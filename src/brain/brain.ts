@@ -65,6 +65,10 @@ export class ThreeBrain {
   /** Step 16: 法则系统 — 6 条互斥法则，替代复杂条件嵌套 */
   readonly lawClassifier: LawClassifier;
   private verbose: boolean;
+  /** 三层知识管线 — Step 12: setEditingPipeline 注入 */
+  private collisionEngine: import('../intelligence/collision-engine.js').CollisionEngine | null = null;
+  private knowledgeConvergence: import('../intelligence/knowledge-convergence.js').KnowledgeConvergence | null = null;
+  private knowledgeAssembler: import('../intelligence/knowledge-assembler.js').KnowledgeAssembler | null = null;
   /** 外部注入的经验进化器 */
   private experienceEvolver: { autoEvolve(): Promise<any[]>; hypothesize(): Promise<any[]> } | null = null;
   /** 待消费的图像帧（截图/摄像头/视频帧）— 一次 predict 后自动清除 */
@@ -686,6 +690,71 @@ export class ThreeBrain {
     }
 
     return { nodes, edges };
+  }
+
+  /**
+   * Step 12: 注入三层知识管线依赖
+   *
+   * 在 Subsystems 初始化后调用，连接：
+   * - KnowledgeConvergence (采集层)
+   * - CollisionEngine (编辑层)
+   * - KnowledgeAssembler (发送层)
+   */
+  setEditingPipeline(
+    convergence: import('../intelligence/knowledge-convergence.js').KnowledgeConvergence,
+    collision: import('../intelligence/collision-engine.js').CollisionEngine,
+    assembler: import('../intelligence/knowledge-assembler.js').KnowledgeAssembler,
+  ): void {
+    this.knowledgeConvergence = convergence;
+    this.collisionEngine = collision;
+    this.knowledgeAssembler = assembler;
+    if (this.verbose) console.log('[ThreeBrain] 三层知识管线已注入');
+  }
+
+  /**
+   * 三层知识管线处理
+   *
+   * 采集 → 碰撞编辑 → 组装 → 返回注入 prompt 的知识文本
+   * 降级：管线不可用时返回空字符串（不影响现有流程）
+   */
+  async processWithKnowledgePipeline(
+    input: string,
+    options?: {
+      toolResults?: Array<{ name: string; result: string }>;
+      intent?: import('../intelligence/knowledge-assembler.js').OutputIntent;
+    },
+  ): Promise<{ knowledgePrompt: string; conflicts: string }> {
+    if (!this.knowledgeConvergence || !this.collisionEngine || !this.knowledgeAssembler) {
+      return { knowledgePrompt: '', conflicts: '' };
+    }
+
+    try {
+      // ① 采集层：并行从所有源收集
+      const nodes = await this.knowledgeConvergence.converge(input, {
+        toolResults: options?.toolResults,
+        maxNodes: 15,
+        timeoutMs: 500,
+      });
+
+      if (nodes.length < 2) {
+        return { knowledgePrompt: '', conflicts: '' };
+      }
+
+      // ② 编辑层：碰撞/融合/冲突检测
+      const intent = options?.intent ?? 'report';
+      const editResult = this.collisionEngine.fullEdit(nodes, intent);
+
+      // ③ 发送层：组装为 prompt 注入文本
+      const knowledgePrompt = this.knowledgeAssembler.assemble(editResult, intent);
+      const conflicts = editResult.conflicts.length > 0
+        ? this.knowledgeAssembler.assembleConflicts(editResult.conflicts)
+        : '';
+
+      return { knowledgePrompt, conflicts };
+    } catch (err) {
+      if (this.verbose) console.warn('[ThreeBrain] 知识管线处理失败:', (err as Error).message);
+      return { knowledgePrompt: '', conflicts: '' };
+    }
   }
 
   imagine(input: string, signal: TaskSignal, candidates: Array<{ type: number; params?: number[]; label: string }>) {

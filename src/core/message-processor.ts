@@ -265,6 +265,27 @@ export class MessageProcessor {
       if (this.verbose) console.warn('[PromptInjector] 注入失败:', (err as Error).message);
     }
 
+    // 6.1 三层知识管线（采集→碰撞→组装，优先级 29）
+    try {
+      const brain = this.sys.threeBrain;
+      if (brain) {
+        const intent = this.inferOutputIntent(content);
+        const { knowledgePrompt, conflicts } = await brain.processWithKnowledgePipeline(content, { intent });
+        if (knowledgePrompt) {
+          budget.add({
+            id: 'knowledge-pipeline',
+            source: 'pipeline',
+            priority: PRIORITY.DOMAIN_KNOWLEDGE + 1,
+            content: knowledgePrompt + conflicts,
+            required: false,
+          });
+          if (this.verbose) console.log(`  [Pipeline] 知识管线注入: ${knowledgePrompt.length} chars`);
+        }
+      }
+    } catch (err) {
+      if (this.verbose) console.warn('[Pipeline] 知识管线处理失败:', (err as Error).message);
+    }
+
     // 6.5 知识源检索（本地 → 飞书 → 网络，优先级 28）
     // Step 15: 根据内容推断领域，精准选择知识源
     if (this.sys.knowledgeSourceManager.getStats().totalSources > 0) {
@@ -1230,5 +1251,18 @@ export class MessageProcessor {
       if (keywords.some(k => lower.includes(k))) return domain;
     }
     return 'general';
+  }
+
+  /**
+   * 推断输出意图（供三层知识管线使用）
+   */
+  private inferOutputIntent(content: string): import('../intelligence/knowledge-assembler.js').OutputIntent {
+    const lower = content.toLowerCase();
+    if (/对比|比较|vs|versus|区别|差异/.test(lower)) return 'compare';
+    if (/怎么|如何|执行|运行|操作|步骤/.test(lower)) return 'execute';
+    if (/什么是|解释|原理|为什么|概念|定义/.test(lower)) return 'explain';
+    if (/报告|总结|汇总|状态|进展/.test(lower)) return 'report';
+    if (/你好|hi|hello|嗯|哦|哈哈|谢谢/.test(lower)) return 'chat';
+    return 'report';
   }
 }

@@ -855,6 +855,31 @@ export class Subsystems {
       if (verbose) console.warn('[ResourceHub] 初始化失败:', err.message);
     });
 
+    // Step 12: 三层知识管线初始化
+    import('../brain/right/features/text-encoder-singleton.js').then(({ getGlobalTextEncoder }) => {
+      return import('../intelligence/knowledge-convergence.js').then(({ KnowledgeConvergence }) => {
+        return import('../intelligence/collision-engine.js').then(({ CollisionEngine }) => {
+          return import('../intelligence/knowledge-assembler.js').then(({ KnowledgeAssembler }) => {
+            let textEncoder = null;
+            try { textEncoder = getGlobalTextEncoder(); } catch { /* 可能未初始化 */ }
+            const convergence = new KnowledgeConvergence(
+              this.stmp,
+              this.intelligence.graph,
+              this.knowledgeSourceManager,
+              this.ternaryRouter ?? null,
+              textEncoder,
+              verbose,
+            );
+            const collision = new CollisionEngine();
+            const assembler = new KnowledgeAssembler();
+            this.threeBrain?.setEditingPipeline(convergence, collision, assembler);
+          });
+        });
+      });
+    }).catch(err => {
+      if (verbose) console.warn('[Pipeline] 三层知识管线初始化失败:', err.message);
+    });
+
     // 将 SensorFusion 的 STMP 写入桥接（替代 FusionBuffer）
     this.cerebellum.sensorFusion.setStmpWriter((entry) => {
       this.stmp.insertNode({
