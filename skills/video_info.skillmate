@@ -1,0 +1,19 @@
+{
+  "name": "video_info",
+  "description": "获取视频元数据信息，包括时长、分辨率、编码格式、帧率等详细参数",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "元数据", "ffprobe"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    }
+  ],
+  "execute": "ffprobe -v quiet -print_format json -show_format -show_streams '${file}'",
+  "timeout": 10,
+  "resultParser": "json"
+}

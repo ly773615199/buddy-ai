@@ -1,0 +1,14 @@
+{
+  "name": "system_info",
+  "description": "查看系统综合信息（CPU/内存/磁盘/负载）",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {},
+  "execute": {
+    "command": "echo '=== 系统 ===' && uname -a && echo '=== CPU ===' && lscpu | grep -E '^(Architecture|CPU|Model name)' && echo '=== 内存 ===' && free -h | head -2 && echo '=== 磁盘 ===' && df -h / | tail -1 && echo '=== 负载 ===' && uptime",
+    "timeout": 10
+  },
+  "resultParser": "text",
+  "tags": ["运维", "系统", "信息"]
+}

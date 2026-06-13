@@ -1,0 +1,16 @@
+{
+    "name": "git_log",
+    "description": "查看 Git 提交历史（支持搜索、指定数量）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["git", "开发", "历史"],
+    "permission": "exec_safe",
+    "parameters": {
+        "cwd": { "type": "string", "description": "工作目录", "required": false, "default": "." },
+        "count": { "type": "number", "description": "显示条数", "required": false, "default": 20 },
+        "grep": { "type": "string", "description": "搜索关键词", "required": false }
+    },
+    "execute": "cd '${cwd:-.}' && git log --oneline --graph -${count:-20} ${grep:+--grep=\"$grep\"}",
+    "timeout": 10,
+    "resultParser": "text"
+}

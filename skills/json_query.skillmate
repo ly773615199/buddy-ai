@@ -1,0 +1,25 @@
+{
+  "name": "json_query",
+  "description": "使用 jq 查询 JSON 文件或内联 JSON 内容",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "input",
+      "type": "string",
+      "required": true,
+      "description": "JSON 文件路径或内联 JSON"
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "jq 查询表达式"
+    }
+  ],
+  "execute": "cat '${input}' | jq '${query}' 2>&1 || echo '${input}' | jq '${query}' 2>&1",
+  "timeout": 10,
+  "resultParser": "json",
+  "tags": ["JSON", "数据处理", "查询"]
+}

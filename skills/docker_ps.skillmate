@@ -1,0 +1,21 @@
+{
+  "name": "docker_ps",
+  "description": "查看正在运行的 Docker 容器列表",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["docker", "容器", "运维"],
+  "permission": "exec_safe",
+  "parameters": {
+    "all": {
+      "type": "boolean",
+      "description": "是否包含已停止的容器",
+      "required": false,
+      "default": false
+    }
+  },
+  "execute": {
+    "command": "docker ps ${all:+--all} --format 'table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}'",
+    "timeout": 10
+  },
+  "resultParser": "lines"
+}

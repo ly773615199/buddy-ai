@@ -1,0 +1,20 @@
+{
+  "name": "base64",
+  "description": "将文本内容进行Base64编码",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {
+    "input": {
+      "type": "string",
+      "required": true,
+      "description": "要编码的文本内容"
+    }
+  },
+  "execute": {
+    "command": "echo -n '${input}' | base64 -w0",
+    "timeout": 5
+  },
+  "resultParser": "text",
+  "tags": ["编码", "Base64", "工具"]
+}

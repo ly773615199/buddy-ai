@@ -1,0 +1,12 @@
+{
+    "name": "env_info",
+    "description": "查看开发环境信息（Node/Python/Go/Rust/Java 版本及路径）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["环境", "开发", "诊断"],
+    "permission": "exec_safe",
+    "parameters": {},
+    "execute": "echo '=== Node ===' && node -v 2>/dev/null && which node && echo '=== npm ===' && npm -v 2>/dev/null && echo '=== Python ===' && python3 --version 2>/dev/null && which python3 && echo '=== Go ===' && go version 2>/dev/null && echo '=== Rust ===' && rustc --version 2>/dev/null && echo '=== Java ===' && java -version 2>&1 | head -1 && echo '=== Git ===' && git --version && echo '=== Docker ===' && docker --version 2>/dev/null && echo '=== Make ===' && make --version 2>/dev/null | head -1",
+    "timeout": 10,
+    "resultParser": "text"
+}

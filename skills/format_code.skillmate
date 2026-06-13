@@ -1,0 +1,26 @@
+{
+  "name": "format_code",
+  "description": "使用 Prettier 格式化代码文件或目录",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "要格式化的文件或目录"
+    },
+    {
+      "name": "write",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "description": "是否写入文件"
+    }
+  ],
+  "execute": "npx prettier ${write:+--write} '${path}' 2>&1 | tail -20",
+  "timeout": 30,
+  "resultParser": "text",
+  "tags": ["格式化", "代码"]
+}

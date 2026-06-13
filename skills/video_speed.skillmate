@@ -1,0 +1,32 @@
+{
+  "name": "video_speed",
+  "description": "调整视频播放速度，支持加速和减速",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "变速", "倍速"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    },
+    {
+      "name": "speed",
+      "type": "number",
+      "description": "播放倍率，如2.0表示2倍速，0.5表示慢放",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出视频文件路径",
+      "required": false,
+      "default": "/tmp/buddy-speed.mp4"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -filter_complex \"[0:v]setpts=${speed}*PTS[v];[0:a]atempo=1/${speed}[a]\" -map \"[v]\" -map \"[a]\" '${output}' 2>&1 && echo \"已变速到 ${output}\"",
+  "timeout": 60,
+  "resultParser": "text"
+}

@@ -1,0 +1,16 @@
+{
+    "name": "git_diff",
+    "description": "查看 Git 变更差异（支持指定文件或分支对比）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["git", "开发", "diff"],
+    "permission": "exec_safe",
+    "parameters": {
+        "cwd": { "type": "string", "description": "工作目录", "required": false, "default": "." },
+        "target": { "type": "string", "description": "对比目标（分支名/commit/留空看工作区）", "required": false },
+        "file": { "type": "string", "description": "指定文件", "required": false }
+    },
+    "execute": "cd '${cwd:-.}' && git diff ${target:-} -- ${file:-} | head -200",
+    "timeout": 10,
+    "resultParser": "text"
+}

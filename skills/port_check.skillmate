@@ -1,0 +1,14 @@
+{
+  "name": "port_check",
+  "description": "检查系统端口占用情况",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {},
+  "execute": {
+    "command": "ss -tuln | head -20",
+    "timeout": 10
+  },
+  "resultParser": "lines",
+  "tags": ["运维", "网络", "端口"]
+}

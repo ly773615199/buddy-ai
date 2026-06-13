@@ -1,0 +1,26 @@
+{
+  "name": "npm_run",
+  "description": "运行 npm scripts，执行项目中定义的 npm 脚本命令",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "script",
+      "type": "string",
+      "required": true,
+      "description": "npm 脚本名"
+    },
+    {
+      "name": "cwd",
+      "type": "string",
+      "required": false,
+      "default": ".",
+      "description": "工作目录，默认当前目录"
+    }
+  ],
+  "execute": "cd '${cwd:-.}' && npm run ${script} 2>&1 | tail -50",
+  "timeout": 60,
+  "resultParser": "text",
+  "tags": ["npm", "开发", "构建"]
+}

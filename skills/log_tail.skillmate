@@ -1,0 +1,26 @@
+{
+  "name": "log_tail",
+  "description": "查看日志文件尾部内容",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "required": true,
+      "description": "日志文件路径"
+    },
+    "lines": {
+      "type": "number",
+      "required": false,
+      "default": 50,
+      "description": "显示行数"
+    }
+  },
+  "execute": {
+    "command": "tail -n ${lines} '${file}'",
+    "timeout": 10
+  },
+  "resultParser": "lines",
+  "tags": ["运维", "日志", "监控"]
+}

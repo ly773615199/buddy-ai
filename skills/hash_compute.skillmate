@@ -1,0 +1,26 @@
+{
+  "name": "hash_compute",
+  "description": "计算文件哈希值",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "required": true,
+      "description": "文件路径"
+    },
+    "algorithm": {
+      "type": "string",
+      "required": false,
+      "default": "sha256",
+      "description": "算法：md5/sha1/sha256/sha512"
+    }
+  },
+  "execute": {
+    "command": "${algorithm}sum '${file}'",
+    "timeout": 10
+  },
+  "resultParser": "text",
+  "tags": ["哈希", "校验", "安全"]
+}

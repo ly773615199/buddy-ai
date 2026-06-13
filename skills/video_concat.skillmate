@@ -1,0 +1,29 @@
+{
+  "name": "video_concat",
+  "description": "拼接多个视频文件为一个完整视频",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "拼接", "合并"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "files",
+      "type": "string",
+      "description": "逗号分隔的视频文件路径列表",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出视频文件路径",
+      "required": false,
+      "default": "/tmp/buddy-concat.mp4"
+    }
+  ],
+  "execute": [
+    "echo \"${files}\" | tr ',' '\\n' | sed \"s/^/file '/\" | sed \"s/$/'/\" > /tmp/buddy-concat.txt",
+    "ffmpeg -y -f concat -safe 0 -i /tmp/buddy-concat.txt -c copy '${output}' 2>&1 && echo \"已拼接到 ${output}\""
+  ],
+  "timeout": 120,
+  "resultParser": "text"
+}

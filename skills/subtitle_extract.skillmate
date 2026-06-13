@@ -1,0 +1,33 @@
+{
+  "name": "subtitle_extract",
+  "description": "提取视频内嵌的字幕轨道并保存为SRT格式",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "字幕", "提取"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    },
+    {
+      "name": "stream",
+      "type": "number",
+      "description": "字幕流编号",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出字幕文件路径",
+      "required": false,
+      "default": "/tmp/buddy-subtitle.srt"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -map 0:s:${stream} '${output}' 2>&1 && echo \"已提取字幕到 ${output}\"",
+  "timeout": 30,
+  "resultParser": "text"
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "frontend",
+    "src/**/*.test.ts",
+    "src/test*.ts",
+    "src/tools/ternary-expert.ts"
+  ]
+}

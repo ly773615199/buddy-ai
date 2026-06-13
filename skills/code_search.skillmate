@@ -1,0 +1,17 @@
+{
+    "name": "code_search",
+    "description": "在代码库中搜索关键词（grep/rg 封装，支持正则）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["搜索", "开发", "代码"],
+    "permission": "exec_safe",
+    "parameters": {
+        "pattern": { "type": "string", "description": "搜索模式（支持正则）", "required": true },
+        "path": { "type": "string", "description": "搜索路径", "required": false, "default": "." },
+        "glob": { "type": "string", "description": "文件过滤（如 *.ts）", "required": false },
+        "max_results": { "type": "number", "description": "最大结果数", "required": false, "default": 30 }
+    },
+    "execute": "(rg --no-heading -n -m ${max_results:-30} ${glob:+-g '$glob'} '$pattern' '${path:-.}' 2>/dev/null || grep -rn -m ${max_results:-30} '$pattern' ${glob:+--include='$glob'} '${path:-.}') | head -${max_results:-30}",
+    "timeout": 15,
+    "resultParser": "text"
+}

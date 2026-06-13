@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buddy — 模型管理</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+  .container { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+  
+  /* Header */
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid #21262d; }
+  .header h1 { font-size: 20px; font-weight: 600; color: #f0f6fc; }
+  .header .icon { font-size: 24px; }
+  
+  /* Section */
+  .section { margin-bottom: 24px; }
+  .section-title { font-size: 14px; font-weight: 600; color: #8b949e; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .section-title .emoji { font-size: 16px; }
+  
+  /* Card */
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; overflow: hidden; }
+  .card-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #21262d; }
+  .card-item:last-child { border-bottom: none; }
+  .card-item:hover { background: #1c2128; }
+  
+  /* Provider item */
+  .provider-info { display: flex; align-items: center; gap: 12px; }
+  .provider-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .provider-status.ok { background: #3fb950; }
+  .provider-status.fail { background: #f85149; }
+  .provider-name { font-weight: 600; color: #f0f6fc; font-size: 14px; }
+  .provider-detail { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  .provider-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .provider-badge.ok { background: #238636; color: #fff; }
+  .provider-badge.fail { background: #da3633; color: #fff; }
+  
+  /* Model item */
+  .model-info { display: flex; align-items: center; gap: 12px; flex: 1; }
+  .model-check { width: 18px; height: 18px; border-radius: 4px; border: 2px solid #30363d; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+  .model-check.active { background: #238636; border-color: #238636; }
+  .model-check.active::after { content: '✓'; color: #fff; font-size: 12px; font-weight: 700; }
+  .model-name { font-weight: 600; color: #f0f6fc; font-size: 13px; }
+  .model-platform { font-size: 11px; color: #8b949e; }
+  .model-meta { display: flex; align-items: center; gap: 12px; }
+  .model-stat { font-size: 11px; color: #8b949e; display: flex; align-items: center; gap: 4px; }
+  .model-stat .label { color: #6e7681; }
+  .model-cost { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+  .model-cost.free { background: #238636; color: #fff; }
+  .model-cost.paid { background: #1c2128; color: #d29922; border: 1px solid #30363d; }
+  .star { color: #d29922; font-size: 10px; }
+  
+  /* Tier tags */
+  .tier { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; }
+  .tier.premium { background: #d29922; color: #0d1117; }
+  .tier.standard { background: #238636; color: #fff; }
+  .tier.budget { background: #1f6feb; color: #fff; }
+  .tier.free { background: #30363d; color: #8b949e; }
+  
+  /* Excluded item */
+  .excluded-info { display: flex; align-items: center; gap: 12px; }
+  .excluded-icon { color: #f85149; font-size: 14px; }
+  .excluded-name { font-size: 13px; color: #8b949e; text-decoration: line-through; }
+  .excluded-reason { font-size: 11px; color: #6e7681; }
+  .btn-remove { font-size: 11px; color: #f85149; cursor: pointer; padding: 2px 8px; border: 1px solid #30363d; border-radius: 4px; background: none; }
+  .btn-remove:hover { background: #1c2128; }
+  
+  /* Ternary */
+  .ternary-item { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+  .ternary-item:last-child { border-bottom: none; }
+  .ternary-stage { font-size: 18px; }
+  .ternary-name { font-weight: 600; color: #f0f6fc; font-size: 13px; }
+  .ternary-detail { font-size: 11px; color: #8b949e; }
+  .stage-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; }
+  .stage-tag.seed { background: #1c2128; color: #8b949e; }
+  .stage-tag.growing { background: #0d419d; color: #79c0ff; }
+  .stage-tag.trainable { background: #238636; color: #fff; }
+  .stage-tag.mature { background: #d29922; color: #0d1117; }
+  
+  /* Strategy */
+  .strategy-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; }
+  .radio-group { display: flex; gap: 12px; }
+  .radio-item { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+  .radio-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #30363d; display: flex; align-items: center; justify-content: center; }
+  .radio-dot.active { border-color: #58a6ff; }
+  .radio-dot.active::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #58a6ff; }
+  
+  /* Budget */
+  .budget-input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #f0f6fc; padding: 6px 10px; font-size: 13px; width: 80px; text-align: center; }
+  .budget-label { font-size: 13px; color: #8b949e; }
+  
+  /* Buttons */
+  .btn { font-size: 12px; padding: 6px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-weight: 500; }
+  .btn:hover { background: #30363d; }
+  .btn.primary { background: #238636; border-color: #238636; color: #fff; }
+  .btn.primary:hover { background: #2ea043; }
+  .btn.danger { color: #f85149; border-color: #f8514933; }
+  .btn.danger:hover { background: #f851491a; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  
+  /* Stats bar */
+  .stats-bar { display: flex; gap: 24px; padding: 10px 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 16px; }
+  .stat-item { text-align: center; }
+  .stat-value { font-size: 18px; font-weight: 700; color: #f0f6fc; }
+  .stat-label { font-size: 10px; color: #6e7681; margin-top: 2px; }
+  
+  /* Capability stars */
+  .cap-stars { display: flex; gap: 2px; }
+  .cap-star { font-size: 10px; }
+  .cap-star.filled { color: #d29922; }
+  .cap-star.empty { color: #30363d; }
+
+  /* Section card with header */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .section-count { font-size: 12px; color: #6e7681; }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <span class="icon">⚙️</span>
+    <h1>设置 — 模型管理</h1>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-value">50</div>
+      <div class="stat-label">可用模型</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">5</div>
+      <div class="stat-label">活跃候选</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">2</div>
+      <div class="stat-label">已排除</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">2</div>
+      <div class="stat-label">三进制</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">¥0.12</div>
+      <div class="stat-label">今日成本</div>
+    </div>
+  </div>
+
+  <!-- API Endpoints -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title"><span class="emoji">📡</span> API 端点</div>
+      <button class="btn primary">+ 添加端点</button>
+    </div>
+    <div class="card">
+      <div class="card-item">
+        <div class="provider-info">
+          <div class="provider-status ok"></div>
+          <div>
+            <div class="provider-name">硅基流动 SiliconFlow</div>
+            <div class="provider-detail">key: sk-***a0IryBv · 自动发现 47 个模型</div>
+          </div>
+        </div>
+        <span class="provider-badge ok">✅ 47 可用</span>
+      </div>
+      <div class="card-item">
+        <div class="provider-info">
+          <div class="provider-status ok"></div>
+          <div>
+            <div class="provider-name">Ollama (本地)</div>
+            <div class="provider-detail">localhost:11434 · 无需 Key · 3 个模型</div>
+          </div>
+        </div>
+        <span class="provider-badge ok">✅ 3 可用</span>
+      </div>
+      <div class="card-item">
+        <div class="provider-info">
+          <div class="provider-status fail"></div>
+          <div>
+            <div class="provider-name">DeepSeek</div>
+            <div class="provider-detail">key: sk-***Bv · 连接超时</div>
+          </div>
+        </div>
+        <span class="provider-badge fail">❌ 连接失败</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Model Pool -->
+  <div class="section">
+    <div class="section-title"><span class="emoji">🏊</span> 活跃模型池 <span style="font-size:12px;color:#6e7681;font-weight:400;margin-left:8px">Thompson Sampling 候选 · 点击切换启用</span></div>
+    <div class="card">
+      <div class="card-item">
+        <div class="model-info">
+          <div class="model-check active"></div>
+          <div>
+            <div class="model-name">DeepSeek-V3</div>
+            <div class="model-platform">siliconflow/deepseek-ai</div>
+          </div>
+        </div>
+        <div class="model-meta">
+          <span class="tier standard">standard</span>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">推理</span>
+          </div>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">代码</span>
+          </div>
+          <span class="model-stat"><span class="label">成功率</span> <b style="color:#3fb950">87%</b></span>
+          <span class="model-stat"><span class="label">调用</span> 234次</span>
+          <span class="model-cost paid">¥0.02/千</span>
+        </div>
+      </div>
+      <div class="card-item">
+        <div class="model-info">
+          <div class="model-check active"></div>
+          <div>
+            <div class="model-name">Qwen2.5-72B-Instruct</div>
+            <div class="model-platform">siliconflow/Qwen</div>
+          </div>
+        </div>
+        <div class="model-meta">
+          <span class="tier premium">premium</span>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">中文</span>
+          </div>
+          <span class="model-stat"><span class="label">成功率</span> <b style="color:#3fb950">82%</b></span>
+          <span class="model-stat"><span class="label">调用</span> 156次</span>
+          <span class="model-cost paid">¥0.04/千</span>
+        </div>
+      </div>
+      <div class="card-item">
+        <div class="model-info">
+          <div class="model-check active"></div>
+          <div>
+            <div class="model-name">Qwen2.5-7B-Instruct</div>
+            <div class="model-platform">siliconflow/Qwen</div>
+          </div>
+        </div>
+        <div class="model-meta">
+          <span class="tier budget">budget</span>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">快速</span>
+          </div>
+          <span class="model-stat"><span class="label">成功率</span> <b style="color:#3fb950">79%</b></span>
+          <span class="model-stat"><span class="label">调用</span> 412次</span>
+          <span class="model-cost free">免费</span>
+        </div>
+      </div>
+      <div class="card-item">
+        <div class="model-info">
+          <div class="model-check active"></div>
+          <div>
+            <div class="model-name">GLM-4-9B-Chat</div>
+            <div class="model-platform">siliconflow/THUDM</div>
+          </div>
+        </div>
+        <div class="model-meta">
+          <span class="tier budget">budget</span>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">中文</span>
+          </div>
+          <span class="model-stat"><span class="label">成功率</span> <b style="color:#3fb950">75%</b></span>
+          <span class="model-stat"><span class="label">调用</span> 89次</span>
+          <span class="model-cost free">免费</span>
+        </div>
+      </div>
+      <div class="card-item">
+        <div class="model-info">
+          <div class="model-check active"></div>
+          <div>
+            <div class="model-name">Llama-3.1-8B-Instruct</div>
+            <div class="model-platform">siliconflow/Meta</div>
+          </div>
+        </div>
+        <div class="model-meta">
+          <span class="tier free">free</span>
+          <div class="cap-stars">
+            <span class="cap-star filled">⭐</span><span class="cap-star filled">⭐</span>
+            <span style="font-size:10px;color:#8b949e;margin-left:4px">通用</span>
+          </div>
+          <span class="model-stat"><span class="label">成功率</span> <b style="color:#d29922">71%</b></span>
+          <span class="model-stat"><span class="label">调用</span> 67次</span>
+          <span class="model-cost free">免费</span>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn">查看全部 50 个可用模型</button>
+      <button class="btn">刷新模型列表</button>
+    </div>
+  </div>
+
+  <!-- Excluded -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title"><span class="emoji">❌</span> 已排除</div>
+      <button class="btn danger">重置自动排除</button>
+    </div>
+    <div class="card">
+      <div class="card-item">
+        <div class="excluded-info">
+          <span class="excluded-icon">🚫</span>
+          <div>
+            <div class="excluded-name">Llama-3.1-70B-Instruct</div>
+            <div class="excluded-reason">用户排除: 太贵 (¥0.05/千)</div>
+          </div>
+        </div>
+        <button class="btn-remove">移除</button>
+      </div>
+      <div class="card-item">
+        <div class="excluded-info">
+          <span class="excluded-icon">🚫</span>
+          <div>
+            <div class="excluded-name">Mistral-7B-Instruct</div>
+            <div class="excluded-reason">自动排除: 连续失败 3 次</div>
+          </div>
+        </div>
+        <button class="btn-remove">移除</button>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn">+ 手动排除模型</button>
+    </div>
+  </div>
+
+  <!-- Ternary Models -->
+  <div class="section">
+    <div class="section-title"><span class="emoji">🧠</span> 三进制微模型</div>
+    <div class="card">
+      <div class="ternary-item">
+        <span class="ternary-stage">🌱</span>
+        <div style="flex:1">
+          <div class="ternary-name">coding</div>
+          <div class="ternary-detail">128 params · 12 步训练 · 上次训练: 2天前</div>
+        </div>
+        <span class="stage-tag seed">种子期</span>
+        <span class="model-stat" style="margin-left:12px"><span class="label">置信度</span> 32%</span>
+      </div>
+      <div class="ternary-item">
+        <span class="ternary-stage">🪴</span>
+        <div style="flex:1">
+          <div class="ternary-name">reasoning</div>
+          <div class="ternary-detail">512 params · 89 步训练 · 上次训练: 3小时前</div>
+        </div>
+        <span class="stage-tag growing">成长期</span>
+        <span class="model-stat" style="margin-left:12px"><span class="label">置信度</span> 58%</span>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn">安装 .ta 模型</button>
+      <button class="btn">查看成长报告</button>
+    </div>
+  </div>
+
+  <!-- Strategy -->
+  <div class="section">
+    <div class="section-title"><span class="emoji">📊</span> 调度策略</div>
+    <div class="card" style="padding: 16px;">
+      <div class="strategy-row">
+        <span class="budget-label">策略:</span>
+        <div class="radio-group">
+          <label class="radio-item"><div class="radio-dot active"></div> task_match (按任务匹配)</label>
+          <label class="radio-item"><div class="radio-dot"></div> cost_optimized (成本优先)</label>
+          <label class="radio-item"><div class="radio-dot"></div> quality_first (质量优先)</label>
+        </div>
+      </div>
+      <div class="strategy-row">
+        <span class="budget-label">每小时预算:</span>
+        <input class="budget-input" value="¥0.50" />
+        <span class="budget-label" style="margin-left:16px">每日预算:</span>
+        <input class="budget-input" value="¥5.00" />
+      </div>
+      <div class="strategy-row">
+        <span class="budget-label">Thompson 探索系数:</span>
+        <input class="budget-input" value="1.0" />
+        <span class="budget-label" style="font-size:11px;color:#6e7681;margin-left:8px">（>1 更激进探索，<1 更保守利用）</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save -->
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;padding-top:16px;border-top:1px solid #21262d">
+    <button class="btn">重置</button>
+    <button class="btn primary" style="padding:8px 24px">保存配置</button>
+  </div>
+</div>
+</body>
+</html>

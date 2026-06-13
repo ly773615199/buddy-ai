@@ -1,0 +1,26 @@
+{
+  "name": "weather",
+  "description": "查询指定城市的当前天气和天气预报",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["天气", "实用", "生活"],
+  "permission": "exec_safe",
+  "parameters": {
+    "city": {
+      "type": "string",
+      "description": "城市名称，如 北京、上海、Tokyo",
+      "required": true
+    },
+    "days": {
+      "type": "number",
+      "description": "预报天数（1-3）",
+      "required": false,
+      "default": 1
+    }
+  },
+  "execute": {
+    "command": "curl -s 'wttr.in/${city}?format=j1' --max-time 10",
+    "timeout": 15
+  },
+  "resultParser": "json"
+}

@@ -1,0 +1,186 @@
+{
+  "亲密度": {
+    "en": "Intimacy",
+    "ja": "親密度",
+    "ko": "친밀도",
+    "fr": "Intimité",
+    "de": "Vertrautheit",
+    "es": "Intimidad"
+  },
+  "精力": {
+    "en": "Energy",
+    "ja": "エネルギー",
+    "ko": "에너지",
+    "fr": "Énergie",
+    "de": "Energie",
+    "es": "Energía"
+  },
+  "心情": {
+    "en": "Mood",
+    "ja": "気分",
+    "ko": "기분",
+    "fr": "Humeur",
+    "de": "Stimmung",
+    "es": "Estado de ánimo"
+  },
+  "蛋": {
+    "en": "Egg",
+    "ja": "たまご",
+    "ko": "알",
+    "fr": "Œuf",
+    "de": "Ei",
+    "es": "Huevo"
+  },
+  "孵化": {
+    "en": "Hatching",
+    "ja": "孵化",
+    "ko": "부화",
+    "fr": "Éclosion",
+    "de": "Schlüpfen",
+    "es": "Eclosión"
+  },
+  "成长": {
+    "en": "Growing",
+    "ja": "成長",
+    "ko": "성장",
+    "fr": "Croissance",
+    "de": "Wachstum",
+    "es": "Crecimiento"
+  },
+  "成形": {
+    "en": "Formed",
+    "ja": "成形",
+    "ko": "완성",
+    "fr": "Formé",
+    "de": "Geformt",
+    "es": "Formado"
+  },
+  "成熟": {
+    "en": "Mature",
+    "ja": "成熟",
+    "ko": "성숙",
+    "fr": "Mature",
+    "de": "Reif",
+    "es": "Maduro"
+  },
+  "完全体": {
+    "en": "Perfect Form",
+    "ja": "完全体",
+    "ko": "완전체",
+    "fr": "Forme Parfaite",
+    "de": "Perfekte Form",
+    "es": "Forma Perfecta"
+  },
+  "传说": {
+    "en": "Legendary",
+    "ja": "レジェンダリー",
+    "ko": "레전더리",
+    "fr": "Légendaire",
+    "de": "Legendär",
+    "es": "Legendario"
+  },
+  "硅基流动": {
+    "en": "SiliconFlow",
+    "ja": "SiliconFlow",
+    "ko": "SiliconFlow",
+    "fr": "SiliconFlow",
+    "de": "SiliconFlow",
+    "es": "SiliconFlow"
+  },
+  "传感器": {
+    "en": "Sensor",
+    "ja": "センサー",
+    "ko": "센서",
+    "fr": "Capteur",
+    "de": "Sensor",
+    "es": "Sensor"
+  },
+  "模型": {
+    "en": "Model",
+    "ja": "モデル",
+    "ko": "모델",
+    "fr": "Modèle",
+    "de": "Modell",
+    "es": "Modelo"
+  },
+  "对话": {
+    "en": "Chat",
+    "ja": "会話",
+    "ko": "대화",
+    "fr": "Discussion",
+    "de": "Chat",
+    "es": "Chat"
+  },
+  "记忆": {
+    "en": "Memory",
+    "ja": "記憶",
+    "ko": "기억",
+    "fr": "Mémoire",
+    "de": "Gedächtnis",
+    "es": "Memoria"
+  },
+  "工具": {
+    "en": "Tools",
+    "ja": "ツール",
+    "ko": "도구",
+    "fr": "Outils",
+    "de": "Werkzeuge",
+    "es": "Herramientas"
+  },
+  "知识": {
+    "en": "Knowledge",
+    "ja": "知識",
+    "ko": "지식",
+    "fr": "Connaissances",
+    "de": "Wissen",
+    "es": "Conocimiento"
+  },
+  "探索": {
+    "en": "Explore",
+    "ja": "探索",
+    "ko": "탐색",
+    "fr": "Explorer",
+    "de": "Erkunden",
+    "es": "Explorar"
+  },
+  "设置": {
+    "en": "Settings",
+    "ja": "設定",
+    "ko": "설정",
+    "fr": "Paramètres",
+    "de": "Einstellungen",
+    "es": "Configuración"
+  },
+  "发送": {
+    "en": "Send",
+    "ja": "送信",
+    "ko": "보내기",
+    "fr": "Envoyer",
+    "de": "Senden",
+    "es": "Enviar"
+  },
+  "连接中": {
+    "en": "Connecting",
+    "ja": "接続中",
+    "ko": "연결 중",
+    "fr": "Connexion",
+    "de": "Verbinden",
+    "es": "Conectando"
+  },
+  "已连接": {
+    "en": "Connected",
+    "ja": "接続済み",
+    "ko": "연결됨",
+    "fr": "Connecté",
+    "de": "Verbunden",
+    "es": "Conectado"
+  },
+  "断开连接": {
+    "en": "Disconnected",
+    "ja": "切断",
+    "ko": "연결 끊김",
+    "fr": "Déconnecté",
+    "de": "Getrennt",
+    "es": "Desconectado"
+  }
+}

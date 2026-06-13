@@ -1,0 +1,32 @@
+{
+  "name": "image_convert",
+  "description": "图片格式转换，支持png/jpg/webp等常见格式互转",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "图片", "格式转换"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "图片文件路径",
+      "required": true
+    },
+    {
+      "name": "format",
+      "type": "string",
+      "description": "目标格式，如 png/jpg/webp",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出图片文件路径",
+      "required": false,
+      "default": "/tmp/buddy-converted.${format}"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' '${output}' 2>&1 && echo \"已转换\"",
+  "timeout": 30,
+  "resultParser": "text"
+}

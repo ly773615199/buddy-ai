@@ -1,0 +1,32 @@
+{
+  "name": "image_resize",
+  "description": "缩放图片尺寸，指定宽度后按比例自动调整高度",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "图片", "缩放", "尺寸"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "图片文件路径",
+      "required": true
+    },
+    {
+      "name": "width",
+      "type": "number",
+      "description": "目标宽度（像素）",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出图片文件路径",
+      "required": false,
+      "default": "/tmp/buddy-resized.png"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -vf \"scale=${width}:-1\" '${output}' 2>&1 && echo \"已缩放\"",
+  "timeout": 30,
+  "resultParser": "text"
+}

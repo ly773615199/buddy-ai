@@ -1,0 +1,14 @@
+{
+    "name": "port_scan",
+    "description": "检查本地端口占用（列出监听中的端口和对应进程）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["网络", "运维", "诊断"],
+    "permission": "exec_safe",
+    "parameters": {
+        "port": { "type": "number", "description": "检查指定端口（留空列出所有）", "required": false }
+    },
+    "execute": "if [ -n '${port:-}' ]; then ss -tlnp | grep ':${port:-} ' || echo '端口 ${port} 未被占用'; else echo '=== 监听端口 ===' && ss -tlnp | head -30; fi",
+    "timeout": 5,
+    "resultParser": "text"
+}

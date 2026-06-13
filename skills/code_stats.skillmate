@@ -1,0 +1,15 @@
+{
+    "name": "code_stats",
+    "description": "统计代码库规模（行数、文件数、语言分布）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["代码", "统计", "开发"],
+    "permission": "exec_safe",
+    "parameters": {
+        "cwd": { "type": "string", "description": "项目目录", "required": false, "default": "." },
+        "exclude": { "type": "string", "description": "排除目录（如 node_modules,.git）", "required": false, "default": "node_modules,.git,dist,build" }
+    },
+    "execute": "cd '${cwd:-.}' && echo '=== 文件统计 ===' && find . -type f ${exclude:+-not -path '*/$(echo $exclude | sed 's/,/*/' | sed 's-,-/\\*/*-g')/*'} -name '*.*' | sed 's/.*\\.//' | sort | uniq -c | sort -rn | head -20 && echo '=== 代码行数 ===' && find . -type f -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' | grep -v node_modules | grep -v dist | xargs wc -l 2>/dev/null | tail -1",
+    "timeout": 15,
+    "resultParser": "text"
+}

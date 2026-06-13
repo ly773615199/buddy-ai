@@ -1,0 +1,17 @@
+{
+    "name": "api_test",
+    "description": "快速测试 HTTP API 接口（GET/POST/PUT/DELETE）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["API", "HTTP", "测试", "开发"],
+    "permission": "exec_safe",
+    "parameters": {
+        "url": { "type": "string", "description": "请求 URL", "required": true },
+        "method": { "type": "string", "description": "HTTP 方法", "required": false, "default": "GET" },
+        "body": { "type": "string", "description": "请求体（JSON）", "required": false },
+        "headers": { "type": "string", "description": "请求头（如 'Authorization: Bearer xxx'）", "required": false }
+    },
+    "execute": "curl -s -X ${method:-GET} -w '\\n--- HTTP %{http_code} | %{time_total}s ---' ${headers:+-H '$headers'} ${body:+-d '$body'} '$url' | tail -100",
+    "timeout": 30,
+    "resultParser": "text"
+}

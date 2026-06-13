@@ -1,0 +1,15 @@
+services:
+  buddy:
+    build: .
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - BUDDY_WS_PORT=8765
+    ports:
+      - "80:80"
+    volumes:
+      - buddy-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  buddy-data:

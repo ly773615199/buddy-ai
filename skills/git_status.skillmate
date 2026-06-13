@@ -1,0 +1,14 @@
+{
+    "name": "git_status",
+    "description": "查看 Git 仓库状态（分支、变更文件、暂存区）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["git", "开发", "版本控制"],
+    "permission": "exec_safe",
+    "parameters": {
+        "cwd": { "type": "string", "description": "工作目录", "required": false, "default": "." }
+    },
+    "execute": "cd '${cwd:-.}' && git status && echo '---' && git log --oneline -5 && echo '---' && git branch -a",
+    "timeout": 10,
+    "resultParser": "text"
+}

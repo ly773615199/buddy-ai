@@ -1,0 +1,38 @@
+{
+  "name": "video_cut",
+  "description": "裁剪视频片段，指定开始和结束时间截取指定段落",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "裁剪", "剪辑"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    },
+    {
+      "name": "start",
+      "type": "string",
+      "description": "开始时间，格式如 00:01:30",
+      "required": true
+    },
+    {
+      "name": "end",
+      "type": "string",
+      "description": "结束时间，格式如 00:02:45",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出视频文件路径",
+      "required": false,
+      "default": "/tmp/buddy-cut.mp4"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -ss '${start}' -to '${end}' -c copy '${output}' 2>&1 && echo \"已裁剪到 ${output}\"",
+  "timeout": 60,
+  "resultParser": "text"
+}

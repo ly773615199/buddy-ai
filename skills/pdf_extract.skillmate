@@ -1,0 +1,20 @@
+{
+  "name": "pdf_extract",
+  "description": "从PDF文件中提取文本内容",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "required": true,
+      "description": "PDF文件路径"
+    }
+  },
+  "execute": {
+    "command": "pdftotext '${file}' - 2>&1 | head -200",
+    "timeout": 30
+  },
+  "resultParser": "text",
+  "tags": ["PDF", "文档", "提取"]
+}

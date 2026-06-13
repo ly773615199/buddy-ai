@@ -1,0 +1,32 @@
+node_modules/
+dist/
+*.db
+*.sqlite
+.buddy/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+test-results/
+test-results/
+.cache/
+model-discovery-result.json

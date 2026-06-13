@@ -1,0 +1,70 @@
+# ---- E2E 测试镜像 ----
+# 包含：前后端依赖 + Playwright + Chromium + 字体
+# 跳过 electron（E2E 不需要桌面客户端）
+FROM node:22-slim
+
+# 系统依赖：字体 + Chromium 运行时 + native 编译工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Chromium 运行时依赖
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    libcups2 \
+    # 字体（视觉回归截图一致性）
+    fonts-noto-color-emoji \
+    fonts-noto-cjk \
+    fonts-liberation \
+    fontconfig \
+    # native 模块编译（better-sqlite3, sharp）
+    python3 \
+    make \
+    g++ \
+    && fc-cache -fv \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ---- 后端依赖 ----
+COPY package.json package-lock.json ./
+# --ignore-scripts: 跳过 electron 的 postinstall（下载二进制）
+RUN npm ci --ignore-scripts
+# 手动重编译 E2E 需要的 native 模块
+RUN npm rebuild better-sqlite3
+
+# ---- 前端依赖 ----
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci --ignore-scripts && npm rebuild sharp
+
+# ---- 安装 Playwright + Chromium ----
+RUN npx playwright install --with-deps chromium
+
+# ---- 构建后端 ----
+COPY tsconfig.json tsconfig.build.json ./
+COPY src/ ./src/
+RUN npx tsc -p tsconfig.build.json
+
+# ---- 构建前端 ----
+COPY frontend/ ./frontend/
+RUN cd frontend && npx vite build
+
+# ---- E2E 测试文件 ----
+COPY e2e/ ./e2e/
+COPY playwright.config.ts vitest.config.ts ./
+
+# 环境变量
+ENV NODE_ENV=test
+ENV BUDDY_WS_PORT=8765
+ENV BUDDY_SKIP_SUBSCRIPTION=1
+ENV BUDDY_MOCK_LLM=1
+
+# 默认命令：运行 E2E 测试
+CMD ["npx", "playwright", "test"]

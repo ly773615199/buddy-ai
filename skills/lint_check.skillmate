@@ -1,0 +1,27 @@
+{
+  "name": "lint_check",
+  "description": "使用 ESLint 进行代码检查，支持自动修复",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": false,
+      "default": "src",
+      "description": "检查路径"
+    },
+    {
+      "name": "fix",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "是否自动修复"
+    }
+  ],
+  "execute": "npx eslint ${fix:+--fix} '${path:-src}' 2>&1 | tail -30",
+  "timeout": 30,
+  "resultParser": "text",
+  "tags": ["lint", "代码质量"]
+}

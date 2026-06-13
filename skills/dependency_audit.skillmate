@@ -1,0 +1,27 @@
+{
+  "name": "dependency_audit",
+  "description": "npm 依赖安全审计，检测项目中的安全漏洞",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "cwd",
+      "type": "string",
+      "required": false,
+      "default": ".",
+      "description": "工作目录"
+    },
+    {
+      "name": "level",
+      "type": "string",
+      "required": false,
+      "default": "moderate",
+      "description": "审计级别：low/moderate/high/critical"
+    }
+  ],
+  "execute": "cd '${cwd:-.}' && npm audit --audit-level=${level:-moderate} 2>&1 | tail -30",
+  "timeout": 30,
+  "resultParser": "text",
+  "tags": ["安全", "依赖", "审计"]
+}

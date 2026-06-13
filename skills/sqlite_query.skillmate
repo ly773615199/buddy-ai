@@ -1,0 +1,16 @@
+{
+    "name": "sqlite_query",
+    "description": "执行 SQLite 数据库查询（只读 SELECT）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["数据库", "SQL", "开发"],
+    "permission": "exec_safe",
+    "parameters": {
+        "db": { "type": "string", "description": "数据库文件路径", "required": true },
+        "sql": { "type": "string", "description": "SQL 查询语句（仅 SELECT）", "required": true },
+        "limit": { "type": "number", "description": "最大行数", "required": false, "default": 50 }
+    },
+    "execute": "sqlite3 -header -column '${db}' \"${sql} LIMIT ${limit:-50}\"",
+    "timeout": 10,
+    "resultParser": "text"
+}

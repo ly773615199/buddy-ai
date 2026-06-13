@@ -1,0 +1,33 @@
+{
+  "name": "video_extract_audio",
+  "description": "从视频文件中提取音频轨道，支持输出为mp3等格式",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "音频", "提取"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出音频文件路径",
+      "required": false,
+      "default": "/tmp/buddy-audio.mp3"
+    },
+    {
+      "name": "format",
+      "type": "string",
+      "description": "输出音频格式",
+      "required": false,
+      "default": "mp3"
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -vn -acodec libmp3lame '${output}' 2>&1 && echo \"已提取音频到 ${output}\"",
+  "timeout": 60,
+  "resultParser": "text"
+}

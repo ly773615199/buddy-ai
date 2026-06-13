@@ -1,0 +1,97 @@
+{
+  "name": "buddy-ai",
+  "version": "0.2.0",
+  "description": "灵伴 — 有形象的个人 AI 助手",
+  "type": "module",
+  "scripts": {
+    "predev": "lsof -ti:8765 | xargs -r kill -9 2>/dev/null || true",
+    "dev": "tsx watch src/main.ts",
+    "predev:ws": "lsof -ti:8765 | xargs -r kill -9 2>/dev/null || true",
+    "dev:ws": "tsx watch src/start-ws.ts",
+    "predev:frontend": "lsof -ti:5173 | xargs -r kill -9 2>/dev/null || true",
+    "dev:frontend": "cd frontend && npx vite",
+    "predev:all": "lsof -ti:8765,5173 | xargs -r kill -9 2>/dev/null || true",
+    "dev:all": "concurrently --names backend,frontend -c blue,green \"npm run dev:ws\" \"npm run dev:frontend\"",
+    "install:all": "npm install && cd frontend && npm install",
+    "build": "tsc",
+    "build:frontend": "cd frontend && npx vite build",
+    "build:all": "npm run build && npm run build:frontend",
+    "start": "node dist/main.js",
+    "start:frontend": "cd frontend && npx vite preview",
+    "test": "vitest run",
+    "test:frontend": "cd frontend && npx vitest run",
+    "test:all": "vitest run && cd frontend && npx vitest run",
+    "i18n:sync": "tsx scripts/i18n-sync.ts",
+    "i18n:check": "tsx scripts/i18n-sync.ts --check",
+    "i18n:cleanup": "tsx scripts/i18n-cleanup.ts",
+    "i18n:report": "tsx scripts/i18n-check.ts",
+    "prebuild:frontend": "npm run i18n:sync -- --check || (echo '⚠️ i18n: running sync...' && npm run i18n:sync)",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:legacy": "tsx src/test.ts",
+    "test:legacy:all": "tsx src/test.ts && tsx src/test-pet.ts && tsx src/test-e2e.ts && tsx src/test-intelligence.ts && tsx src/test-extractor.ts",
+    "test:legacy:week": "tsx src/test-week9-12.ts && tsx src/test-week16.ts && tsx src/test-week17.ts && tsx src/test-week18.ts && tsx src/test-week19-20.ts",
+    "electron:dev": "electron electron/main.cjs",
+    "electron:build": "electron-builder",
+    "electron:build:mac": "electron-builder --mac",
+    "electron:build:win": "electron-builder --win",
+    "electron:build:linux": "electron-builder --linux"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.buddy-ai.app",
+    "productName": "Buddy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "electron/icon.png"
+    },
+    "win": {
+      "icon": "electron/icon.png"
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "electron/icon.png"
+    }
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/deepseek": "^2.0.29",
+    "@ai-sdk/google": "^3.0.64",
+    "@ai-sdk/openai": "^3.0.53",
+    "@ai-sdk/openai-compatible": "^2.0.41",
+    "ai": "^6.0.168",
+    "better-sqlite3": "^12.9.0",
+    "glob": "^13.0.6",
+    "seedrandom": "^3.0.5",
+    "stripe": "^22.1.0",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@babel/generator": "^7.29.1",
+    "@babel/parser": "^7.29.3",
+    "@babel/traverse": "^7.29.0",
+    "@playwright/test": "^1.59.1",
+    "@types/babel__generator": "^7.27.0",
+    "@types/babel__traverse": "^7.28.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.5",
+    "concurrently": "^9.2.1",
+    "electron": "^41.2.2",
+    "electron-builder": "^26.0.12",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}

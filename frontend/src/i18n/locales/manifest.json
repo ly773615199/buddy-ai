@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "generatedAt": "2026-05-14T14:05:19.402Z",
+  "totalKeys": 645,
+  "languages": {
+    "en": {
+      "keys": 578,
+      "file": "en.json"
+    },
+    "ja": {
+      "keys": 578,
+      "file": "ja.json"
+    },
+    "ko": {
+      "keys": 578,
+      "file": "ko.json"
+    },
+    "fr": {
+      "keys": 578,
+      "file": "fr.json"
+    },
+    "de": {
+      "keys": 578,
+      "file": "de.json"
+    },
+    "es": {
+      "keys": 578,
+      "file": "es.json"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "process_list",
+  "description": "查看系统进程列表，支持按进程名过滤和按CPU/内存/PID排序",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": {
+    "sort": {
+      "type": "string",
+      "required": false,
+      "default": "cpu",
+      "description": "排序方式：cpu/mem/pid"
+    }
+  },
+  "execute": {
+    "command": "ps aux --sort=-%cpu | head -20",
+    "timeout": 10
+  },
+  "resultParser": "lines",
+  "tags": ["运维", "进程", "系统"]
+}

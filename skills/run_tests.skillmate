@@ -1,0 +1,27 @@
+{
+  "name": "run_tests",
+  "description": "自动检测并运行项目的测试，支持 vitest、jest、pytest 等框架",
+  "permission": "exec_safe",
+  "author": "buddy",
+  "version": "1.0.0",
+  "parameters": [
+    {
+      "name": "cwd",
+      "type": "string",
+      "required": false,
+      "default": ".",
+      "description": "工作目录"
+    },
+    {
+      "name": "framework",
+      "type": "string",
+      "required": false,
+      "default": "auto",
+      "description": "测试框架：auto/npm/vitest/jest/pytest"
+    }
+  ],
+  "execute": "cd '${cwd:-.}' && (npx vitest run 2>&1 || npx jest 2>&1 || npm test 2>&1) | tail -50",
+  "timeout": 120,
+  "resultParser": "text",
+  "tags": ["测试", "开发"]
+}

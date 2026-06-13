@@ -1,0 +1,17 @@
+{
+    "name": "docker_compose",
+    "description": "管理 Docker Compose 服务（up/down/ps/logs）",
+    "version": "1.0.0",
+    "author": "buddy",
+    "tags": ["docker", "运维", "容器"],
+    "permission": "exec_safe",
+    "parameters": {
+        "action": { "type": "string", "description": "操作：up/down/ps/logs/restart", "required": true },
+        "cwd": { "type": "string", "description": "compose 文件目录", "required": false, "default": "." },
+        "service": { "type": "string", "description": "指定服务名", "required": false },
+        "follow": { "type": "boolean", "description": "logs 是否跟踪", "required": false, "default": false }
+    },
+    "execute": "cd '${cwd:-.}' && case '${action}' in up) docker compose up -d ${service:-} ;; down) docker compose down ${service:-} ;; ps) docker compose ps ;; logs) docker compose logs ${follow:+-f} --tail=100 ${service:-} ;; restart) docker compose restart ${service:-} ;; *) echo '未知操作: ${action}' ;; esac",
+    "timeout": 60,
+    "resultParser": "text"
+}

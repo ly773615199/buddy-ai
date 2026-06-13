@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>屏幕标注</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+
+    /* 工具栏 — 毛玻璃浮动 */
+    #toolbar {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 16px;
+      background: rgba(30, 30, 30, 0.55);
+      backdrop-filter: blur(18px) saturate(1.4);
+      -webkit-backdrop-filter: blur(18px) saturate(1.4);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    #toolbar.visible { opacity: 1; }
+
+    .tb-btn {
+      width: 38px;
+      height: 38px;
+      border: none;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.08);
+      color: #e0e0e0;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .tb-btn:hover { background: rgba(255,255,255,0.18); }
+    .tb-btn:active { transform: scale(0.92); }
+    .tb-btn.active {
+      background: rgba(79,172,254,0.45);
+      color: #fff;
+      box-shadow: 0 0 0 2px rgba(79,172,254,0.6);
+    }
+    .tb-btn.danger { background: rgba(239,68,68,0.3); }
+    .tb-btn.danger:hover { background: rgba(239,68,68,0.55); }
+
+    .tb-divider {
+      width: 1px;
+      height: 24px;
+      background: rgba(255,255,255,0.15);
+      margin: 0 4px;
+    }
+
+    /* 颜色选择器 */
+    .color-dot {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.25);
+      cursor: pointer;
+      transition: transform 0.12s, border-color 0.15s;
+    }
+    .color-dot:hover { transform: scale(1.15); }
+    .color-dot.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.5); }
+
+    /* 文字输入框 */
+    #text-input-wrapper {
+      position: fixed;
+      z-index: 10000;
+      display: none;
+    }
+    #text-input {
+      min-width: 120px;
+      padding: 6px 10px;
+      border: 2px solid rgba(79,172,254,0.7);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      color: #fff;
+      font-size: 18px;
+      outline: none;
+      caret-color: #4facfe;
+    }
+
+    /* 快捷键提示 */
+    .tb-btn[data-tip]::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: 46px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.75);
+      color: #ddd;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .tb-btn[data-tip]:hover::after { opacity: 1; }
+    .tb-btn { position: relative; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <!-- 文字输入 -->
+  <div id="text-input-wrapper">
+    <input id="text-input" type="text" placeholder="输入文字…" />
+  </div>
+
+  <!-- 工具栏 -->
+  <div id="toolbar">
+    <button class="tb-btn active" data-tool="freehand" data-tip="自由绘制 (P)">✏️</button>
+    <button class="tb-btn" data-tool="rect" data-tip="矩形 (R)">⬜</button>
+    <button class="tb-btn" data-tool="arrow" data-tip="箭头 (A)">➡️</button>
+    <button class="tb-btn" data-tool="text" data-tip="文字 (T)">🔤</button>
+    <div class="tb-divider"></div>
+    <div class="color-dot active" data-color="#EF4444" style="background:#EF4444" title="红"></div>
+    <div class="color-dot" data-color="#3B82F6" style="background:#3B82F6" title="蓝"></div>
+    <div class="color-dot" data-color="#22C55E" style="background:#22C55E" title="绿"></div>
+    <div class="color-dot" data-color="#EAB308" style="background:#EAB308" title="黄"></div>
+    <div class="color-dot" data-color="#FFFFFF" style="background:#FFFFFF" title="白"></div>
+    <div class="tb-divider"></div>
+    <button class="tb-btn" id="btn-undo" data-tip="撤销 (Ctrl+Z)">↩️</button>
+    <button class="tb-btn danger" id="btn-clear" data-tip="清除">🗑️</button>
+    <button class="tb-btn danger" id="btn-close" data-tip="关闭">✖️</button>
+  </div>
+
+  <script>
+  (() => {
+    // ── 常量 ──
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const toolbar = document.getElementById('toolbar');
+    const textWrapper = document.getElementById('text-input-wrapper');
+    const textInput = document.getElementById('text-input');
+
+    // ── 状态 ──
+    let currentTool = 'freehand';
+    let currentColor = '#EF4444';
+    let lineWidth = 3;
+    let isDrawing = false;
+    let annotations = [];      // 已完成标注
+    let currentAnnotation = null;
+    let startX = 0, startY = 0;
+
+    // ── 画布尺寸 ──
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      redraw();
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ── 工具栏显示 ──
+    function showToolbar() { toolbar.classList.add('visible'); }
+    function hideToolbar() { toolbar.classList.remove('visible'); }
+    showToolbar();
+
+    // ── 工具切换 ──
+    toolbar.querySelectorAll('.tb-btn[data-tool]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        toolbar.querySelectorAll('.tb-btn[data-tool]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTool = btn.dataset.tool;
+        // 提交未完成的文字
+        commitTextInput();
+      });
+    });
+
+    // ── 颜色切换 ──
+    toolbar.querySelectorAll('.color-dot').forEach(dot => {
+      dot.addEventListener('click', () => {
+        toolbar.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+        dot.classList.add('active');
+        currentColor = dot.dataset.color;
+      });
+    });
+
+    // ── 撤销 ──
+    document.getElementById('btn-undo').addEventListener('click', undo);
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+      if (e.key === 'Escape') { commitTextInput(); hideToolbar(); }
+    });
+
+    function undo() {
+      if (annotations.length > 0) {
+        annotations.pop();
+        redraw();
+        notifyIpc('overlay_annotation', { type: 'undo' });
+      }
+    }
+
+    // ── 清除 ──
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      annotations = [];
+      redraw();
+      notifyIpc('overlay_clear');
+    });
+
+    // ── 关闭 ──
+    document.getElementById('btn-close').addEventListener('click', () => {
+      annotations = [];
+      redraw();
+      hideToolbar();
+      notifyIpc('overlay_draw_mode', false);
+    });
+
+    // ── 绘制事件 ──
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('mouseleave', onMouseUp);
+
+    function getPos(e) { return { x: e.clientX, y: e.clientY }; }
+
+    function onMouseDown(e) {
+      const pos = getPos(e);
+      startX = pos.x;
+      startY = pos.y;
+
+      if (currentTool === 'text') {
+        showTextInput(pos.x, pos.y);
+        return;
+      }
+
+      isDrawing = true;
+
+      if (currentTool === 'freehand') {
+        currentAnnotation = {
+          type: 'freehand',
+          color: currentColor,
+          lineWidth,
+          points: [{ x: pos.x, y: pos.y }],
+        };
+      } else if (currentTool === 'rect') {
+        currentAnnotation = {
+          type: 'rect',
+          color: currentColor,
+          lineWidth,
+          x: pos.x, y: pos.y,
+          w: 0, h: 0,
+        };
+      } else if (currentTool === 'arrow') {
+        currentAnnotation = {
+          type: 'arrow',
+          color: currentColor,
+          lineWidth,
+          x1: pos.x, y1: pos.y,
+          x2: pos.x, y2: pos.y,
+        };
+      }
+    }
+
+    function onMouseMove(e) {
+      if (!isDrawing || !currentAnnotation) return;
+      const pos = getPos(e);
+
+      if (currentTool === 'freehand') {
+        currentAnnotation.points.push({ x: pos.x, y: pos.y });
+      } else if (currentTool === 'rect') {
+        currentAnnotation.w = pos.x - startX;
+        currentAnnotation.h = pos.y - startY;
+      } else if (currentTool === 'arrow') {
+        currentAnnotation.x2 = pos.x;
+        currentAnnotation.y2 = pos.y;
+      }
+
+      redraw();
+      drawAnnotation(ctx, currentAnnotation);
+    }
+
+    function onMouseUp(e) {
+      if (!isDrawing) return;
+      isDrawing = false;
+
+      if (currentAnnotation) {
+        // 丢弃过小的标注
+        const valid = currentAnnotation.type === 'freehand'
+          ? currentAnnotation.points.length > 2
+          : true;
+
+        if (valid) {
+          annotations.push(currentAnnotation);
+          notifyIpc('overlay_annotation', currentAnnotation);
+        }
+        currentAnnotation = null;
+        redraw();
+      }
+    }
+
+    // ── 文字标注 ──
+    function showTextInput(x, y) {
+      textWrapper.style.display = 'block';
+      textWrapper.style.left = x + 'px';
+      textWrapper.style.top = y + 'px';
+      textInput.style.color = currentColor;
+      textInput.value = '';
+      textInput.focus();
+    }
+
+    function commitTextInput() {
+      if (textWrapper.style.display === 'none') return;
+      const text = textInput.value.trim();
+      if (text) {
+        const rect = textWrapper.getBoundingClientRect();
+        const annotation = {
+          type: 'text',
+          color: currentColor,
+          text,
+          x: rect.left,
+          y: rect.top + 4,
+          fontSize: 18,
+        };
+        annotations.push(annotation);
+        notifyIpc('overlay_annotation', annotation);
+        redraw();
+      }
+      textWrapper.style.display = 'none';
+      textInput.value = '';
+    }
+
+    textInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { commitTextInput(); }
+      if (e.key === 'Escape') { textWrapper.style.display = 'none'; textInput.value = ''; }
+    });
+    // 点击别处也提交
+    canvas.addEventListener('mousedown', e => {
+      if (textWrapper.style.display !== 'none' && !textWrapper.contains(e.target)) {
+        commitTextInput();
+      }
+    });
+
+    // ── 绘制 ──
+    function redraw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const ann of annotations) drawAnnotation(ctx, ann);
+    }
+
+    function drawAnnotation(c, ann) {
+      c.save();
+      c.strokeStyle = ann.color;
+      c.fillStyle = ann.color;
+      c.lineWidth = ann.lineWidth || 3;
+      c.lineCap = 'round';
+      c.lineJoin = 'round';
+
+      if (ann.type === 'freehand') {
+        c.beginPath();
+        const pts = ann.points;
+        if (pts.length < 2) { c.restore(); return; }
+        c.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          c.lineTo(pts[i].x, pts[i].y);
+        }
+        c.stroke();
+      }
+
+      if (ann.type === 'rect') {
+        c.strokeRect(ann.x, ann.y, ann.w, ann.h);
+      }
+
+      if (ann.type === 'arrow') {
+        drawArrow(c, ann.x1, ann.y1, ann.x2, ann.y2, ann.lineWidth);
+      }
+
+      if (ann.type === 'text') {
+        c.font = `${ann.fontSize || 18}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        c.fillText(ann.text, ann.x, ann.y);
+      }
+
+      c.restore();
+    }
+
+    function drawArrow(c, x1, y1, x2, y2, lw) {
+      const headLen = Math.max(12, lw * 4);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+
+      c.beginPath();
+      c.moveTo(x1, y1);
+      c.lineTo(x2, y2);
+      c.stroke();
+
+      // 箭头
+      c.beginPath();
+      c.moveTo(x2, y2);
+      c.lineTo(
+        x2 - headLen * Math.cos(angle - Math.PI / 7),
+        y2 - headLen * Math.sin(angle - Math.PI / 7)
+      );
+      c.lineTo(
+        x2 - headLen * Math.cos(angle + Math.PI / 7),
+        y2 - headLen * Math.sin(angle + Math.PI / 7)
+      );
+      c.closePath();
+      c.fill();
+    }
+
+    // ── IPC 通信 ──
+    function notifyIpc(channel, data) {
+      try {
+        if (window.electronAPI && window.electronAPI.send) {
+          window.electronAPI.send(channel, data);
+        } else if (window.require) {
+          // fallback: 直接 require electron (contextIsolation=false 时)
+          const { ipcRenderer } = window.require('electron');
+          ipcRenderer.send(channel, data);
+        }
+      } catch (_) { /* 纯浏览器模式，忽略 */ }
+    }
+
+    // 接收来自主进程的事件
+    function listenIpc(channel, callback) {
+      try {
+        if (window.electronAPI && window.electronAPI.on) {
+          window.electronAPI.on(channel, callback);
+        } else if (window.require) {
+          const { ipcRenderer } = window.require('electron');
+          ipcRenderer.on(channel, (event, ...args) => callback(...args));
+        }
+      } catch (_) { /* 纯浏览器模式 */ }
+    }
+
+    listenIpc('overlay_clear', () => { annotations = []; redraw(); });
+    listenIpc('overlay_add_annotation', (ann) => {
+      annotations.push(ann);
+      redraw();
+    });
+    listenIpc('overlay_draw_mode_changed', (enabled) => {
+      if (enabled) showToolbar(); else hideToolbar();
+    });
+
+    // ── 接收数据导出请求 ──
+    listenIpc('overlay_export', () => {
+      notifyIpc('overlay_export', {
+        annotations: JSON.parse(JSON.stringify(annotations)),
+        canvas: { width: canvas.width, height: canvas.height },
+      });
+    });
+
+  })();
+  </script>
+</body>
+</html>

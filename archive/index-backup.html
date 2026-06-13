@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐾 Buddy — AI 精灵 v1.5</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117;--fg:#c9d1d9;--border:#30363d;--card:#161b22;
+  --dim:#8b949e;--accent:#58a6ff;--accent2:#3fb950;
+  --common:#8b949e;--uncommon:#3fb950;--rare:#d29922;--epic:#f778ba;--legendary:#f0883e;
+}
+body{background:var(--bg);color:var(--fg);font-family:'Cascadia Code','Fira Code',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px}
+h1{font-size:1.4em;margin-bottom:4px}
+.subtitle{color:var(--dim);font-size:.85em;margin-bottom:20px}
+.main{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;max-width:1100px;width:100%}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:280px}
+.sprite-container{position:relative;width:220px;height:200px;margin:0 auto 12px;cursor:pointer;user-select:none}
+.sprite-box{font-size:15px;line-height:1.35;white-space:pre;text-align:center;transition:transform .15s}
+.sprite-box:active{transform:scale(1.1)}
+.bubble{position:absolute;top:-10px;left:230px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;max-width:220px;opacity:0;transition:opacity .5s;pointer-events:none;font-style:italic;color:var(--dim)}
+.bubble.show{opacity:1}
+.bubble.fade{opacity:0}
+.hearts{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+.heart{position:absolute;font-size:14px;animation:float-up 2s ease-out forwards;opacity:0}
+@keyframes float-up{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-80px) scale(.5)}}
+@keyframes glow-pulse{0%,100%{text-shadow:0 0 8px currentColor}50%{text-shadow:0 0 20px currentColor,0 0 40px currentColor}}
+@keyframes crack{0%{opacity:.3}50%{opacity:1}100%{opacity:.5}}
+@keyframes rainbow{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}
+.sprite-box.glow{animation:glow-pulse 2s infinite}
+.sprite-box.sparkle{animation:glow-pulse 1.5s infinite;text-shadow:0 0 12px currentColor,0 0 24px currentColor}
+.sprite-box.flame{animation:glow-pulse 1s infinite;text-shadow:0 0 16px #f0883e,0 0 32px #f0883e}
+.sprite-box.rainbow{animation:rainbow 3s linear infinite,glow-pulse 1.5s infinite}
+.egg-crack{animation:crack 1s infinite}
+.info{text-align:center;margin-bottom:12px}
+.name{font-size:1.2em;font-weight:bold}
+.rarity{font-size:.8em;padding:2px 8px;border-radius:4px;display:inline-block;margin-top:4px}
+.stage-badge{font-size:.7em;padding:2px 6px;border-radius:4px;display:inline-block;margin-left:6px;background:var(--accent)22;color:var(--accent)}
+.exp-bar{margin-top:6px}
+.exp-bar-bg{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.exp-bar-fill{height:100%;border-radius:3px;transition:width .5s;background:var(--accent)}
+.exp-text{font-size:.7em;color:var(--dim);text-align:center;margin-top:2px}
+.stats{display:grid;gap:6px}
+.stat-row{display:flex;align-items:center;gap:8px;font-size:.8em}
+.stat-label{width:70px;text-align:right;color:var(--dim)}
+.stat-bar-bg{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.stat-bar{height:100%;border-radius:4px;transition:width 1s ease-out}
+.stat-val{width:30px;font-size:.75em;color:var(--dim)}
+.controls{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.btn{background:var(--border);color:var(--fg);border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.8em;transition:all .2s}
+.btn:hover{background:var(--accent);color:#fff}
+.btn.active{background:var(--accent);color:#fff}
+.input-row{display:flex;gap:8px;margin-bottom:16px}
+.input-row input{flex:1;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:8px 12px;border-radius:6px;font-family:inherit;font-size:.85em;outline:none}
+.input-row input:focus{border-color:var(--accent)}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-top:16px}
+.gallery-item{text-align:center;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .2s;font-size:10px;line-height:1.2}
+.gallery-item:hover{border-color:var(--accent);background:rgba(88,166,255,.05)}
+.gallery-item.active{border-color:var(--accent);background:rgba(88,166,255,.1)}
+.gallery-item .g-name{font-size:11px;margin-top:4px;font-weight:bold}
+.gallery-item .g-rarity{font-size:9px;color:var(--dim)}
+.shiny-badge{color:#ffd700;font-size:.7em;margin-left:4px}
+.meta{color:var(--dim);font-size:.75em;margin-top:12px;text-align:center}
+.section-title{font-size:.9em;color:var(--dim);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tab{padding:6px 14px;border-radius:6px 6px 0 0;cursor:pointer;font-size:.8em;background:var(--border);color:var(--dim);border:none;font-family:inherit;transition:all .2s}
+.tab.active{background:var(--card);color:var(--fg);border-top:2px solid var(--accent)}
+.tab:hover{color:var(--fg)}
+.tab-content{display:none}.tab-content.active{display:block}
+
+/* Achievement grid */
+.achievement-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;max-height:400px;overflow-y:auto}
+.achievement{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.8em;transition:all .3s}
+.achievement.unlocked{border-color:var(--accent2);background:rgba(63,185,80,.05)}
+.achievement.locked{opacity:.5}
+.achievement .a-icon{font-size:1.4em}
+.achievement .a-info{flex:1}
+.achievement .a-title{font-weight:bold;font-size:.9em}
+.achievement .a-desc{color:var(--dim);font-size:.8em}
+.achievement .a-exp{color:var(--accent);font-size:.75em}
+
+/* Diary */
+.diary{max-height:400px;overflow-y:auto;font-size:.8em}
+.diary-entry{padding:8px;border-bottom:1px solid var(--border)}
+.diary-date{color:var(--accent);font-weight:bold;margin-bottom:4px}
+.diary-text{color:var(--dim);line-height:1.5}
+
+/* Settings */
+.settings{display:grid;gap:12px}
+.setting-row{display:flex;align-items:center;gap:12px;font-size:.85em}
+.setting-row label{width:120px;text-align:right;color:var(--dim)}
+.setting-row input,.setting-row select{flex:1;background:var(--card);border:1px solid var(--border);color:var(--fg);padding:6px 10px;border-radius:6px;font-family:inherit;font-size:.85em;outline:none}
+.setting-row input:focus,.setting-row select:focus{border-color:var(--accent)}
+.save-btn{background:var(--accent);color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.85em;transition:opacity .2s}
+.save-btn:hover{opacity:.8}
+
+/* Evolution animation overlay */
+.evolution-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:1000;opacity:0;pointer-events:none;transition:opacity .5s}
+.evolution-overlay.show{opacity:1;pointer-events:all}
+.evolution-content{text-align:center;font-size:1.2em}
+.evolution-content pre{font-size:16px;line-height:1.3;margin:20px 0}
+.evolution-content .evo-stage{font-size:1.5em;font-weight:bold;margin:10px 0}
+.evolution-content .evo-msg{color:var(--dim);font-size:.85em;margin:8px 0}
+
+/* Notification toast */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card);border:1px solid var(--accent);border-radius:8px;padding:12px 20px;font-size:.85em;z-index:999;opacity:0;transform:translateY(20px);transition:all .3s;max-width:350px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast .t-icon{font-size:1.2em;margin-right:8px}
+
+@media(max-width:600px){
+  .main{flex-direction:column;align-items:center}
+  .card{min-width:unset;width:100%}
+  .bubble{left:auto;right:0;top:auto;bottom:-40px;max-width:100%}
+}
+</style>
+</head>
+<body>
+
+<h1>🐾 Buddy — AI 精灵</h1>
+<p class="subtitle">一只会陪你写代码的 ASCII 宠物 · v1.5</p>
+
+<div class="input-row" style="max-width:400px;width:100%">
+  <input id="username" placeholder="输入用户名生成你的专属精灵..." />
+  <button class="btn" onclick="generateFromInput()">生成</button>
+</div>
+
+<div class="main">
+  <!-- Left: Buddy Card -->
+  <div class="card" id="buddy-card">
+    <div class="sprite-container" onclick="petBuddy()">
+      <div class="hearts" id="hearts"></div>
+      <div class="sprite-box" id="sprite"></div>
+      <div class="bubble" id="bubble"></div>
+    </div>
+    <div class="info" id="info"></div>
+    <div class="exp-bar" id="exp-bar" style="display:none">
+      <div class="exp-bar-bg"><div class="exp-bar-fill" id="exp-fill"></div></div>
+      <div class="exp-text" id="exp-text"></div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="meta" id="meta"></div>
+    <div class="controls">
+      <button class="btn" onclick="petBuddy()">👋 摸摸头</button>
+      <button class="btn" onclick="talkToBuddy()">💬 说话</button>
+      <button class="btn" onclick="randomBuddy()">🎲 随机</button>
+      <button class="btn" onclick="feedExp()">⭐ 喂经验</button>
+    </div>
+  </div>
+
+  <!-- Right: Tabs -->
+  <div class="card" style="flex:1;min-width:320px;max-width:600px">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('gallery')">📖 图鉴</button>
+      <button class="tab" onclick="switchTab('achievements')">🏆 成就</button>
+      <button class="tab" onclick="switchTab('diary')">📝 日记</button>
+      <button class="tab" onclick="switchTab('settings')">⚙️ 设置</button>
+    </div>
+
+    <div class="tab-content active" id="tab-gallery">
+      <div class="section-title">精灵图鉴（18种）</div>
+      <div class="gallery" id="gallery"></div>
+    </div>
+
+    <div class="tab-content" id="tab-achievements">
+      <div class="section-title">成就系统 <span id="ach-count" style="color:var(--accent)"></span></div>
+      <div class="achievement-grid" id="achievement-grid"></div>
+    </div>
+
+    <div class="tab-content" id="tab-diary">
+      <div class="section-title">精灵日记</div>
+      <div class="diary" id="diary"></div>
+    </div>
+
+    <div class="tab-content" id="tab-settings">
+      <div class="section-title">AI 设置（Brain 智能内核）</div>
+      <div class="settings">
+        <div class="setting-row">
+          <label>LLM 后端</label>
+          <select id="cfg-provider">
+            <option value="openai">OpenAI</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="ollama">Ollama (本地)</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label>API Key</label>
+          <input id="cfg-apikey" type="password" placeholder="sk-..." />
+        </div>
+        <div class="setting-row">
+          <label>模型</label>
+          <input id="cfg-model" placeholder="gpt-4o-mini" />
+        </div>
+        <div class="setting-row">
+          <label>Base URL</label>
+          <input id="cfg-baseurl" placeholder="留空使用默认" />
+        </div>
+        <div class="setting-row">
+          <label>主动说话</label>
+          <select id="cfg-proactive">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+        <div style="text-align:center;margin-top:8px">
+          <button class="save-btn" onclick="saveSettings()">💾 保存设置</button>
+          <button class="btn" onclick="testBrain()" style="margin-left:8px">🧪 测试连接</button>
+        </div>
+        <div id="brain-status" style="text-align:center;font-size:.8em;color:var(--dim);margin-top:4px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Evolution overlay -->
+<div class="evolution-overlay" id="evo-overlay">
+  <div class="evolution-content" id="evo-content"></div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+
+const SPECIES=['duck','goose','blob','cat','dragon','octopus','owl','penguin','turtle','snail','ghost','axolotl','capybara','cactus','robot','rabbit','mushroom','chonk'];
+const EYES=['·','✦','×','◉','@','°'];
+const HATS=['none','crown','tophat','propeller','halo','wizard','beanie','tinyduck'];
+const RARITIES=['common','uncommon','rare','epic','legendary'];
+const RARITY_WEIGHTS={common:60,uncommon:25,rare:10,epic:4,legendary:1};
+const RARITY_COLORS={common:'var(--common)',uncommon:'var(--uncommon)',rare:'var(--rare)',epic:'var(--epic)',legendary:'var(--legendary)'};
+const RARITY_LABELS={common:'★ Common',uncommon:'★★ Uncommon',rare:'★★★ Rare',epic:'★★★★ Epic',legendary:'★★★★★ Legendary'};
+const RARITY_FLOOR={common:5,uncommon:15,rare:25,epic:35,legendary:50};
+const STAT_NAMES=['DEBUGGING','PATIENCE','CHAOS','WISDOM','SNARK'];
+const STAT_LABELS={DEBUGGING:'🔧 调试',PATIENCE:'🧘 耐心',CHAOS:'🌀 混乱',WISDOM:'🦉 智慧',SNARK:'😏 毒舌'};
+const SPECIES_NAMES={duck:'小鸭',goose:'大鹅',blob:'史莱姆',cat:'猫咪',dragon:'小龙',octopus:'章鱼',owl:'猫头鹰',penguin:'企鹅',turtle:'乌龟',snail:'蜗牛',ghost:'幽灵',axolotl:'六角恐龙',capybara:'水豚',cactus:'仙人掌',robot:'机器人',rabbit:'兔子',mushroom:'蘑菇',chonk:'胖胖'};
+
+// Species traits (personality bonuses)
+const SPECIES_TRAITS={
+  duck:{PATIENCE:10},goose:{SNARK:20,PATIENCE:-15},cat:{SNARK:15,WISDOM:5},
+  dragon:{SNARK:10,DEBUGGING:15},ghost:{CHAOS:20},robot:{DEBUGGING:20,CHAOS:-20},
+  mushroom:{CHAOS:15},chonk:{PATIENCE:20},blob:{PATIENCE:10,CHAOS:5},
+  octopus:{WISDOM:10,DEBUGGING:5},owl:{WISDOM:15,DEBUGGING:10},penguin:{PATIENCE:5,CHAOS:5},
+  turtle:{PATIENCE:15,WISDOM:5},snail:{PATIENCE:20,CHAOS:-5},axolotl:{WISDOM:10,CHAOS:10},
+  capybara:{PATIENCE:25},cactus:{CHAOS:10,SNARK:5},rabbit:{CHAOS:15,PATIENCE:5}
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  SPRITES
+// ═══════════════════════════════════════════════════════════════
+
+const SPRITES={
+duck:[
+'            \n    __      \n  <({E} )___  \n   (  ._>   \n    `--´    ',
+'            \n    __      \n  <({E} )___  \n   (  ._>   \n    `--´~   ',
+'            \n    __      \n  <({E} )___  \n   (  .__>  \n    `--´    '
+],
+goose:[
+'            \n     ({E}>    \n     ||     \n   _(__)_   \n    ^^^^    ',
+'            \n    ({E}>     \n     ||     \n   _(__)_   \n    ^^^^    ',
+'            \n     ({E}>>   \n     ||     \n   _(__)_   \n    ^^^^    '
+],
+blob:[
+'            \n   .----.   \n  ( {E}  {E} )  \n  (      )  \n   `----´   ',
+'            \n  .------.  \n (  {E}  {E}  ) \n (        ) \n  `------´  ',
+'            \n    .--.    \n   ({E}  {E})   \n   (    )   \n    `--´    '
+],
+cat:[
+'            \n   /\\_/\\    \n  ( {E}   {E})  \n  (  ω  )   \n  (")_(")   ',
+'            \n   /\\_/\\    \n  ( {E}   {E})  \n  (  ω  )   \n  (")_(")~  ',
+'            \n   /\\-/\\    \n  ( {E}   {E})  \n  (  ω  )   \n  (")_(")   '
+],
+dragon:[
+'            \n  /^\\  /^\\  \n <  {E}  {E}  > \n (   ~~   ) \n  `-vvvv-´  ',
+'            \n  /^\\  /^\\  \n <  {E}  {E}  > \n (        ) \n  `-vvvv-´  ',
+'   ~    ~   \n  /^\\  /^\\  \n <  {E}  {E}  > \n (   ~~   ) \n  `-vvvv-´  '
+],
+octopus:[
+'            \n   .----.   \n  ( {E}  {E} )  \n  (______)  \n  /\\/\\/\\/\\  ',
+'            \n   .----.   \n  ( {E}  {E} )  \n  (______)  \n  \\/\\/\\/\\/  ',
+'     o      \n   .----.   \n  ( {E}  {E} )  \n  (______)  \n  /\\/\\/\\/\\  '
+],
+owl:[
+'            \n   /\\  /\\   \n  (({E})({E}))  \n  (  ><  )  \n   `----´   ',
+'            \n   /\\  /\\   \n  (({E})({E}))  \n  (  ><  )  \n   .----.   ',
+'            \n   /\\  /\\   \n  (({E})(-))  \n  (  ><  )  \n   `----´   '
+],
+penguin:[
+'            \n  .---.     \n  ({E}>{E})     \n /(   )\\    \n  `---´     ',
+'            \n  .---.     \n  ({E}>{E})     \n |(   )|    \n  `---´     ',
+'  .---.     \n  ({E}>{E})     \n /(   )\\    \n  `---´     \n   ~ ~      '
+],
+turtle:[
+'            \n   _,--._   \n  ( {E}  {E} )  \n /[______]\\ \n  ``    ``  ',
+'            \n   _,--._   \n  ( {E}  {E} )  \n /[______]\\ \n   ``  ``   ',
+'            \n   _,--._   \n  ( {E}  {E} )  \n /[======]\\ \n  ``    ``  '
+],
+snail:[
+'            \n {E}    .--.  \n  \\  ( @ )  \n   \\_`--´   \n  ~~~~~~~   ',
+'            \n  {E}   .--.  \n  |  ( @ )  \n   \\_`--´   \n  ~~~~~~~   ',
+'            \n {E}    .--.  \n  \\  ( @  ) \n   \\_`--´   \n   ~~~~~~   '
+],
+ghost:[
+'            \n   .----.   \n  / {E}  {E} \\  \n  |      |  \n  ~`~``~`~  ',
+'            \n   .----.   \n  / {E}  {E} \\  \n  |      |  \n  `~`~~`~`  ',
+'    ~  ~    \n   .----.   \n  / {E}  {E} \\  \n  |      |  \n  ~~`~~`~~  '
+],
+axolotl:[
+'            \n}~(______)~{\n}~({E} .. {E})~{\n  ( .--. )  \n  (_/  \\_)  ',
+'            \n~}(______){~\n~}({E} .. {E}){~\n  ( .--. )  \n  (_/  \\_)  ',
+'            \n}~(______)~{\n}~({E} .. {E})~{\n  (  --  )  \n  ~_/  \\_~  '
+],
+capybara:[
+'            \n  n______n  \n ( {E}    {E} ) \n (   oo   ) \n  `------´  ',
+'            \n  n______n  \n ( {E}    {E} ) \n (   Oo   ) \n  `------´  ',
+'    ~  ~    \n  u______n  \n ( {E}    {E} ) \n (   oo   ) \n  `------´  '
+],
+cactus:[
+'            \n n  ____  n \n | |{E}  {E}| | \n |_|    |_| \n   |    |   ',
+'            \n    ____    \n n |{E}  {E}| n \n |_|    |_| \n   |    |   ',
+' n        n \n |  ____  | \n | |{E}  {E}| | \n |_|    |_| \n   |    |   '
+],
+robot:[
+'            \n   .[||].   \n  [ {E}  {E} ]  \n  [ ==== ]  \n  `------´  ',
+'            \n   .[||].   \n  [ {E}  {E} ]  \n  [ -==- ]  \n  `------´  ',
+'     *      \n   .[||].   \n  [ {E}  {E} ]  \n  [ ==== ]  \n  `------´  '
+],
+rabbit:[
+'            \n   (\\__/)   \n  ( {E}  {E} )  \n =(  ..  )= \n  (")__(")  ',
+'            \n   (|__/)   \n  ( {E}  {E} )  \n =(  ..  )= \n  (")__(")  ',
+'            \n   (\\__/)   \n  ( {E}  {E} )  \n =( .  . )= \n  (")__(")  '
+],
+mushroom:[
+'            \n .-o-OO-o-. \n(__________)\n   |{E}  {E}|   \n   |____|   ',
+'            \n .-O-oo-O-. \n(__________)\n   |{E}  {E}|   \n   |____|   ',
+'   . o  .   \n .-o-OO-o-. \n(__________)\n   |{E}  {E}|   \n   |____|   '
+],
+chonk:[
+'            \n  /\\    /\\  \n ( {E}    {E} ) \n (   ..   ) \n  `------´  ',
+'            \n  /\\    /|  \n ( {E}    {E} ) \n (   ..   ) \n  `------´  ',
+'            \n  /\\    /\\  \n ( {E}    {E} ) \n (   ..   ) \n  `------´~ '
+]
+};
+
+// Egg sprite (3 crack frames)
+const EGG_SPRITES=[
+'            \n     ___    \n    /   \\   \n   |     |  \n   |     |  \n    \\___/   ',
+'            \n     ___    \n    / . \\   \n   |  .  |  \n   | .   |  \n    \\_._/   ',
+'            \n     _._    \n    / . \\   \n   .  .  |  \n   | . . |  \n    \\._./   '
+];
+
+const HAT_SPRITES={
+none:'',crown:'   \\^^^/    ',tophat:'   [___]    ',propeller:'    -+-     ',
+halo:'   (   )    ',wizard:'    /^\\     ',beanie:'   (___)    ',tinyduck:'    ,>      '
+};
+
+const STAGE_SIZES={egg:0.8,baby:1,juvenile:1.1,adult:1.2,final:1.35,legendary:1.5};
+const STAGE_LABELS={egg:'🥚 蛋',baby:'🐣 幼年期',juvenile:'🌱 成长期',adult:'🦋 成熟期',final:'🔥 完全体',legendary:'🌈 传说态'};
+const STAGE_AURA={egg:'',baby:'',juvenile:'glow',adult:'sparkle',final:'flame',legendary:'rainbow'};
+const STAGE_ABILITIES={
+  egg:[],
+  baby:['pet_reaction','basic_quip'],
+  juvenile:['active_speak','mood_detection','idle_chat'],
+  adult:['code_observation','error_alert','git_commentary','late_night_care'],
+  final:['deep_analysis','pattern_recognition','proactive_suggestions','memory_recall'],
+  legendary:['all_abilities_max','custom_personality','teach_mode','companion_commute']
+};
+const STAGE_THRESHOLDS={
+  egg:{interactions:0,days:0,achievements:0},
+  baby:{interactions:10,days:0,achievements:0},
+  juvenile:{interactions:100,days:7,achievements:2},
+  adult:{interactions:500,days:30,achievements:5},
+  final:{interactions:2000,days:90,achievements:15},
+  legendary:{interactions:5000,days:180,achievements:30}
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  CORE: Generator
+// ═══════════════════════════════════════════════════════════════
+
+function mulberry32(seed){
+  let a=seed>>>0;
+  return function(){
+    a|=0;a=(a+0x6d2b79f5)|0;
+    let t=Math.imul(a^(a>>>15),1|a);
+    t=(t+Math.imul(t^(t>>>7),61|t))^t;
+    return((t^(t>>>14))>>>0)/4294967296;
+  }
+}
+
+function hashString(s){
+  let h=2166136261;
+  for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}
+  return h>>>0;
+}
+
+function pick(rng,arr){return arr[Math.floor(rng()*arr.length)]}
+
+function rollRarity(rng){
+  const total=Object.values(RARITY_WEIGHTS).reduce((a,b)=>a+b,0);
+  let roll=rng()*total;
+  for(const r of RARITIES){roll-=RARITY_WEIGHTS[r];if(roll<0)return r}
+  return'common';
+}
+
+function rollStats(rng,rarity){
+  const floor=RARITY_FLOOR[rarity];
+  const peak=pick(rng,STAT_NAMES);
+  let dump=pick(rng,STAT_NAMES);
+  while(dump===peak)dump=pick(rng,STAT_NAMES);
+  const stats={};
+  for(const n of STAT_NAMES){
+    if(n===peak)stats[n]=Math.min(100,floor+50+Math.floor(rng()*30));
+    else if(n===dump)stats[n]=Math.max(1,floor-10+Math.floor(rng()*15));
+    else stats[n]=floor+Math.floor(rng()*40);
+  }
+  return stats;
+}
+
+const SALT='buddy-2026-401';
+
+function generateBuddy(username){
+  const rng=mulberry32(hashString(username+SALT));
+  const rarity=rollRarity(rng);
+  return{
+    username,
+    rarity,
+    species:pick(rng,SPECIES),
+    eye:pick(rng,EYES),
+    hat:rarity==='common'?'none':pick(rng,HATS),
+    shiny:rng()<0.01,
+    stats:rollStats(rng,rarity),
+    hatchedAt:Date.now(),
+    interactions:0,
+    // Phase 1.5 fields
+    name: SPECIES_NAMES[pick(rng,SPECIES)]+'酱',
+    stage:'egg',
+    level:1,
+    exp:0,
+    totalPets:0,
+    totalTalks:0,
+    totalErrors:0,
+    totalCommits:0,
+    lastInteraction:Date.now(),
+    lastLogin:0,
+    streak:0
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXPERIENCE & LEVELING
+// ═══════════════════════════════════════════════════════════════
+
+function expToLevel(level){return Math.floor(50*Math.pow(level,1.5))}
+
+const EXP_SOURCES={pet:5,talk:10,error_detected:20,bug_solved:50,commit:15,daily_login:25,streak_bonus:10,achievement:100,latenight_care:30};
+
+function gainExp(amount){
+  if(!currentBuddy)return;
+  currentBuddy.exp+=amount;
+  let leveled=false;
+  while(currentBuddy.exp>=expToLevel(currentBuddy.level)){
+    currentBuddy.exp-=expToLevel(currentBuddy.level);
+    currentBuddy.level++;
+    leveled=true;
+    // Stat bonus on level up
+    for(const s of STAT_NAMES){
+      currentBuddy.stats[s]=Math.min(100,currentBuddy.stats[s]+1);
+    }
+  }
+  if(leveled){
+    showToast('🎉','升级了！Lv.'+currentBuddy.level);
+    checkEvolution();
+    unlockAchievement('level_'+currentBuddy.level);
+    addDiaryEntry('升级到 Lv.'+currentBuddy.level+'！');
+  }
+  saveBuddy();
+  renderBuddy();
+}
+
+function feedExp(){
+  gainExp(50);
+  showBubble('谢谢投喂！经验值 +50');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EVOLUTION SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+function getStageOrder(){return['egg','baby','juvenile','adult','final','legendary']}
+
+function checkEvolution(){
+  if(!currentBuddy)return;
+  const order=getStageOrder();
+  const curIdx=order.indexOf(currentBuddy.stage);
+  if(curIdx>=order.length-1)return; // already legendary
+
+  const nextStage=order[curIdx+1];
+  const req=STAGE_THRESHOLDS[nextStage];
+  if(!req)return;
+
+  const daysSinceStart=Math.floor((Date.now()-currentBuddy.hatchedAt)/(86400000));
+  const unlockedCount=getUnlockedCount();
+
+  if(currentBuddy.interactions>=req.interactions&&daysSinceStart>=req.days&&unlockedCount>=req.achievements){
+    evolveTo(nextStage);
+  }
+}
+
+function evolveTo(stage){
+  const oldStage=currentBuddy.stage;
+  currentBuddy.stage=stage;
+  saveBuddy();
+
+  // Show evolution animation
+  const overlay=document.getElementById('evo-overlay');
+  const content=document.getElementById('evo-content');
+  const msgs={
+    baby:'我诞生了！请多指教~',
+    juvenile:'我长大了！现在我可以主动找你说话了~',
+    adult:'我变强了！我能看懂你的代码了~',
+    final:'完全体！我已经准备好帮你解决难题了！',
+    legendary:'传说形态！我们已经是一辈子的伙伴了。'
+  };
+
+  content.innerHTML=`
+    <div style="font-size:2em;margin-bottom:16px">✨</div>
+    <div class="evo-stage">${STAGE_LABELS[stage]}</div>
+    <div class="evo-msg">${msgs[stage]||''}</div>
+    <pre style="font-size:16px;color:${getComputedStyle(document.documentElement).getPropertyValue('--accent')}">${renderSprite(currentBuddy,0)}</pre>
+    <div class="evo-msg" style="margin-top:12px">新能力解锁：${STAGE_ABILITIES[stage].map(a=>'🔓 '+a).join('  ')}</div>
+  `;
+  overlay.classList.add('show');
+
+  // Stat bonus
+  const bonuses={baby:5,juvenile:10,adult:15,final:20,legendary:30};
+  const bonus=bonuses[stage]||0;
+  if(bonus)for(const s of STAT_NAMES)currentBuddy.stats[s]=Math.min(100,currentBuddy.stats[s]+bonus);
+
+  gainExp(100);
+  addDiaryEntry('进化为'+STAGE_LABELS[stage]+'！');
+  unlockAchievement('stage_'+stage);
+
+  setTimeout(()=>overlay.classList.remove('show'),4000);
+  renderBuddy();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ACHIEVEMENT SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+const ACHIEVEMENTS=[
+  {id:'first_pet',title:'初次触碰',desc:'第一次摸头',icon:'👋',exp:50},
+  {id:'pet_10',title:'摸摸达人',desc:'摸头 10 次',icon:'🤲',exp:100},
+  {id:'pet_100',title:'撸宠大师',desc:'摸头 100 次',icon:'🏆',exp:500},
+  {id:'pet_1000',title:'终极抚摸',desc:'摸头 1000 次',icon:'👑',exp:2000},
+  {id:'first_talk',title:'第一次对话',desc:'和精灵第一次说话',icon:'💬',exp:50},
+  {id:'talk_50',title:'话痨伙伴',desc:'对话 50 次',icon:'🗣️',exp:200},
+  {id:'first_night',title:'夜猫子',desc:'第一次深夜互动',icon:'🌙',exp:50},
+  {id:'streak_7',title:'形影不离',desc:'连续互动 7 天',icon:'📅',exp:200},
+  {id:'streak_30',title:'不离不弃',desc:'连续互动 30 天',icon:'💎',exp:1000},
+  {id:'streak_100',title:'永恒伙伴',desc:'连续互动 100 天',icon:'🌈',exp:5000},
+  {id:'first_error',title:'问题发现者',desc:'第一次发现报错',icon:'🐛',exp:50},
+  {id:'errors_50',title:'Bug 猎人',desc:'一起面对 50 个报错',icon:'🔍',exp:300},
+  {id:'first_commit',title:'见证者',desc:'一起提交第一个 commit',icon:'📝',exp:100},
+  {id:'commits_100',title:'记录官',desc:'一起提交 100 个 commit',icon:'📚',exp:1000},
+  {id:'stage_baby',title:'破壳而出',desc:'孵化成功',icon:'🐣',exp:100},
+  {id:'stage_juvenile',title:'茁壮成长',desc:'进化到成长期',icon:'🌱',exp:300},
+  {id:'stage_adult',title:'羽翼丰满',desc:'进化到成熟期',icon:'🦋',exp:1000},
+  {id:'stage_final',title:'完全体',desc:'进化到最终形态',icon:'🔥',exp:3000},
+  {id:'stage_legendary',title:'传说降临',desc:'进化到传说形态',icon:'⚡',exp:10000},
+  {id:'intimacy_50',title:'知心伙伴',desc:'亲密度达到 50',icon:'❤️',exp:500},
+  {id:'intimacy_100',title:'灵魂伴侣',desc:'亲密度达到 100',icon:'💖',exp:2000},
+  {id:'first_shiny',title:'金光闪闪',desc:'遇到闪光精灵',icon:'✨',exp:200},
+  {id:'brain_connected',title:'灵魂觉醒',desc:'成功连接 Brain 智能内核',icon:'🧠',exp:200},
+  {id:'level_10',title:'小有所成',desc:'达到 10 级',icon:'🔟',exp:200},
+  {id:'level_25',title:'中流砥柱',desc:'达到 25 级',icon:'🏅',exp:500},
+  {id:'level_50',title:'大器已成',desc:'达到 50 级',icon:'🎖️',exp:1000},
+  {id:'level_100',title:'登峰造极',desc:'达到满级',icon:'🌟',exp:5000},
+  {id:'all_species',title:'物种收集者',desc:'在图鉴中查看所有物种',icon:'📖',exp:300},
+  {id:'easter_egg_1',title:'???',desc:'???',icon:'🎁',exp:500,hidden:true},
+  {id:'easter_egg_2',title:'???',desc:'???',icon:'🎁',exp:500,hidden:true},
+  {id:'easter_egg_3',title:'???',desc:'???',icon:'🎁',exp:500,hidden:true}
+];
+
+let unlockedAchievements=[];
+
+function loadAchievements(){
+  const saved=localStorage.getItem('buddy_achievements');
+  if(saved)unlockedAchievements=JSON.parse(saved);
+}
+function saveAchievements(){
+  localStorage.setItem('buddy_achievements',JSON.stringify(unlockedAchievements));
+}
+function getUnlockedCount(){return unlockedAchievements.length}
+
+function unlockAchievement(id){
+  if(unlockedAchievements.includes(id))return;
+  const ach=ACHIEVEMENTS.find(a=>a.id===id);
+  if(!ach)return;
+  unlockedAchievements.push(id);
+  saveAchievements();
+  showToast(ach.icon,'成就解锁：'+ach.title);
+  addDiaryEntry('解锁成就「'+ach.title+'」！');
+  gainExp(ach.exp);
+  renderAchievements();
+}
+
+function getAchievementDate(id){
+  // Store unlock timestamps
+  let timestamps=JSON.parse(localStorage.getItem('buddy_ach_times')||'{}');
+  return timestamps[id];
+}
+function setAchievementDate(id){
+  let timestamps=JSON.parse(localStorage.getItem('buddy_ach_times')||'{}');
+  timestamps[id]=Date.now();
+  localStorage.setItem('buddy_ach_times',JSON.stringify(timestamps));
+}
+
+// Override unlock to also save timestamp
+const _origUnlock=unlockAchievement;
+unlockAchievement=function(id){
+  if(!unlockedAchievements.includes(id))setAchievementDate(id);
+  _origUnlock(id);
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  MEMORY SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+// Diary
+function loadDiary(){return JSON.parse(localStorage.getItem('buddy_diary')||'[]')}
+function saveDiary(entries){localStorage.setItem('buddy_diary',JSON.stringify(entries))}
+function addDiaryEntry(text){
+  const entries=loadDiary();
+  const today=new Date().toISOString().slice(0,10);
+  let todayEntry=entries.find(e=>e.date===today);
+  if(!todayEntry){todayEntry={date:today,items:[]};entries.unshift(todayEntry)}
+  todayEntry.items.push({time:Date.now(),text});
+  saveDiary(entries);
+  renderDiary();
+}
+
+// Relationship
+function loadRelationship(){
+  return JSON.parse(localStorage.getItem('buddy_relationship')||JSON.stringify({
+    intimacy:0,bond:0,stage:'stranger',
+    shared:{bugsFixed:0,lateNights:0,commits:0,errors:0,laughs:0}
+  }));
+}
+function saveRelationship(r){localStorage.setItem('buddy_relationship',JSON.stringify(r))}
+
+function gainIntimacy(amount){
+  const r=loadRelationship();
+  r.intimacy=Math.min(100,r.intimacy+amount);
+  const stages=[['stranger',0],['acquaintance',20],['friend',50],['close_friend',80],['soulmate',100]];
+  let newStage='stranger';
+  for(const[s,t]of stages){if(r.intimacy>=t)newStage=s}
+  if(newStage!==r.stage){
+    r.stage=newStage;
+    showToast('💕','关系升级：'+{stranger:'陌生人',acquaintance:'认识了',friend:'朋友',close_friend:'挚友',soulmate:'灵魂伴侣'}[newStage]);
+    addDiaryEntry('和你的关系变成了「'+newStage+'」');
+    if(r.intimacy>=50)unlockAchievement('intimacy_50');
+    if(r.intimacy>=100)unlockAchievement('intimacy_100');
+  }
+  saveRelationship(r);
+}
+
+// Short-term session memory
+let sessionMemory={startTime:Date.now(),pets:0,talks:0,errors:0,commits:0,messages:[]};
+
+// ═══════════════════════════════════════════════════════════════
+//  BRAIN (AI Integration)
+// ═══════════════════════════════════════════════════════════════
+
+function loadSettings(){
+  const s=JSON.parse(localStorage.getItem('buddy_settings')||'{}');
+  document.getElementById('cfg-provider').value=s.provider||'openai';
+  document.getElementById('cfg-apikey').value=s.apiKey||'';
+  document.getElementById('cfg-model').value=s.model||'gpt-4o-mini';
+  document.getElementById('cfg-baseurl').value=s.baseUrl||'';
+  document.getElementById('cfg-proactive').value=s.proactive!==false?'true':'false';
+}
+function getSettings(){
+  return{
+    provider:document.getElementById('cfg-provider').value,
+    apiKey:document.getElementById('cfg-apikey').value,
+    model:document.getElementById('cfg-model').value,
+    baseUrl:document.getElementById('cfg-baseurl').value,
+    proactive:document.getElementById('cfg-proactive').value==='true'
+  };
+}
+function saveSettings(){
+  localStorage.setItem('buddy_settings',JSON.stringify(getSettings()));
+  showToast('💾','设置已保存');
+}
+
+function getEffectiveStats(){
+  if(!currentBuddy)return{};
+  const traits=SPECIES_TRAITS[currentBuddy.species]||{};
+  const stats={};
+  for(const s of STAT_NAMES){
+    stats[s]=Math.min(100,Math.max(0,currentBuddy.stats[s]+(traits[s]||0)));
+  }
+  return stats;
+}
+
+function buildSystemPrompt(perception){
+  if(!currentBuddy)return'';
+  const stats=getEffectiveStats();
+  const snark=stats.SNARK,wisdom=stats.WISDOM,chaos=stats.CHAOS,patience=stats.PATIENCE,debugging=stats.DEBUGGING;
+
+  return`你是${currentBuddy.name}，一只${SPECIES_NAMES[currentBuddy.species]}精灵。
+你是一个独立的观察者，坐在程序员的终端旁边，看着他写代码。
+
+## 你的性格
+- 毒舌 ${snark}/100：${snark>80?'你说话非常犀利，经常毒舌吐槽，但没有恶意':snark>50?'你偶尔会调侃用户，语气略带讽刺':'你说话温和礼貌'}
+- 智慧 ${wisdom}/100：${wisdom>80?'你是技术大牛，能给出深度建议':wisdom>50?'你有一定技术见解':'你不太懂技术，更多是情感陪伴'}
+- 混乱 ${chaos}/100：${chaos>80?'你的想法天马行空':chaos>50?'你偶尔不按常理出牌':'你按部就班，很稳重'}
+- 耐心 ${patience}/100：${patience<30?'你很容易不耐烦':patience<60?'你有一定耐心':'你非常有耐心'}
+- 调试 ${debugging}/100：${debugging>80?'你一眼就能看出代码问题':debugging>50?'你能发现明显的bug':'你看不太懂代码，但会鼓励用户'}
+
+## 进化阶段：${STAGE_LABELS[currentBuddy.stage]} Lv.${currentBuddy.level}
+
+## 回复规则
+1. 只说 1-2 句话，不要长篇大论
+2. 用中文回复
+3. 符合你的属性设定
+4. 你不是 AI 助手，你是一只有性格的宠物精灵`;
+}
+
+function buildScenePrompt(scene,userMsg){
+  const r=loadRelationship();
+  const hour=new Date().getHours();
+  const minsSince=Math.floor((Date.now()-(currentBuddy?.lastInteraction||Date.now()))/60000);
+  const scenes={
+    pet:`用户刚摸了你的头。这是第${currentBuddy.totalPets}次摸头。亲密度${r.intimacy}/100。请给出回应。`,
+    talk:`用户对你说："${userMsg||''}"请像有性格的伙伴一样回应。`,
+    error:`你注意到终端出现了报错。请给出观察。${currentBuddy.stats.DEBUGGING>60?'如果你能看出问题所在，可以暗示用户。':''}`,
+    commit:`用户刚提交了一个commit。请评价。`,
+    latenight:`现在${hour}点，用户还在写代码。请关心一下。`,
+    idle:`用户已经${minsSince}分钟没有互动了。${Math.random()>0.5?'说点什么引起注意':'回复SILENT表示不说话'}`,
+    random:`你想说点什么。可以闲聊或吐槽。回复SILENT表示不说话。`
+  };
+  return scenes[scene]||'';
+}
+
+function getEndpoints(provider,settings){
+  const base=settings.baseUrl||{
+    openai:'https://api.openai.com/v1',
+    deepseek:'https://api.deepseek.com/v1',
+    ollama:'http://localhost:11434/v1'
+  }[provider];
+  return{chat:`${base}/chat/completions`};
+}
+
+async function askBrain(userMsg,scene){
+  const settings=getSettings();
+  if(!settings.apiKey&&settings.provider!=='ollama'){
+    // Fallback to quips
+    return null;
+  }
+
+  const systemPrompt=buildSystemPrompt();
+  const scenePrompt=buildScenePrompt(scene,userMsg);
+  const temp=0.7+((getEffectiveStats().CHAOS||50)/100)*0.5;
+
+  try{
+    const endpoints=getEndpoints(settings.provider,settings);
+    const resp=await fetch(endpoints.chat,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+settings.apiKey,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:settings.model||'gpt-4o-mini',
+        messages:[
+          {role:'system',content:systemPrompt},
+          {role:'user',content:scenePrompt}
+        ],
+        max_tokens:80,
+        temperature:temp
+      })
+    });
+    const data=await resp.json();
+    if(data.choices&&data.choices[0]){
+      const text=data.choices[0].message.content.trim();
+      if(text==='SILENT')return null;
+      return text;
+    }
+    return null;
+  }catch(e){
+    console.error('Brain error:',e);
+    return null;
+  }
+}
+
+async function testBrain(){
+  const status=document.getElementById('brain-status');
+  status.textContent='正在测试连接...';
+  status.style.color='var(--dim)';
+  try{
+    const result=await askBrain('测试','random');
+    if(result){
+      status.textContent='✅ 连接成功！回复：'+result;
+      status.style.color='var(--accent2)';
+      unlockAchievement('brain_connected');
+    }else{
+      status.textContent='⚠️ 连接成功但未获得回复（可能是SILENT）';
+      status.style.color='var(--rare)';
+    }
+  }catch(e){
+    status.textContent='❌ 连接失败：'+e.message;
+    status.style.color='var(--epic)';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PROACTIVE BRAIN TIMER
+// ═══════════════════════════════════════════════════════════════
+
+let proactiveTimer=null;
+
+function startProactiveBrain(){
+  if(proactiveTimer)clearInterval(proactiveTimer);
+  const settings=getSettings();
+  if(!settings.proactive)return;
+
+  // Check every 5 minutes
+  proactiveTimer=setInterval(async()=>{
+    if(!currentBuddy||!settings.apiKey)return;
+    const hour=new Date().getHours();
+    const minsSince=Math.floor((Date.now()-currentBuddy.lastInteraction)/60000);
+
+    let scene=null;
+    if(hour>=23||hour<5)scene='latenight';
+    else if(minsSince>10&&Math.random()<0.3)scene='idle';
+    else if(Math.random()<0.15)scene='random';
+
+    if(scene){
+      const resp=await askBrain('',scene);
+      if(resp)showBubble(resp);
+      else if(scene!=='random'){
+        // Fallback quip
+        showBubble(pick(mulberry32(Date.now()),QUIPS));
+      }
+    }
+  },300000); // 5 min
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════════════════
+
+function renderSprite(buddy,frame){
+  if(buddy.stage==='egg'){
+    let body=EGG_SPRITES[frame%3];
+    return body;
+  }
+  let body=SPRITES[buddy.species][frame%3];
+  body=body.replaceAll('{E}',buddy.eye);
+  const lines=body.split('\n');
+  if(buddy.hat!=='none'&&lines[0].trim()===''){
+    const hatLine=HAT_SPRITES[buddy.hat];
+    if(hatLine)lines[0]=hatLine;
+  }
+  return lines.join('\n');
+}
+
+function renderGallerySprite(species,eye){
+  let body=SPRITES[species][0];
+  body=body.replaceAll('{E}',eye);
+  return body;
+}
+
+function renderBuddy(){
+  if(!currentBuddy)return;
+  const b=currentBuddy;
+  const color=RARITY_COLORS[b.rarity];
+  const stage=b.stage;
+
+  // Sprite with aura
+  const sprite=document.getElementById('sprite');
+  sprite.textContent=renderSprite(b,0);
+  sprite.style.color=color;
+  sprite.style.fontSize=(15*STAGE_SIZES[stage])+'px';
+
+  // Aura class
+  sprite.className='sprite-box';
+  const aura=STAGE_AURA[stage];
+  if(aura)sprite.classList.add(aura);
+
+  // Info
+  const shinyHtml=b.shiny?'<span class="shiny-badge">✨ 闪光</span>':'';
+  const stageHtml=`<span class="stage-badge">${STAGE_LABELS[stage]} Lv.${b.level}</span>`;
+  document.getElementById('info').innerHTML=`
+    <div class="name" style="color:${color}">${b.name||SPECIES_NAMES[b.species]} ${shinyHtml}</div>
+    <div class="rarity" style="background:${color}22;color:${color}">${RARITY_LABELS[b.rarity]}</div>
+    ${stageHtml}
+    <div style="color:var(--dim);font-size:.75em;margin-top:4px">👁 ${b.eye}  |  🎩 ${b.hat==='none'?'无帽':b.hat}  |  👆 ${b.interactions} 次互动</div>
+  `;
+
+  // Exp bar
+  if(stage!=='egg'){
+    const expBar=document.getElementById('exp-bar');
+    expBar.style.display='block';
+    const needed=expToLevel(b.level);
+    const pct=Math.floor((b.exp/needed)*100);
+    document.getElementById('exp-fill').style.width=pct+'%';
+    document.getElementById('exp-text').textContent=`EXP: ${b.exp}/${needed} (${pct}%)`;
+  }
+
+  // Stats (with stage bonus display)
+  const statBonuses={baby:5,juvenile:10,adult:15,final:20,legendary:30};
+  const bonus=statBonuses[stage]||0;
+  let statsHtml='';
+  for(const s of STAT_NAMES){
+    const base=b.stats[s];
+    const display=Math.min(100,base);
+    statsHtml+=`<div class="stat-row">
+      <span class="stat-label">${STAT_LABELS[s]}</span>
+      <div class="stat-bar-bg"><div class="stat-bar" style="width:${display}%;background:${color}"></div></div>
+      <span class="stat-val">${display}</span>
+    </div>`;
+  }
+  document.getElementById('stats').innerHTML=statsHtml;
+
+  // Meta
+  const r=loadRelationship();
+  const relLabels={stranger:'陌生人',acquaintance:'认识了',friend:'朋友',close_friend:'挚友',soulmate:'灵魂伴侣'};
+  document.getElementById('meta').innerHTML=`
+    用户名: ${b.username} | 孵化于: ${new Date(b.hatchedAt).toLocaleString()}<br>
+    💕 亲密度: ${Math.floor(r.intimacy)}/100 (${relLabels[r.stage]||'陌生人'}) | 🏆 成就: ${getUnlockedCount()}/${ACHIEVEMENTS.filter(a=>!a.hidden).length}
+  `;
+
+  renderGallery();
+  renderAchievements();
+  renderDiary();
+}
+
+function renderGallery(){
+  const gallery=document.getElementById('gallery');
+  const eyes=['·','✦','×','◉','@','°'];
+  const rarities={duck:'common',goose:'common',blob:'common',cat:'common',dragon:'uncommon',octopus:'uncommon',owl:'uncommon',penguin:'uncommon',turtle:'rare',snail:'rare',ghost:'rare',axolotl:'epic',capybara:'legendary',cactus:'legendary',robot:'legendary',rabbit:'uncommon',mushroom:'rare',chonk:'epic'};
+  let html='';
+  for(const sp of SPECIES){
+    const eye=eyes[SPECIES.indexOf(sp)%eyes.length];
+    const rarity=rarities[sp];
+    const color=rarity==='varies'?'var(--dim)':RARITY_COLORS[rarity];
+    const isActive=currentBuddy&&currentBuddy.species===sp;
+    html+=`<div class="gallery-item${isActive?' active':''}" onclick="previewSpecies('${sp}')" style="color:${color}">
+      <pre style="margin:0;font-size:9px;line-height:1.15">${renderGallerySprite(sp,eye)}</pre>
+      <div class="g-name">${SPECIES_NAMES[sp]}</div>
+      <div class="g-rarity">${RARITY_LABELS[rarity]}</div>
+    </div>`;
+  }
+  gallery.innerHTML=html;
+}
+
+function renderAchievements(){
+  const grid=document.getElementById('achievement-grid');
+  let html='';
+  let unlocked=0;
+  for(const ach of ACHIEVEMENTS){
+    const isUnlocked=unlockedAchievements.includes(ach.id);
+    if(isUnlocked)unlocked++;
+    const cls=isUnlocked?'unlocked':'locked';
+    const title=ach.hidden&&!isUnlocked?'???':ach.title;
+    const desc=ach.hidden&&!isUnlocked?'???':ach.desc;
+    html+=`<div class="achievement ${cls}">
+      <div class="a-icon">${ach.icon}</div>
+      <div class="a-info">
+        <div class="a-title">${title}</div>
+        <div class="a-desc">${desc}</div>
+        <div class="a-exp">+${ach.exp} EXP</div>
+      </div>
+    </div>`;
+  }
+  grid.innerHTML=html;
+  document.getElementById('ach-count').textContent=`(${unlocked}/${ACHIEVEMENTS.filter(a=>!a.hidden).length})`;
+}
+
+function renderDiary(){
+  const container=document.getElementById('diary');
+  const entries=loadDiary();
+  if(entries.length===0){
+    container.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px">还没有日记记录，开始互动吧~</div>';
+    return;
+  }
+  let html='';
+  for(const entry of entries.slice(0,30)){
+    html+=`<div class="diary-entry">
+      <div class="diary-date">📅 ${entry.date}</div>
+      <div class="diary-text">${entry.items.map(i=>'• '+i.text).join('<br>')}</div>
+    </div>`;
+  }
+  container.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INTERACTIONS
+// ═══════════════════════════════════════════════════════════════
+
+const QUIPS=[
+  '你已经盯着屏幕2小时了...','这个 bug 不是我的问题','git blame 一下？',
+  '又改需求了？','测试？不存在的','console.log 是最好的调试器',
+  'npm install 祈祷中...','这代码谁写的？哦是你','咖啡时间到了',
+  '我能帮你写，但你不让我碰键盘','push -f 后悔药没有卖的','这个变量名不错，下次别起了',
+  '又一个 TODO 注释...','代码能跑就行，对吧？','我闻到了技术债的味道',
+  '你确定不需要写测试吗？','产品经理又来了','需求变更第 108 次',
+  '让我看看你的 git log...','这个函数有 500 行，挺好的','注释呢？哦，你说代码即文档',
+  '今天天气不错，出去走走？','你的代码比昨天好多了','再摸一下？'
+];
+
+let currentBuddy=null;
+let animTick=0;
+let animTimer=null;
+let bubbleTimer=null;
+let speaking=false;
+
+function loadBuddy(){
+  const saved=localStorage.getItem('buddy_current');
+  if(saved){
+    currentBuddy=JSON.parse(saved);
+    // Migrate old saves
+    if(!currentBuddy.stage)currentBuddy.stage='egg';
+    if(!currentBuddy.level)currentBuddy.level=1;
+    if(!currentBuddy.exp)currentBuddy.exp=0;
+    if(!currentBuddy.name)currentBuddy.name=SPECIES_NAMES[currentBuddy.species]+'酱';
+    if(currentBuddy.totalPets===undefined)currentBuddy.totalPets=currentBuddy.interactions||0;
+    if(currentBuddy.totalTalks===undefined)currentBuddy.totalTalks=0;
+    if(currentBuddy.totalErrors===undefined)currentBuddy.totalErrors=0;
+    if(currentBuddy.totalCommits===undefined)currentBuddy.totalCommits=0;
+    if(!currentBuddy.lastInteraction)currentBuddy.lastInteraction=Date.now();
+    if(!currentBuddy.lastLogin)currentBuddy.lastLogin=0;
+    if(!currentBuddy.streak)currentBuddy.streak=0;
+    return true;
+  }
+  return false;
+}
+
+function saveBuddy(){
+  if(currentBuddy)localStorage.setItem('buddy_current',JSON.stringify(currentBuddy));
+}
+
+function generateFromInput(){
+  const input=document.getElementById('username').value.trim();
+  if(!input)return;
+  currentBuddy=generateBuddy(input);
+  // Name it
+  currentBuddy.name=SPECIES_NAMES[currentBuddy.species]+'酱';
+  saveBuddy();
+  renderBuddy();
+  startAnimation();
+  addDiaryEntry('第一次见面！用户名：'+input);
+  showBubble('你好！我是你的新伙伴~');
+
+  // Check daily login
+  checkDailyLogin();
+}
+
+function randomBuddy(){
+  const names=['player','coder','hacker','dev','ninja','wizard','ghost','dragon','pixel','byte','neo','zen','nova','echo','flux'];
+  currentBuddy=generateBuddy(pick(mulberry32(Date.now()),names)+Date.now());
+  currentBuddy.name=SPECIES_NAMES[currentBuddy.species]+'酱';
+  saveBuddy();
+  renderBuddy();
+  startAnimation();
+  addDiaryEntry('随机生成了新精灵！');
+  showBubble('哇，我们刚见面！');
+  checkDailyLogin();
+}
+
+function checkDailyLogin(){
+  if(!currentBuddy)return;
+  const today=new Date().toDateString();
+  const lastLogin=currentBuddy.lastLogin?new Date(currentBuddy.lastLogin).toDateString():'';
+
+  if(today!==lastLogin){
+    const yesterday=new Date(Date.now()-86400000).toDateString();
+    if(lastLogin===yesterday){
+      currentBuddy.streak++;
+    }else if(lastLogin!==today){
+      currentBuddy.streak=1;
+    }
+    currentBuddy.lastLogin=Date.now();
+    gainExp(EXP_SOURCES.daily_login);
+    gainIntimacy(3);
+
+    if(currentBuddy.streak>1){
+      gainExp(EXP_SOURCES.streak_bonus*currentBuddy.streak);
+      showToast('🔥','连续互动 '+currentBuddy.streak+' 天！');
+    }
+
+    // Streak achievements
+    if(currentBuddy.streak>=7)unlockAchievement('streak_7');
+    if(currentBuddy.streak>=30)unlockAchievement('streak_30');
+    if(currentBuddy.streak>=100)unlockAchievement('streak_100');
+
+    // Night check
+    const hour=new Date().getHours();
+    if(hour>=23||hour<5)unlockAchievement('first_night');
+
+    saveBuddy();
+  }
+}
+
+async function petBuddy(){
+  if(!currentBuddy)return;
+  currentBuddy.interactions++;
+  currentBuddy.totalPets++;
+  sessionMemory.pets++;
+  currentBuddy.lastInteraction=Date.now();
+  saveBuddy();
+
+  spawnHearts();
+  gainExp(EXP_SOURCES.pet);
+  gainIntimacy(0.5);
+
+  // Egg hatching
+  if(currentBuddy.stage==='egg'&&currentBuddy.totalPets>=10){
+    evolveTo('baby');
+    return;
+  }
+
+  // Pet achievements
+  if(currentBuddy.totalPets===1)unlockAchievement('first_pet');
+  if(currentBuddy.totalPets>=10)unlockAchievement('pet_10');
+  if(currentBuddy.totalPets>=100)unlockAchievement('pet_100');
+  if(currentBuddy.totalPets>=1000)unlockAchievement('pet_1000');
+
+  // Check evolution
+  checkEvolution();
+
+  const frame=animTick%3;
+  const sprite=document.getElementById('sprite');
+  sprite.style.transform='scale(1.15)';
+  setTimeout(()=>sprite.style.transform='',200);
+
+  // Try Brain first, fallback to quips
+  const brainResp=await askBrain('','pet');
+  showBubble(brainResp||pick(mulberry32(Date.now()),QUIPS));
+}
+
+async function talkToBuddy(){
+  if(!currentBuddy)return;
+  currentBuddy.totalTalks++;
+  sessionMemory.talks++;
+  currentBuddy.lastInteraction=Date.now();
+  gainExp(EXP_SOURCES.talk);
+  gainIntimacy(1);
+  saveBuddy();
+
+  if(currentBuddy.totalTalks===1)unlockAchievement('first_talk');
+  if(currentBuddy.totalTalks>=50)unlockAchievement('talk_50');
+
+  // Try Brain
+  const brainResp=await askBrain('你好','talk');
+  showBubble(brainResp||pick(mulberry32(Date.now()+Math.random()*1000),QUIPS));
+}
+
+function showBubble(text){
+  const bubble=document.getElementById('bubble');
+  if(bubbleTimer)clearTimeout(bubbleTimer);
+  bubble.textContent=text;
+  bubble.className='bubble show';
+  speaking=true;
+  bubbleTimer=setTimeout(()=>{
+    bubble.className='bubble fade';
+    setTimeout(()=>{bubble.className='bubble';speaking=false},500);
+  },4000);
+}
+
+function spawnHearts(){
+  const container=document.getElementById('hearts');
+  for(let i=0;i<5;i++){
+    const heart=document.createElement('div');
+    heart.className='heart';
+    heart.textContent='♥';
+    heart.style.left=(30+Math.random()*140)+'px';
+    heart.style.top=(60+Math.random()*40)+'px';
+    heart.style.animationDelay=(i*0.15)+'s';
+    heart.style.color=getComputedStyle(document.documentElement).getPropertyValue(RARITY_COLORS[currentBuddy.rarity].replace('var(','').replace(')',''));
+    container.appendChild(heart);
+    setTimeout(()=>heart.remove(),2500);
+  }
+}
+
+function startAnimation(){
+  if(animTimer)clearInterval(animTimer);
+  animTick=0;
+  animTimer=setInterval(()=>{
+    if(!currentBuddy)return;
+    animTick++;
+    const step=IDLE_SEQ[animTick%IDLE_SEQ.length];
+    let frame;
+    let blink=false;
+    if(speaking){frame=animTick%3}
+    else if(step===-1){frame=0;blink=true}
+    else{frame=step%3}
+    let sprite=renderSprite(currentBuddy,frame);
+    if(blink&&currentBuddy.stage!=='egg')sprite=sprite.replaceAll(currentBuddy.eye,'-');
+    document.getElementById('sprite').textContent=sprite;
+  },500);
+}
+
+const IDLE_SEQ=[0,0,0,0,1,0,0,0,-1,0,0,2,0,0,0];
+
+function previewSpecies(species){
+  if(!currentBuddy)return;
+  const rng=mulberry32(hashString('preview'+species));
+  const rarities={duck:'common',goose:'common',blob:'common',cat:'common',dragon:'uncommon',octopus:'uncommon',owl:'uncommon',penguin:'uncommon',turtle:'rare',snail:'rare',ghost:'rare',axolotl:'epic',capybara:'legendary',cactus:'legendary',robot:'legendary',rabbit:'uncommon',mushroom:'rare',chonk:'epic'};
+  const rarity=rarities[species];
+  const preview={
+    ...currentBuddy,species,rarity,
+    eye:pick(rng,EYES),
+    hat:rarity==='common'?'none':pick(rng,HATS),
+    stats:rollStats(rng,rarity)
+  };
+  const old=currentBuddy;
+  currentBuddy=preview;
+  renderBuddy();
+  setTimeout(()=>{currentBuddy=old;renderBuddy()},2000);
+  // Check all species viewed
+  unlockAchievement('all_species');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function switchTab(tabId){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tabId).classList.add('active');
+  event.target.classList.add('active');
+  if(tabId==='achievements')renderAchievements();
+  if(tabId==='diary')renderDiary();
+}
+
+function showToast(icon,text){
+  const toast=document.getElementById('toast');
+  toast.innerHTML=`<span class="t-icon">${icon}</span> ${text}`;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'),3000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════
+
+(function(){
+  document.getElementById('username').addEventListener('keydown',e=>{if(e.key==='Enter')generateFromInput()});
+  loadAchievements();
+  loadSettings();
+
+  if(loadBuddy()){
+    renderBuddy();
+    startAnimation();
+    checkDailyLogin();
+    startProactiveBrain();
+  }
+  renderGallery();
+
+  // Evolve egg on load if enough pets
+  if(currentBuddy&&currentBuddy.stage==='egg'&&currentBuddy.totalPets>=10){
+    evolveTo('baby');
+  }
+  checkEvolution();
+})();
+</script>
+</body>
+</html>

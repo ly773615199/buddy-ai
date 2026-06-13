@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔮 猜数字游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.container { background: rgba(255,255,255,0.95); border-radius: 20px; padding: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); text-align: center; max-width: 400px; width: 90%; }
+h1 { font-size: 2em; margin-bottom: 10px; }
+.subtitle { color: #666; margin-bottom: 20px; }
+.input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+input { flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 10px; font-size: 18px; text-align: center; outline: none; transition: border-color 0.3s; }
+input:focus { border-color: #667eea; }
+button { padding: 12px 24px; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+.btn-guess { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+.btn-new { background: #f0f0f0; color: #333; }
+.result { font-size: 1.2em; margin: 15px 0; min-height: 30px; }
+.result.high { color: #e74c3c; }
+.result.low { color: #3498db; }
+.result.win { color: #2ecc71; font-size: 1.5em; }
+.history { margin-top: 20px; text-align: left; }
+.history h3 { margin-bottom: 10px; color: #555; }
+.history-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag { background: #f0f0f0; padding: 5px 12px; border-radius: 20px; font-size: 14px; }
+.tag.high { background: #fde8e8; color: #e74c3c; }
+.tag.low { background: #e8f0fd; color: #3498db; }
+.stats { margin-top: 15px; color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔮 猜数字</h1>
+  <p class="subtitle">我想了一个 1~100 的数字，你来猜猜看！</p>
+  <div class="input-group">
+    <input type="number" id="guessInput" min="1" max="100" placeholder="输入你的猜测...">
+    <button class="btn-guess" onclick="makeGuess()">🎯 猜！</button>
+  </div>
+  <div class="result" id="result"></div>
+  <button class="btn-new" onclick="newGame()">🔄 新游戏</button>
+  <div class="history" id="history" style="display:none">
+    <h3>📝 猜测历史</h3>
+    <div class="history-list" id="historyList"></div>
+  </div>
+  <div class="stats" id="stats"></div>
+</div>
+<script>
+let target, guesses, gameOver;
+function newGame() {
+  target = Math.floor(Math.random() * 100) + 1;
+  guesses = [];
+  gameOver = false;
+  document.getElementById('result').textContent = '';
+  document.getElementById('result').className = 'result';
+  document.getElementById('historyList').innerHTML = '';
+  document.getElementById('history').style.display = 'none';
+  document.getElementById('stats').textContent = '';
+  document.getElementById('guessInput').value = '';
+  document.getElementById('guessInput').disabled = false;
+  document.getElementById('guessInput').focus();
+}
+function makeGuess() {
+  if (gameOver) return;
+  const input = document.getElementById('guessInput');
+  const num = parseInt(input.value);
+  if (isNaN(num) || num < 1 || num > 100) {
+    showResult('请输入 1~100 的数字！', '');
+    return;
+  }
+  guesses.push(num);
+  const resultEl = document.getElementById('result');
+  if (num === target) {
+    showResult(`🎉 恭喜你猜对了！答案就是 ${target}！`, 'win');
+    gameOver = true;
+    document.getElementById('guessInput').disabled = true;
+    document.getElementById('stats').textContent = `你用了 ${guesses.length} 次猜中！`;
+  } else if (num > target) {
+    showResult('📈 大了！再小一点~', 'high');
+    addHistory(num, 'high');
+  } else {
+    showResult('📉 小了！再大一点~', 'low');
+    addHistory(num, 'low');
+  }
+  input.value = '';
+  input.focus();
+}
+function showResult(text, cls) {
+  const el = document.getElementById('result');
+  el.textContent = text;
+  el.className = 'result ' + cls;
+}
+function addHistory(num, cls) {
+  document.getElementById('history').style.display = 'block';
+  const tag = document.createElement('span');
+  tag.className = 'tag ' + cls;
+  tag.textContent = num + (cls === 'high' ? ' ↓' : ' ↑');
+  document.getElementById('historyList').appendChild(tag);
+}
+document.getElementById('guessInput').addEventListener('keydown', e => { if (e.key === 'Enter') makeGuess(); });
+newGame();
+</script>
+</body>
+</html>

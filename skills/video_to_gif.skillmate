@@ -1,0 +1,40 @@
+{
+  "name": "video_to_gif",
+  "description": "将视频文件转换为GIF动图，支持自定义帧率和宽度",
+  "author": "buddy",
+  "version": "1.0.0",
+  "tags": ["媒体", "视频", "GIF", "动图", "转换"],
+  "permission": "exec_safe",
+  "parameters": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "视频文件路径",
+      "required": true
+    },
+    {
+      "name": "output",
+      "type": "string",
+      "description": "输出GIF文件路径",
+      "required": false,
+      "default": "/tmp/buddy-preview.gif"
+    },
+    {
+      "name": "fps",
+      "type": "number",
+      "description": "GIF帧率",
+      "required": false,
+      "default": 10
+    },
+    {
+      "name": "width",
+      "type": "number",
+      "description": "GIF宽度（像素）",
+      "required": false,
+      "default": 480
+    }
+  ],
+  "execute": "ffmpeg -y -i '${file}' -vf \"fps=${fps},scale=${width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 '${output}' 2>&1 && echo \"已转换为 GIF: ${output}\"",
+  "timeout": 60,
+  "resultParser": "text"
+}
