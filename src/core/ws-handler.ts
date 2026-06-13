@@ -24,7 +24,7 @@ import { WSEventHandlers } from './ws-event-handlers.js';
 import { OrchestrationHandler } from './orchestration-handler.js';
 import { setupRESTAPI } from './rest-api.js';
 import { reflect } from './reflector.js';
-import { collectSignals } from './signal-collector.js';
+import { collectSignals, collectResourceState } from './signal-collector.js';
 
 /** Agent 桥接接口 — 避免循环依赖 */
 interface AgentBridge {
@@ -861,6 +861,25 @@ export class WSHandler {
         }
       } catch (err) {
         // learn 可能未完全初始化，忽略
+      }
+
+      // ── Step 8: 三脑反馈闭环（WS 路径）──
+      try {
+        const threeBrain = this.sys.threeBrain;
+        if (threeBrain && planRef) {
+          const signal = collectSignals(this.sys, content);
+          const resources = collectResourceState(this.sys, this.config, () => this.userCorrectionCount, content, signal);
+          const outcome = {
+            success: result.toolCalls.every(tc => !tc.result?.startsWith('[')),
+            latencyMs: Date.now() - taskStartTime,
+            toolsUsed: result.toolCalls.map(tc => tc.name),
+            costEstimate: 0,
+          };
+          threeBrain.feedback(signal, resources, planRef as any, outcome, undefined, undefined, undefined, undefined, result.text)
+            .catch(err => { if (this.verbose) console.warn('[WS] feedback 失败:', err.message); });
+        }
+      } catch (err) {
+        if (this.verbose) console.warn('[WS] feedback 构造失败:', (err as Error).message);
       }
 
       // Phase 6: 用户纠正检测（FeedbackLearner）

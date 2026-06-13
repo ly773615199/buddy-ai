@@ -405,6 +405,25 @@ export class BuddyAgent {
       const signal = this.collectSignals(content);
       await this.reflect(plan, result, signal);
 
+      // ── Step 8: 三脑反馈闭环 ──
+      const threeBrain = this.sys.threeBrain;
+      if (threeBrain) {
+        try {
+          const resources = this.collectResourceState(content, signal);
+          const outcome = {
+            success: result.toolCalls.every(tc => !tc.result?.startsWith('[')),
+            latencyMs: performance.now() - execStart,
+            toolsUsed: result.toolCalls.map(tc => tc.name),
+            costEstimate: 0,
+          };
+          // 异步调用 feedback，不阻塞主流程
+          threeBrain.feedback(signal, resources, plan as any, outcome, undefined, undefined, undefined, undefined, result.text)
+            .catch(err => { if (this.verbose) console.warn('[Agent] feedback 失败:', err.message); });
+        } catch (err) {
+          if (this.verbose) console.warn('[Agent] feedback 构造失败:', (err as Error).message);
+        }
+      }
+
       if (this.verbose) {
         const moodEmoji = this.sys.cerebellum?.bodyState.getMoodEmoji() ?? "😶";
         console.log(`  [情绪] ${moodEmoji} ${this.sys.cerebellum?.inferMood() ?? "calm"} | 精力: ${this.sys.cerebellum?.getBodyState().energy ?? 0}`);
