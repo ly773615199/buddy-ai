@@ -5,12 +5,20 @@
  * 职责：用户输入 → TaskSignal + ResourceState
  *
  * Phase 2: agent.ts 瘦身计划 Step 2
+ * Step 3: 新增 collectPerceptionState() — 一次计算，全链路共享
  */
 
 import type { TaskSignal, ResourceState } from './agent-types.js';
 import type { OrchestrationNode } from '../types.js';
 import type { BuddyConfig } from '../types.js';
 import type { Subsystems } from './subsystems.js';
+import {
+  type PerceptionState,
+  inferDomains,
+  assessComplexity,
+  assessDAG,
+  mapTaskType,
+} from './perception-state.js';
 
 // ==================== 信号采集 ====================
 
@@ -95,13 +103,62 @@ export function assessTaskComplexity(sys: Subsystems, content: string): {
 }
 
 /**
+ * Stage 1: 统一感知采集 — 调用一次 classifyFromText()，结果供全链路使用
+ *
+ * 替代 detectDomains + assessTaskComplexity 各自独立调用 classifyFromText()
+ */
+export function collectPerceptionState(sys: Subsystems, content: string): PerceptionState {
+  const t0 = performance.now();
+
+  // 一次调用，获取完整意图信息
+  const intent = sys.threeBrain!.right.classifyFromText(content);
+
+  // 从意图推断领域
+  const domains = inferDomains(intent);
+
+  // 复杂度评估
+  const complexity = assessComplexity(content, intent);
+
+  // DAG 判断
+  const { shouldUseDAG, dagReason } = assessDAG(content);
+
+  // 任务类型映射
+  const taskType = mapTaskType(intent.category);
+
+  return {
+    intent: {
+      category: intent.category,
+      confidence: intent.confidence,
+      hit: intent.hit,
+      suggestedTools: intent.suggestedTools,
+    },
+    domains,
+    complexity,
+    taskType,
+    shouldUseDAG,
+    dagReason,
+    intentConfidence: intent.confidence,
+    timestamp: Date.now(),
+    computeMs: performance.now() - t0,
+  };
+}
+
+/**
  * Stage 1: 信号采集 — 纯语义分析，不依赖资源状态
+ *
+ * 使用 collectPerceptionState 统一采集，避免重复调用 classifyFromText
  */
 export function collectSignals(sys: Subsystems, content: string): TaskSignal {
-  const domains = detectDomains(sys, content);
-  const { complexity, shouldUseDAG, dagReason, taskType } = assessTaskComplexity(sys, content);
-  const intent = sys.threeBrain!.right.classifyFromText(content);
-  return { domains, complexity, taskType, shouldUseDAG, dagReason, intentConfidence: intent.confidence, content };
+  const ps = collectPerceptionState(sys, content);
+  return {
+    domains: ps.domains,
+    complexity: ps.complexity,
+    taskType: ps.taskType,
+    shouldUseDAG: ps.shouldUseDAG,
+    dagReason: ps.dagReason,
+    intentConfidence: ps.intentConfidence,
+    content,
+  };
 }
 
 // ==================== 资源状态采集 ====================
