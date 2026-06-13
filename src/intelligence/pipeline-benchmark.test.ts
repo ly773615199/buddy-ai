@@ -160,10 +160,10 @@ describe('三层知识管线性能基准', () => {
 
     const editResult = {
       edited: [
-        { id: 'r1', content: '测试知识', sources: ['stmp'], confidence: 0.8, strategy: 'fuse' as const },
+        { id: 'r1', content: '测试知识', sources: ['stmp'], confidence: 0.8, strategy: 'fuse' as const, novelty: 0.3, reasoning: '测试碰撞', concepts: ['知识'] },
       ],
-      conflicts: [],
-      stats: { fused: 1, emerged: 0, scattered: 0 },
+      intent: 'report' as const,
+      explanation: '测试碰撞结果',
     };
 
     for (const intent of ['report', 'explain', 'compare', 'execute', 'chat'] as const) {
