@@ -46,6 +46,7 @@ const DEFAULT_CONFIG: RightBrainConfig = {
 
 import { WorldModel, type ActionEncoding, type PredictionResult } from './nn/world-model.js';
 import { PrototypeMemory, type PrototypeMemoryConfig } from './prototype-memory.js';
+import { TextEncoder } from './features/text-encoder.js';
 
 export class RightBrain {
   private config: RightBrainConfig;
@@ -60,6 +61,8 @@ export class RightBrain {
   readonly entityRegistry: EntityRegistry;
   /** 原型记忆层 — 双通道意图表征 */
   readonly prototypeMemory: PrototypeMemory;
+  /** 字节级文本编码器（可选，有则走 NN 路径） */
+  private textEncoder: TextEncoder | null = null;
   private modelVersion = 0;
   private predictCount = 0;
 
@@ -344,43 +347,62 @@ export class RightBrain {
     suggestedTools: string[];
     hit: boolean;
   } {
-    // 内置关键词规则（零延迟，与 IntentClassifier 相同逻辑）
-    const rules: Array<{ category: string; keywords: string[]; tools: string[] }> = [
-      { category: 'file_operations', keywords: ['读', '查看', '打开', '写', '创建', '保存', '删除', '移动', '复制', 'read', 'cat', 'write', 'create', 'save', 'delete', 'file', '文件', '目录', 'folder'], tools: ['read', 'write', 'list_files', 'exec'] },
-      { category: 'code_operations', keywords: ['代码', 'code', '函数', 'function', '类', 'class', '模块', 'module', '分析', '重构', 'refactor', '搜索', 'grep', '测试', 'test', '构建', 'build', '编译'], tools: ['read', 'write', 'exec', 'search_files'] },
-      { category: 'git_operations', keywords: ['git', '提交', 'commit', '分支', 'branch', '合并', 'merge', '推送', 'push', '拉取', 'pull', 'diff', 'log', 'status'], tools: ['exec'] },
-      { category: 'web_operations', keywords: ['搜', '搜索', 'search', 'google', '网页', 'web', 'url', '抓取', 'fetch', '爬', '访问', 'visit'], tools: ['web_fetch', 'exec'] },
-      { category: 'system_operations', keywords: ['运行', 'run', '执行', 'exec', '命令', 'command', '进程', '端口', 'port', '服务', 'service', '安装', 'install', '配置', 'config', '系统', 'system'], tools: ['exec'] },
-      { category: 'knowledge_query', keywords: ['是什么', '什么是', '为什么', '怎么', '如何', '区别', '原理', 'what', 'why', 'how', 'explain', '推荐', '建议'], tools: ['web_fetch'] },
-      { category: 'conversation', keywords: ['你好', 'hello', 'hi', '谢谢', 'thanks', '再见', 'bye', '在吗', '聊聊', '聊天'], tools: [] },
-    ];
-
-    const lower = input.toLowerCase();
-    let bestCategory = 'conversation';
-    let bestScore = 0;
-    let bestTools: string[] = [];
-    const matchedKeywords: string[] = [];
-
-    for (const rule of rules) {
-      const matched = rule.keywords.filter(k => lower.includes(k));
-      const score = matched.length;
-      if (score > bestScore) {
-        bestScore = score;
-        bestCategory = rule.category;
-        bestTools = rule.tools;
-        matchedKeywords.length = 0;
-        matchedKeywords.push(...matched);
+    // 新路径：有 TextEncoder 时走 NN
+    if (this.textEncoder) {
+      try {
+        return this.classifyFromTextNN(input);
+      } catch {
+        // NN 路径失败，降级到关键词规则
       }
     }
 
-    const confidence = bestScore === 0 ? 0.1 : Math.min(1, 0.3 + bestScore * 0.2);
+    // 旧路径：关键词规则（保持不变）
+    return this.classifyFromTextRules(input);
+  }
 
-    return {
-      category: bestCategory,
-      confidence,
-      suggestedTools: bestTools,
-      hit: confidence > 0.5,
-    };
+  /**
+   * NN 路径分类 — TextEncoder + 原型匹配
+   */
+  private classifyFromTextNN(input: string): {
+    category: string;
+    confidence: number;
+    suggestedTools: string[];
+    hit: boolean;
+  } {
+    const textEmb = this.textEncoder!.forwardPooled(input); // [1, 128]
+    const hidden = new Float32Array(textEmb.data);
+
+    // 原型匹配
+    const protoMatch = this.prototypeMemory.findNearest(hidden);
+    if (protoMatch && !protoMatch.isNovel) {
+      const proto = protoMatch.prototype;
+      const tools = proto.topTools(4);
+      const confidence = Math.min(1, protoMatch.confidence);
+      return {
+        category: proto.label,
+        confidence,
+        suggestedTools: tools,
+        hit: confidence > 0.3,
+      };
+    }
+
+    // 无匹配原型，返回 conversation
+    return { category: 'conversation', confidence: 0.2, suggestedTools: [], hit: false };
+  }
+
+  /**
+   * 设置 TextEncoder（外部注入，可选）
+   */
+  setTextEncoder(encoder: TextEncoder): void {
+    this.textEncoder = encoder;
+    if (this.verbose) {
+      console.log(`[RightBrain] TextEncoder 已注入: ${encoder.countParams()} 参数`);
+    }
+  }
+
+  /** 获取 TextEncoder 实例（可为 null） */
+  getTextEncoder(): TextEncoder | null {
+    return this.textEncoder;
   }
 
   // ── 影子大脑数据接口 ──

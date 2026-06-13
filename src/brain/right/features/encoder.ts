@@ -25,6 +25,8 @@ import type { TaskSignal, ResourceState, BodyState, IntuitionSignal } from '../.
 import { encodeSpatial, type SpatialEncodeInput } from './spatial-encoder.js';
 import { encodeImage, type RawImage } from './image-encoder.js';
 import { encodeSceneGraph, slotAttention, encodeSlots, type SceneGraph } from './scene-encoder.js';
+import { TextEncoder } from './text-encoder.js';
+import { Tensor } from '../nn/tensor.js';
 
 // ==================== Token ID 映射 ====================
 
@@ -235,4 +237,25 @@ export function getToolIdMap(): Map<number, string> {
     map.set(id, name);
   }
   return map;
+}
+
+/**
+ * V2 特征编码 — 拼接 TextEncoder 的语义向量
+ *
+ * 有 TextEncoder + rawText → 文本走 TextEncoder 输出的 token 拼接到序列前部
+ * 否则 → fallback 到原 encodeFeatures()
+ */
+export function encodeFeaturesV2(
+  input: EncodeInput,
+  textEncoder?: TextEncoder,
+  rawText?: string,
+): { tokenIds: number[]; textEmbedding?: Tensor } {
+  const baseTokens = encodeFeatures(input);
+
+  if (textEncoder && rawText) {
+    const textEmb = textEncoder.forward(rawText); // [S', outputDim]
+    return { tokenIds: baseTokens, textEmbedding: textEmb };
+  }
+
+  return { tokenIds: baseTokens };
 }

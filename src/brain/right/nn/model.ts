@@ -48,6 +48,10 @@ export class IntuitionNet {
   heads: OutputHeads;
   config: NNConfig;
 
+  /** TextEncoder 融合门控参数 */
+  private gateW: Tensor;  // [hiddenDim, hiddenDim]
+  private gateB: Tensor;  // [hiddenDim]
+
   /** Early Exit 置信度阈值（默认 0.85） */
   exitThreshold = 0.85;
 
@@ -72,6 +76,11 @@ export class IntuitionNet {
     }
 
     this.heads = new OutputHeads(config.hiddenDim, config.hiddenDim, config.numIntents, config.numTools);
+
+    // TextEncoder 融合门控: gate = sigmoid(pooled @ gateW + gateB)
+    this.gateW = randn([config.hiddenDim, config.hiddenDim],
+      Math.sqrt(2 / (config.hiddenDim + config.hiddenDim)));
+    this.gateB = zeros([config.hiddenDim]);
   }
 
   /**
@@ -282,6 +291,101 @@ export class IntuitionNet {
   }
 
   /**
+   * 带 TextEncoder 的前向推理 — 门控加法融合
+   *
+   * 流程：
+   * 1. 正常 forward 得到 pooled [1, hiddenDim]
+   * 2. textEmbedding (来自 TextEncoder) 池化到 [1, hiddenDim]
+   * 3. gate = sigmoid(pooled @ gateW + gateB)
+   * 4. fused = pooled + gate * textPooled
+   * 5. 输出头在 fused 上推理
+   *
+   * 零破坏：无 TextEncoder 时 fallback 到普通 forward
+   */
+  forwardWithText(
+    tokenIds: number[],
+    textEmbedding: Tensor,  // [S', outputDim] 来自 TextEncoder
+  ): ModelOutput {
+    const t0 = performance.now();
+
+    // 1. 正常路径得到 pooled
+    this._cachedTokenIds = tokenIds;
+    let h = this.embedding.forward(tokenIds);
+    if (this.config.embedDim !== this.config.hiddenDim) {
+      if (!this._projWeight) {
+        this._projWeight = randn([this.config.embedDim, this.config.hiddenDim],
+          Math.sqrt(2 / (this.config.embedDim + this.config.hiddenDim)));
+      }
+      h = matmul(h, this._projWeight);
+    }
+    for (const block of this.encoderBlocks) {
+      h = block.forward(h, true);
+    }
+    this._cachedEncoderOut = h;
+    const pooled = this._poolLast(h); // [1, hiddenDim]
+
+    // 2. TextEncoder 输出池化
+    const textSeq = textEmbedding.shape[0];
+    const textDim = textEmbedding.shape[1];
+    const hiddenDim = this.config.hiddenDim;
+
+    const textPooled = zeros([1, hiddenDim]);
+    if (textDim === hiddenDim) {
+      for (let s = 0; s < textSeq; s++) {
+        const off = s * hiddenDim;
+        for (let d = 0; d < hiddenDim; d++) {
+          textPooled.data[d] += textEmbedding.data[off + d];
+        }
+      }
+      for (let d = 0; d < hiddenDim; d++) textPooled.data[d] /= textSeq || 1;
+    } else {
+      const ratio = textDim / hiddenDim;
+      for (let s = 0; s < textSeq; s++) {
+        const off = s * textDim;
+        for (let d = 0; d < hiddenDim; d++) {
+          const start = Math.floor(d * ratio);
+          const end = Math.floor((d + 1) * ratio);
+          let sum = 0;
+          for (let j = start; j < end && j < textDim; j++) {
+            sum += textEmbedding.data[off + j];
+          }
+          textPooled.data[d] += sum / (end - start || 1);
+        }
+      }
+      for (let d = 0; d < hiddenDim; d++) textPooled.data[d] /= textSeq || 1;
+    }
+
+    // 3. 门控: gate = sigmoid(pooled @ gateW + gateB)
+    const gate = zeros([1, hiddenDim]);
+    for (let d = 0; d < hiddenDim; d++) {
+      let sum = this.gateB.data[d];
+      for (let k = 0; k < hiddenDim; k++) {
+        sum += pooled.data[k] * this.gateW.data[k * hiddenDim + d];
+      }
+      gate.data[d] = 1 / (1 + Math.exp(-sum));
+    }
+
+    // 4. 融合: fused = pooled + gate * textPooled
+    const fused = zeros([1, hiddenDim]);
+    for (let d = 0; d < hiddenDim; d++) {
+      fused.data[d] = pooled.data[d] + gate.data[d] * textPooled.data[d];
+    }
+
+    // 5. 输出头
+    const { intent, tools, quality, spatial, scene } = this.heads.forward(fused);
+
+    return {
+      intentProbs: new Float32Array(intent.data),
+      toolProbs: new Float32Array(tools.data),
+      qualityScore: sigmoid(quality.data[0]),
+      spatialProbs: new Float32Array(spatial.data),
+      sceneProbs: new Float32Array(scene.data),
+      latencyMs: performance.now() - t0,
+      _hidden: new Float32Array(fused.data),
+    };
+  }
+
+  /**
    * 批量前向推理（batch > 1）
    *
    * @param batchTokenIds 批量输入 token ID 序列
@@ -356,6 +460,8 @@ export class IntuitionNet {
     }
     params.push(...this.heads.parameters());
     if (this._projWeight) params.push(this._projWeight);
+    // TextEncoder 融合门控参数
+    params.push(this.gateW, this.gateB);
     return params;
   }
 
