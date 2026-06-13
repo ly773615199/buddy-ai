@@ -266,9 +266,14 @@ export class MessageProcessor {
     }
 
     // 6.5 知识源检索（本地 → 飞书 → 网络，优先级 28）
+    // Step 15: 根据内容推断领域，精准选择知识源
     if (this.sys.knowledgeSourceManager.getStats().totalSources > 0) {
       try {
-        const knowledgeResults = await this.sys.knowledgeSourceManager.query(content, { limit: 5 });
+        const inferredDomain = this.inferDomainFromContent(content);
+        const knowledgeResults = await this.sys.knowledgeSourceManager.query(content, {
+          limit: 5,
+          domain: inferredDomain,
+        });
         if (knowledgeResults.length > 0) {
           const knowledgePrompt = knowledgeResults
             .map(n => `[${n.sourceType}:${n.title}] ${n.summary}`)
@@ -1204,5 +1209,26 @@ export class MessageProcessor {
     const toolNames = CATEGORY_TOOLS[category];
     if (!toolNames || toolNames.length === 0) return allTools;
     return allTools.filter(t => toolNames.some(n => t.name.includes(n)));
+  }
+
+  /**
+   * Step 15: 从内容推断领域，用于知识源精准路由
+   */
+  private inferDomainFromContent(content: string): string {
+    const lower = content.toLowerCase();
+    const domainKeywords: Record<string, string[]> = {
+      code: ['代码', 'code', '函数', 'function', 'bug', 'debug', '编译', 'build', 'npm', 'pip'],
+      git: ['git', 'commit', 'push', 'merge', 'branch', 'diff', 'log'],
+      web: ['网页', 'web', 'url', '搜索', 'search', 'fetch', '天气', 'weather'],
+      file: ['文件', 'file', '目录', 'folder', '读取', '写入', '创建', '删除'],
+      system: ['系统', 'system', '进程', 'process', '端口', 'port', 'docker', '服务'],
+      data: ['数据', 'data', '分析', 'analyze', 'csv', 'sql', '图表', '统计'],
+      knowledge: ['是什么', '什么是', '为什么', '怎么', '如何', '区别', '原理', 'explain'],
+    };
+
+    for (const [domain, keywords] of Object.entries(domainKeywords)) {
+      if (keywords.some(k => lower.includes(k))) return domain;
+    }
+    return 'general';
   }
 }
