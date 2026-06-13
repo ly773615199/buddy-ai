@@ -593,10 +593,14 @@ export class ShadowBrainOrchestrator {
         ? Math.min(1, realSuccessRate + shadowBoost)  // shadow: 真实 + 进化增益
         : realSuccessRate;                               // production: 真实
 
+      // Step 20: 延迟基于聚类统计（替代纯随机模拟）
+      // clusterStats 包含真实成功率，延迟用成功率反推（高成功率 → 低延迟经验）
+      const clusterLatency = stats ? 50 + (1 - stats.successRate) * 100 : 80;
+
       results.push({
         group: isShadow ? 'shadow' : 'production',
-        success: Math.random() < successRate,
-        latencyMs: 50 + Math.random() * 100,
+        success: Math.random() < successRate,  // Bernoulli 采样（正确方法）
+        latencyMs: clusterLatency,
         cost: 0.001,
       });
     }

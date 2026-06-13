@@ -86,6 +86,22 @@ export async function executeByPlan(
   ctx: ExecutionContext,
   plan: OrchestrationPlan,
 ): Promise<ExecutionResult> {
+  // Step 11: 资源可行性检查 — 预算耗尽或无可用资源时降级
+  const hub = ctx.sys.resourceHub;
+  if (hub) {
+    const health = hub.getHealthSummary();
+    if (health.active === 0 && health.degraded === 0) {
+      if (ctx.verbose) console.log(`  [PlanExecutor] 资源检查: 无可用资源，降级`);
+      return { text: '⚠️ 当前无可用资源，请稍后重试', source: 'resource_check', toolCalls: [] };
+    }
+    // 检查预算
+    if (plan.meta?.budgetRemaining !== undefined && plan.meta.budgetRemaining < 0) {
+      if (ctx.verbose) console.log(`  [PlanExecutor] 资源检查: 预算耗尽，降级到本地`);
+      // 降级到本地执行
+      plan = { ...plan, mode: 'local_only', reason: `${plan.reason} → 预算耗尽降级` };
+    }
+  }
+
   // Phase 2: DAG 执行路径 — 有 resolvedDAG 时走 TaskExecutor
   if (plan.useDAG && plan.resolvedDAG) {
     return executeDAG(ctx, plan);
@@ -94,6 +110,15 @@ export async function executeByPlan(
   // Phase 1: 经验路由命中 → 优先执行经验
   const firstNode = plan.selectedNodes[0];
   if (firstNode?.type === 'experience' && firstNode.skillId) {
+    // Step 11: 检查工具健康度
+    if (hub) {
+      const toolHealth = hub.getById(`tool/${firstNode.skillId}`);
+      if (toolHealth && toolHealth.healthScore < 30) {
+        if (ctx.verbose) console.log(`  [PlanExecutor] 工具 ${firstNode.skillId} 健康度过低 (${toolHealth.healthScore})，降级到 LLM`);
+        return executeSingle(ctx, { ...plan, reason: `工具不健康降级: ${plan.reason}` });
+      }
+    }
+
     const routePath = firstNode.routePath;
     if (routePath === 'exp_direct') {
       return executeExperience(ctx, firstNode.skillId, plan.content);

@@ -141,19 +141,45 @@ async function searchDuckDuckGo(query: string, count: number): Promise<SearchRes
 /**
  * 智能选择搜索引擎
  */
-async function doSearch(query: string, count: number): Promise<SearchResult[]> {
+/**
+ * Step 15: 领域感知查询增强 — 根据领域添加 site: 限定词
+ * 减少无关源，提高搜索精准度
+ */
+const DOMAIN_SEARCH_HINTS: Record<string, string[]> = {
+  code: ['site:github.com', 'site:stackoverflow.com'],
+  git: ['site:github.com', 'site:git-scm.com'],
+  data: ['site:arxiv.org', 'site:paperswithcode.com'],
+  knowledge: ['site:wikipedia.org', 'site:arxiv.org'],
+  writing: ['site:wikipedia.org'],
+};
+
+export function augmentSearchQuery(query: string, domains: string[] = []): string {
+  if (domains.length === 0) return query;
+  // 只取第一个领域的 hint，避免查询过长
+  const primaryDomain = domains[0];
+  const hints = DOMAIN_SEARCH_HINTS[primaryDomain];
+  if (!hints) return query;
+  // 如果 query 已经包含 site: 则不增强
+  if (query.includes('site:')) return query;
+  return `${query} ${hints[0]}`;
+}
+
+async function doSearch(query: string, count: number, domains?: string[]): Promise<SearchResult[]> {
+  // Step 15: 领域感知查询增强
+  const augmentedQuery = augmentSearchQuery(query, domains);
+
   // 优先级：Brave > Serper > DuckDuckGo
   const braveKey = process.env.BRAVE_API_KEY;
   const serperKey = process.env.SERPER_API_KEY;
 
   if (braveKey) {
-    try { return await searchBrave(query, count, braveKey); } catch { /* fallback */ }
+    try { return await searchBrave(augmentedQuery, count, braveKey); } catch { /* fallback */ }
   }
   if (serperKey) {
-    try { return await searchSerper(query, count, serperKey); } catch { /* fallback */ }
+    try { return await searchSerper(augmentedQuery, count, serperKey); } catch { /* fallback */ }
   }
   // DuckDuckGo 免费兜底
-  return searchDuckDuckGo(query, count);
+  return searchDuckDuckGo(augmentedQuery, count);
 }
 
 export const search_web: ToolDef = {
@@ -162,12 +188,13 @@ export const search_web: ToolDef = {
   parameters: z.object({
     query: z.string().describe('搜索关键词'),
     count: z.number().optional().describe('返回结果数量（默认5）'),
+    domains: z.array(z.string()).optional().describe('搜索领域标签（用于精准路由）'),
   }),
   permission: 'web_search',
   execute: async (args) => {
-    const { query, count } = args as { query: string; count?: number };
+    const { query, count, domains } = args as { query: string; count?: number; domains?: string[] };
     try {
-      const results = await doSearch(query, count ?? 5);
+      const results = await doSearch(query, count ?? 5, domains);
       if (results.length === 0) return '[搜索无结果]';
 
       return results.map((r, i) =>

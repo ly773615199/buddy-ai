@@ -175,6 +175,10 @@ export class Subsystems {
   // --- 三脑架构 ---
   /** 三脑协作实例 */
   threeBrain: ThreeBrain | null = null;
+  /** Step 6: 统一资源画像系统 */
+  resourceHub: import('../brain/hub/resource-hub.js').ResourceHub | null = null;
+  /** Step 7: ModelPool ↔ ResourceHub 双向同步桥 */
+  modelPoolBridge: import('../brain/hub/model-pool-bridge.js').ModelPoolResourceBridge | null = null;
   /** 左脑：理性决策脑（规则+调度+策略蒸馏） */
   leftBrain: LeftBrain | null = null;
   /** 右脑：直觉学习脑（轻量NN+在线学习+蒸馏） */
@@ -836,6 +840,21 @@ export class Subsystems {
     const llmRouter = this._llm.getRouter();
     this.threeBrain.left.scheduler.setRouter(llmRouter);
     if (verbose) console.log('[ThreeBrain] ModelRouter 已同步注入 UnifiedScheduler');
+
+    // Step 6+7: ResourceHub + ModelPoolResourceBridge 初始化
+    try {
+      const { ResourceHub } = await import('../brain/hub/resource-hub.js');
+      const { ModelPoolResourceBridge } = await import('../brain/hub/model-pool-bridge.js');
+      this.resourceHub = new ResourceHub();
+      const pool = llmRouter?.getPool?.();
+      if (pool) {
+        this.modelPoolBridge = new ModelPoolResourceBridge(pool, this.resourceHub);
+        const synced = this.modelPoolBridge.fullSync();
+        if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源`);
+      }
+    } catch (err) {
+      if (verbose) console.warn('[ResourceHub] 初始化失败:', (err as Error).message);
+    }
 
     // 将 SensorFusion 的 STMP 写入桥接（替代 FusionBuffer）
     this.cerebellum.sensorFusion.setStmpWriter((entry) => {

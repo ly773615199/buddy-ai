@@ -227,6 +227,7 @@ export function collectToolHealth(sys: Subsystems): import('../brain/types.js').
 
 /**
  * Stage 1.5: 资源状态采集 — 运行时状态，依赖外部系统
+ * Step 10: 优先从 ResourceHub 读取实时数据，fallback 到硬编码估算
  */
 export function collectResourceState(
   sys: Subsystems,
@@ -235,36 +236,71 @@ export function collectResourceState(
   content: string,
   signal: TaskSignal,
 ): ResourceState {
-  const localExperts = sys.ternaryRouter.listExperts();
-  const pool = sys.router.getPool();
-  const availableModelCount = pool?.profileCount ?? 0;
+  const hub = sys.resourceHub;
 
-  const matureExperts = localExperts.filter(e => e.growthStage !== 'seed');
-  const coveredDomains = signal.domains.filter(d =>
-    matureExperts.some(e => e.domain.toLowerCase() === d)
-  );
-  const localCoverageRatio = signal.domains.length > 0 ? coveredDomains.length / signal.domains.length : 0;
+  // Step 10: 优先从 ResourceHub 读取资源状态
+  let availableModelCount: number;
+  let localCoverageRatio: number;
+  let localConfidence: number;
+  let budgetRemaining: number;
 
-  const recorder = sys.router.getDecisionRecorder();
-  const localConfidence = coveredDomains.length > 0
-    ? Math.max(...coveredDomains.map(d => {
-        const expert = matureExperts.find(e => e.domain.toLowerCase() === d);
-        if (!expert) return 0;
-        if (recorder) {
-          const stats = recorder.getNodeStats(`ternary/${d}`, 'domain');
-          if (stats.attempts >= 3) return stats.successRate;
-        }
-        return 0.5;
-      }))
-    : 0;
+  if (hub) {
+    // 从 ResourceHub 读取实时数据
+    const allModels = hub.getActive('model');
+    availableModelCount = allModels.length;
 
-  let budgetRemaining = Infinity;
-  if (recorder) {
-    const oneHourAgo = Date.now() - 3600_000;
-    const recent = recorder.getByTimeRange(oneHourAgo, Date.now());
-    const recentCost = recent.reduce((sum, r) => sum + (r.costEstimate ?? 0), 0);
+    const localExperts = hub.getActive('expert');
+    const coveredDomains = signal.domains.filter(d =>
+      localExperts.some(e => e.strengths.domains[d]?.successes > 0)
+    );
+    localCoverageRatio = signal.domains.length > 0 ? coveredDomains.length / signal.domains.length : 0;
+
+    localConfidence = coveredDomains.length > 0
+      ? Math.max(...coveredDomains.map(d => {
+          const expert = localExperts.find(e => e.strengths.domains[d]);
+          if (!expert) return 0;
+          const stats = expert.strengths.domains[d];
+          return stats.attempts >= 3 ? stats.successes / stats.attempts : 0.5;
+        }))
+      : 0;
+
+    // 预算：从 ResourceHub 汇总
     const hourlyBudget = (config as any).hourlyBudget ?? 1.0;
+    const recentCost = allModels.reduce((sum, m) => sum + m.stats.totalCost, 0);
     budgetRemaining = hourlyBudget - recentCost;
+  } else {
+    // fallback: 硬编码估算（原逻辑）
+    const localExperts = sys.ternaryRouter.listExperts();
+    const pool = sys.router.getPool();
+    availableModelCount = pool?.profileCount ?? 0;
+
+    const matureExperts = localExperts.filter(e => e.growthStage !== 'seed');
+    const coveredDomains = signal.domains.filter(d =>
+      matureExperts.some(e => e.domain.toLowerCase() === d)
+    );
+    localCoverageRatio = signal.domains.length > 0 ? coveredDomains.length / signal.domains.length : 0;
+
+    const recorder = sys.router.getDecisionRecorder();
+    localConfidence = coveredDomains.length > 0
+      ? Math.max(...coveredDomains.map(d => {
+          const expert = matureExperts.find(e => e.domain.toLowerCase() === d);
+          if (!expert) return 0;
+          if (recorder) {
+            const stats = recorder.getNodeStats(`ternary/${d}`, 'domain');
+            if (stats.attempts >= 3) return stats.successRate;
+          }
+          return 0.5;
+        }))
+      : 0;
+
+    budgetRemaining = Infinity;
+    if (recorder) {
+      const oneHourAgo = Date.now() - 3600_000;
+      const recent = recorder.getByTimeRange(oneHourAgo, Date.now());
+      const recentCost = recent.reduce((sum, r) => sum + (r.costEstimate ?? 0), 0);
+      const hourlyBudget = (config as any).hourlyBudget ?? 1.0;
+      budgetRemaining = hourlyBudget - recentCost;
+    }
   }
 
   let experienceHit: import('../intelligence/types.js').RouteDecision | null = null;

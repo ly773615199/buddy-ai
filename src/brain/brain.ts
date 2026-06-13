@@ -11,6 +11,7 @@ import type {
   Rule, NNConfig, FeedbackResult, DiagnosticReport,
 } from './types.js';
 import { LeftBrain } from './left/index.js';
+import { LawClassifier, type LawResult } from './left/law-classifier.js';
 import { RightBrain } from './right/index.js';
 import { Cerebellum } from './cerebellum/index.js';
 import { DeliberationCouncil, type DeliberationCouncilConfig } from './deliberation/index.js';
@@ -61,6 +62,8 @@ export class ThreeBrain {
   readonly qualityAssessor: OutputQualityAssessor;
   /** 用户状态推断器 */
   readonly userStateInferrer: UserStateInferrer;
+  /** Step 16: 法则系统 — 6 条互斥法则，替代复杂条件嵌套 */
+  readonly lawClassifier: LawClassifier;
   private verbose: boolean;
   /** 外部注入的经验进化器 */
   private experienceEvolver: { autoEvolve(): Promise<any[]>; hypothesize(): Promise<any[]> } | null = null;
@@ -82,6 +85,7 @@ export class ThreeBrain {
     this.cerebellum = new Cerebellum(config?.cerebellum, this.verbose);
     this.qualityAssessor = new OutputQualityAssessor();
     this.userStateInferrer = new UserStateInferrer();
+    this.lawClassifier = new LawClassifier(this.verbose);
 
     // 审议委员会初始化
     this.deliberation = new DeliberationCouncil({
@@ -253,8 +257,30 @@ export class ThreeBrain {
       return { plan, intuition, bodyState, homeostasisActions, latencyMs, deliberationResult };
     }
 
-    // Step 3: 左脑 — 规则 + 调度
-    let plan = await this.left.decide(signal, resources, intuition, bodyState);
+    // Step 3: 左脑 — 法则系统 + 规则 + 调度
+    // Step 16: LawClassifier 先分类法则，指导决策路径
+    const lawResult = this.lawClassifier.classify(signal, resources, this.left.getRuleEngine());
+    if (this.verbose) {
+      console.log(`[ThreeBrain] 法则 #${lawResult.law} (${LawClassifier.lawName(lawResult.law)}): ${lawResult.reason} (${(lawResult.confidence * 100).toFixed(0)}%)`);
+    }
+
+    let plan: ExecutionPlan;
+    if (lawResult.law === 4) {
+      // 法则 4: 交互澄清 — 低置信度，需要追问，不走 LLM
+      plan = {
+        mode: 'clarify',
+        reason: lawResult.reason,
+        selectedNodes: [],
+        confidence: lawResult.confidence,
+        source: 'law',
+      };
+    } else {
+      // 法则 1/2/3/5/6 — 走正常决策（规则引擎 → 调度器）
+      plan = await this.left.decide(signal, resources, intuition, bodyState);
+      // 将法则信息附加到 plan（供日志/调试）
+      (plan as any).law = lawResult.law;
+      (plan as any).lawName = LawClassifier.lawName(lawResult.law);
+    }
 
     const latencyMs = performance.now() - t0;
 
