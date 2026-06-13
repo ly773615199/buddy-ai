@@ -182,6 +182,20 @@ export class BuddyAgent {
           for (const s of samples) {
             this.sys.threeBrain!.right.ingestExternalSample(toNNSample(s.sample));
           }
+          // Step 22 #2: 触发世界模型训练
+          try {
+            const worldModelSamples = samples.map(s => s.sample);
+            const sceneWM = this.sys.threeBrain!.right['sceneWorldModel'];
+            if (sceneWM && worldModelSamples.length > 0) {
+              const lr = 0.001;
+              const result = sceneWM.train(worldModelSamples, lr);
+              if (this.verbose && result.trained > 0) {
+                console.log(`[WorldModel] 训练 ${result.trained} 样本, loss=${result.loss.toFixed(4)}`);
+              }
+            }
+          } catch (err) {
+            if (this.verbose) console.warn('[WorldModel] 训练失败:', (err as Error).message);
+          }
           if (this.verbose) {
             console.log(`[RuntimeCollector] flush ${samples.length} samples → SceneWorldModel`);
           }
