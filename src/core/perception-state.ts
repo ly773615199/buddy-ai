@@ -57,7 +57,7 @@ export function inferDomains(intent: { category: string; suggestedTools: string[
     web_fetch: 'web', search_web: 'web',
   };
 
-  for (const tool of intent.suggestedTools) {
+  for (const tool of (intent.suggestedTools ?? [])) {
     const domain = TOOL_TO_DOMAIN[tool];
     if (domain && !domains.includes(domain)) {
       domains.push(domain);

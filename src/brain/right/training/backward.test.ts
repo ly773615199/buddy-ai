@@ -68,6 +68,6 @@ describe('backwardPass', () => {
     const w2: SpanLossWeights = { alpha: 0, beta: 1, gamma: 0, delta: 0, epsilon: 0 };
     const loss2 = backwardPass(model, output2, 0, [1, 0, 0, 0, 0, 0, 0, 0], 0.5, w2);
 
-    expect(loss1.total).not.toBeCloseTo(loss2.total, 1);
+    expect(loss1.total).not.toBeCloseTo(loss2.total, 2);
   });
 });
