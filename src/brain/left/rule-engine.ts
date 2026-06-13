@@ -777,9 +777,62 @@ export class RuleEngine {
       if (rule.condition(signal, resources, intuition, body)) {
         rule.stats.hits++;
         rule.stats.lastUsed = Date.now();
-        return rule.action(signal, resources);
+        const plan = rule.action(signal, resources);
+        // Step 14: 尝试提取直接工具调用（跳过 LLM）
+        const directTool = RuleEngine.tryExtractDirectTool(signal.content ?? '');
+        if (directTool) {
+          plan.directTool = directTool;
+          plan.mode = 'direct';
+          plan.reason = `${plan.reason} → 直接执行 ${directTool.name}`;
+        }
+        return plan;
       }
     }
+    return null;
+  }
+
+  /**
+   * Step 14: 从用户输入中提取直接工具调用
+   * 当输入是纯命令行指令时，直接映射到 exec 工具，跳过 LLM
+   */
+  static tryExtractDirectTool(content: string): { name: string; args: Record<string, unknown> } | null {
+    const trimmed = content.trim();
+
+    // 纯 shell 命令模式：以常见命令开头，不含自然语言
+    const shellPatterns: Array<{ re: RegExp; tool: string }> = [
+      // Git
+      { re: /^(git\s+(?:status|diff|log|show|branch|remote|stash|commit|push|merge|pull|rebase|checkout|switch|init|clone|add|reset|revert|cherry-pick|tag|fetch|blame|bisect|worktree|submodule)\b.*)$/i, tool: 'exec' },
+      // 包管理
+      { re: /^((?:npm|yarn|pnpm)\s+(?:install|run|test|build|start|dev|ci|update|uninstall|publish|version|audit|outdated|list|exec)\b.*)$/i, tool: 'exec' },
+      { re: /^(pip3?\s+(?:install|uninstall|freeze|list|show|download|wheel|hash|check)\b.*)$/i, tool: 'exec' },
+      // 构建
+      { re: /^((?:tsc|npx\s+tsc|make|cargo\s+(?:build|test|run|check|clippy|fmt)|cmake|gradle|mvn)\b.*)$/i, tool: 'exec' },
+      // Docker
+      { re: /^(docker\s+(?:ps|logs|build|run|stop|rm|exec|images|compose|pull|push|inspect|stats|top|network|volume|system)\b.*)$/i, tool: 'exec' },
+      { re: /^(docker-compose\s.*)$/i, tool: 'exec' },
+      // 网络
+      { re: /^((?:curl|wget|ping|traceroute|nslookup|dig|netstat|ss|lsof|ifconfig|ip\s+addr)\b.*)$/i, tool: 'exec' },
+      // 代码分析
+      { re: /^((?:npx\s+)?(?:eslint|prettier|biome|deno\s+lint)\b.*)$/i, tool: 'exec' },
+      // 文件操作
+      { re: /^((?:cat|head|tail|less|more|ls|dir|find|tree|grep|rg|ag|ack|wc|sort|uniq|cut|awk|sed|tr)\b.*)$/i, tool: 'exec' },
+      // 系统
+      { re: /^((?:ps|top|htop|df|du|free|uname|whoami|hostname|uptime|date|cal|last|id|groups|which|whereis|locate|realpath|readlink|chmod|chown|ln|mkdir|rmdir|rm|cp|mv|touch|tar|zip|unzip|gzip|gunzip)\b.*)$/i, tool: 'exec' },
+      // Node.js
+      { re: /^((?:node|npx|tsx|ts-node|bun|deno)\b.*)$/i, tool: 'exec' },
+      // Shell 组合
+      { re: /^((?:export|source|alias|echo|printf|test|true|false|sleep|kill|killall|nohup|time|watch)\b.*)$/i, tool: 'exec' },
+      // Python
+      { re: /^(python3?\s.*)$/i, tool: 'exec' },
+    ];
+
+    for (const { re, tool } of shellPatterns) {
+      const m = trimmed.match(re);
+      if (m) {
+        return { name: tool, args: { command: m[1] } };
+      }
+    }
+
     return null;
   }
 

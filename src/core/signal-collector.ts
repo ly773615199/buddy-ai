@@ -19,6 +19,10 @@ import {
   assessDAG,
   mapTaskType,
 } from './perception-state.js';
+import { IntentClassifier } from './intent-classifier.js';
+
+/** 全局细粒度意图分类器单例（零延迟关键词匹配，可复用） */
+const _intentClassifier = new IntentClassifier();
 
 // ==================== 信号采集 ====================
 
@@ -106,31 +110,49 @@ export function assessTaskComplexity(sys: Subsystems, content: string): {
  * Stage 1: 统一感知采集 — 调用一次 classifyFromText()，结果供全链路使用
  *
  * 替代 detectDomains + assessTaskComplexity 各自独立调用 classifyFromText()
+ * Step 4: 集成细粒度意图层 — 当主分类器置信度低时，用 IntentClassifier 补充
  */
 export function collectPerceptionState(sys: Subsystems, content: string): PerceptionState {
   const t0 = performance.now();
 
-  // 一次调用，获取完整意图信息
+  // 一次调用，获取完整意图信息（关键词 + TextEncoder + 原型匹配）
   const intent = sys.threeBrain!.right.classifyFromText(content);
 
+  // Step 4: 细粒度意图层补充 — 当主分类器未命中或低置信度时
+  let finalCategory = intent.category;
+  let finalConfidence = intent.confidence;
+  let finalTools = intent.suggestedTools;
+  let finalHit = intent.hit;
+
+  if (!intent.hit || intent.confidence < 0.5) {
+    const fineResult = _intentClassifier.classify(content);
+    // 细粒度命中且置信度更高 → 补充/覆盖
+    if (fineResult.confidence > finalConfidence) {
+      finalCategory = fineResult.category;
+      finalConfidence = fineResult.confidence;
+      finalTools = fineResult.suggestedTools;
+      finalHit = true;
+    }
+  }
+
   // 从意图推断领域
-  const domains = inferDomains(intent);
+  const domains = inferDomains({ category: finalCategory, suggestedTools: finalTools });
 
   // 复杂度评估
-  const complexity = assessComplexity(content, intent);
+  const complexity = assessComplexity(content, { category: finalCategory, confidence: finalConfidence });
 
   // DAG 判断
   const { shouldUseDAG, dagReason } = assessDAG(content);
 
   // 任务类型映射
-  const taskType = mapTaskType(intent.category);
+  const taskType = mapTaskType(finalCategory);
 
   return {
     intent: {
-      category: intent.category,
-      confidence: intent.confidence,
-      hit: intent.hit,
-      suggestedTools: intent.suggestedTools,
+      category: finalCategory,
+      confidence: finalConfidence,
+      hit: finalHit,
+      suggestedTools: finalTools,
       protoMatch: intent.protoMatch,
     },
     domains,
@@ -138,7 +160,7 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
     taskType,
     shouldUseDAG,
     dagReason,
-    intentConfidence: intent.confidence,
+    intentConfidence: finalConfidence,
     embedding: intent.embedding,
     timestamp: Date.now(),
     computeMs: performance.now() - t0,

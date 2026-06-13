@@ -809,7 +809,8 @@ export type CollaborationMode =
   | 'debate'       // 多方论证 + 裁决
   | 'deliberate'   // 审议环：需丰富信息
   | 'clarify'      // 审议环：追问用户
-  | 'brainstorm';  // 审议环：头脑风暴生成方案
+  | 'brainstorm'   // 审议环：头脑风暴生成方案
+  | 'direct';      // Step 14: 直接执行工具，跳过 LLM
 
 /** 编排决策节点 */
 export interface OrchestrationNode {
@@ -854,6 +855,8 @@ export interface OrchestrationPlan {
   dagSkeleton?: import('./orchestrate/types.js').DAGSkeleton;
   /** 经验路由决策（Phase 1: ExperienceRouter 接入） */
   routeDecision?: import('./intelligence/types.js').RouteDecision;
+  /** Step 14: 直接执行工具 — 跳过 LLM，直接调用工具返回结果 */
+  directTool?: { name: string; args: Record<string, unknown> };
   /** 决策元数据 */
   meta: {
     localCoverageRatio: number;

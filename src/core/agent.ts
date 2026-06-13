@@ -380,19 +380,29 @@ export class BuddyAgent {
 
       let result: { text: string; toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }> };
 
-      // 经验直连 / 经验+质检 / LLM+hint 走 executeByPlan
-      const firstNode = plan.selectedNodes[0];
-      if (firstNode?.type === 'experience' || firstNode?.routePath === 'llm_with_hint') {
-        result = await this.executeByPlan(plan);
-        // 经验直连无流式输出，直接打印
-        if (plan.mode === 'local_only' || firstNode.routePath === 'exp_direct') {
-          process.stdout.write(result.text);
-        }
+      // Step 14: 直接执行模式 — 规则引擎命中 + 可直接映射到工具，跳过 LLM
+      if (plan.mode === 'direct' && plan.directTool) {
+        const dt = plan.directTool;
+        if (this.verbose) console.log(`  [Direct] 直接执行 ${dt.name}: ${JSON.stringify(dt.args).slice(0, 100)}`);
+        const toolResult = await this.sys.tools.executeWithCache(dt.name, dt.args);
+        const toolText = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+        result = { text: toolText, toolCalls: [{ name: dt.name, args: dt.args, result: toolText }] };
+        process.stdout.write(toolText);
       } else {
-        // 非经验路径：走 LLM 流式输出
-        result = await this.processor.processStream(content, (chunk) => {
-          process.stdout.write(chunk);
-        }, null);
+        // 经验直连 / 经验+质检 / LLM+hint 走 executeByPlan
+        const firstNode = plan.selectedNodes[0];
+        if (firstNode?.type === 'experience' || firstNode?.routePath === 'llm_with_hint') {
+          result = await this.executeByPlan(plan);
+          // 经验直连无流式输出，直接打印
+          if (plan.mode === 'local_only' || firstNode.routePath === 'exp_direct') {
+            process.stdout.write(result.text);
+          }
+        } else {
+          // 非经验路径：走 LLM 流式输出
+          result = await this.processor.processStream(content, (chunk) => {
+            process.stdout.write(chunk);
+          }, null);
+        }
       }
 
       // 工具追踪
@@ -917,6 +927,7 @@ export class BuddyAgent {
       selectedNodes: decision.plan.selectedNodes as import('../types.js').OrchestrationNode[],
       useDAG: signal.shouldUseDAG,
       routeDecision: resources.experienceHit ?? undefined,
+      directTool: decision.plan.directTool,  // Step 14: 直接执行工具
       meta: {
         localCoverageRatio: resources.localCoverageRatio,
         localConfidence: resources.localConfidence,

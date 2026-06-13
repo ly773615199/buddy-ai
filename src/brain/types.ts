@@ -8,7 +8,7 @@
 
 /** 左脑输出的执行计划 */
 export interface ExecutionPlan {
-  mode: 'local_only' | 'single' | 'parallel' | 'cascade' | 'sequential' | 'debate' | 'deliberate' | 'clarify' | 'brainstorm';
+  mode: 'local_only' | 'single' | 'parallel' | 'cascade' | 'sequential' | 'debate' | 'deliberate' | 'clarify' | 'brainstorm' | 'direct';
   reason: string;
   selectedNodes: OrchestrationNode[];
   confidence: number;
@@ -18,6 +18,8 @@ export interface ExecutionPlan {
   metaAction?: 'proceed' | 'refine' | 'concede' | 'brainstorm';
   /** 审议细化策略 */
   refineStrategy?: 'ask_user' | 'multi_llm' | 'tool_check' | 'llm_only' | 'local_only';
+  /** Step 14: 直接执行工具 — 跳过 LLM，直接调用工具返回结果 */
+  directTool?: { name: string; args: Record<string, unknown> };
 }
 
 /** 右脑输出的直觉信号 */

@@ -155,8 +155,45 @@ export async function executeByPlan(
       return { text: plan.reason, source: 'deliberation', toolCalls: [] };
     case 'brainstorm':
       return { text: plan.reason, source: 'deliberation', toolCalls: [] };
+    case 'direct':
+      return executeDirect(ctx, plan);
     default:
       return executeSingle(ctx, plan);
+  }
+}
+
+// ==================== Step 14: 直接执行 ====================
+
+/**
+ * 直接执行 — 跳过 LLM，直接调用工具
+ * 用于规则引擎命中的确定性命令（git status, npm install 等）
+ */
+async function executeDirect(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
+  const directTool = plan.directTool;
+  if (!directTool) {
+    // fallback: 没有 directTool 时走 single
+    return executeSingle(ctx, plan);
+  }
+
+  const startTime = Date.now();
+  try {
+    if (ctx.verbose) console.log(`  [Direct] 执行 ${directTool.name}: ${JSON.stringify(directTool.args).slice(0, 100)}`);
+    const toolResult = await ctx.sys.tools.executeWithCache(directTool.name, directTool.args);
+    const text = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+    const durationMs = Date.now() - startTime;
+
+    if (ctx.verbose) console.log(`  [Direct] 完成 ${directTool.name} (${durationMs}ms)`);
+
+    return {
+      text,
+      source: `direct/${directTool.name}`,
+      toolCalls: [{ name: directTool.name, args: directTool.args, result: text }],
+    };
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    if (ctx.verbose) console.warn(`  [Direct] 失败 ${directTool.name} (${durationMs}ms): ${(err as Error).message}`);
+    // 降级到 LLM
+    return executeSingle(ctx, plan);
   }
 }
 
