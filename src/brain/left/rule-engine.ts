@@ -142,6 +142,295 @@ export class RuleEngine {
         stats: { hits: 0, successes: 0, lastUsed: 0 },
         createdAt: now,
       },
+
+      // ── 文件操作规则 ──
+      {
+        id: 'builtin-file-write',
+        name: '文件写入操作 → 直接执行',
+        priority: 88,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.toLowerCase() ?? "";
+          return /^(写入|保存|创建|编辑|修改|write|save|create|edit)\s*\S+/.test(content)
+            || /^打开(文件|目录)/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '文件写入操作，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+      {
+        id: 'builtin-file-read',
+        name: '文件读取操作 → 直接执行',
+        priority: 87,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.toLowerCase() ?? "";
+          return /^(读取|查看|打开|cat|read|head|tail|less|more)\s+\S+/.test(content)
+            || /^(ls|dir|find|tree)\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '文件读取操作，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── Git 操作规则 ──
+      {
+        id: 'builtin-git-status',
+        name: 'git status/diff/log → 直接执行',
+        priority: 92,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^git\s+(status|diff|log|show|branch|remote|stash)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Git 查询命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.95, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+      {
+        id: 'builtin-git-commit',
+        name: 'git commit/push/merge → 直接执行',
+        priority: 91,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^git\s+(commit|push|merge|pull|rebase|checkout|switch)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Git 写操作，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 包管理规则 ──
+      {
+        id: 'builtin-npm-install',
+        name: 'npm install/run/test/build → 直接执行',
+        priority: 86,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(npm|yarn|pnpm)\s+(install|run|test|build|start|dev|ci|update|uninstall)\b/.test(content)
+            || /^pip\s+(install|uninstall|freeze|list)\b/.test(content)
+            || /^pip3?\s+install\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '包管理命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 构建编译规则 ──
+      {
+        id: 'builtin-build',
+        name: 'tsc/make/cargo build → 直接执行',
+        priority: 84,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(tsc|npx\s+tsc|make|cargo\s+(build|test|run|check)|cmake|gradle|mvn)\b/.test(content)
+            || /^(npm\s+run\s+(build|compile|tsc))\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '构建编译命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── Docker 规则 ──
+      {
+        id: 'builtin-docker',
+        name: 'docker 命令 → 直接执行',
+        priority: 83,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^docker\s+(ps|logs|build|run|stop|rm|exec|images|compose|pull|push|inspect|stats|top)\b/.test(content)
+            || /^docker-compose\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Docker 命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 网络调试规则 ──
+      {
+        id: 'builtin-network',
+        name: 'curl/ping/wget → 直接执行',
+        priority: 82,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(curl|wget|ping|traceroute|nslookup|dig|netstat|ss|lsof)\b/.test(content)
+            || /^(ifconfig|ip\s+addr)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '网络调试命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 代码分析规则 ──
+      {
+        id: 'builtin-code-lint',
+        name: 'eslint/tsc --noEmit/prettier → 直接执行',
+        priority: 81,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(npx\s+)?(eslint|prettier|tsc\s+--noEmit|biome|deno\s+lint)\b/.test(content)
+            || /^(npm\s+run\s+(lint|format|check|typecheck))\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '代码分析命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+      {
+        id: 'builtin-code-search',
+        name: 'grep/find/ripgrep 搜索 → 直接执行',
+        priority: 80,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(grep|rg|find|ag|ack|wc\s+-l)\b/.test(content)
+            || /^(cat|head|tail)\s+.*\|/.test(content); // 管道命令
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '代码搜索命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 系统运维规则 ──
+      {
+        id: 'builtin-sysadmin',
+        name: '系统运维命令 → 直接执行',
+        priority: 79,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(ps|top|htop|kill|killall|nohup|systemctl|journalctl|df|du|free|uname|whoami|which|whereis|env|export|chmod|chown|ln)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '系统运维命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 时间/计算规则 ──
+      {
+        id: 'builtin-time-calc',
+        name: '时间/日期/计算查询 → 直接执行',
+        priority: 78,
+        condition: (signal) => {
+          const content = (signal.content ?? "");
+          return /^(现在几点|今天(日期|几号)|当前时间|what\s+time|current\s+time|date\s+today)/i.test(content)
+            || /^(\d+[\+\-\*\/\%]\d+|计算\s+\d)/.test(content)
+            || /^(convert|换算|转换)\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '时间/计算查询，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 进程管理规则 ──
+      {
+        id: 'builtin-process',
+        name: '进程/端口查看 → 直接执行',
+        priority: 77,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(lsof\s+-i|ss\s+-tlnp|netstat\s+-tlnp|fuser)\b/.test(content)
+            || /^查看.*(端口|进程|服务)/.test(content)
+            || /^哪个(进程|服务)/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '进程/端口查询，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 工具推荐规则（经验系统） ──
+      {
+        id: 'builtin-experience-route',
+        name: '经验路由命中 → 优先使用经验',
+        priority: 74,
+        condition: (signal, resources) => resources.experienceHit !== null,
+        action: (signal, resources) => ({
+          mode: 'single', reason: `经验路由命中: ${resources.experienceHit!.id}`,
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }, { id: 'exp', type: 'experience' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 问候/闲聊规则 ──
+      {
+        id: 'builtin-greeting',
+        name: '问候/闲聊 → 简单回复',
+        priority: 40,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase().trim();
+          return /^(你好|hello|hi|hey|嗨|在吗|早上好|good\s*morning|good\s*evening|晚安|good\s*night|谢谢|thanks|thank\s*you|再见|bye|拜拜)$/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '问候/闲聊，简单回复',
+          selectedNodes: [{ id: 'local', type: 'local_expert' }],
+          confidence: 0.95, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
     ];
   }
 

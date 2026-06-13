@@ -18,6 +18,7 @@ function makeSignal(overrides?: Partial<TaskSignal>): TaskSignal {
   return {
     domains: ['code'], complexity: 'medium', taskType: 'tools',
     shouldUseDAG: false, dagReason: '', intentConfidence: 0.8,
+    content: 'test input',
     ...overrides,
   };
 }
@@ -55,7 +56,7 @@ describe('RuleEngine', () => {
 
   it('内置规则数量正确', () => {
     const rules = engine.getRules();
-    expect(rules.filter(r => r.source === 'builtin').length).toBe(8);
+    expect(rules.filter(r => r.source === 'builtin').length).toBe(23);
   });
 
   it('简单对话不命中规则引擎（交给 scheduler 决策）', () => {
@@ -283,8 +284,8 @@ describe('RuleEngine', () => {
   describe('统计', () => {
     it('getStats 返回正确数据', () => {
       const stats = engine.getStats();
-      expect(stats.totalRules).toBe(8);
-      expect(stats.builtinRules).toBe(8);
+      expect(stats.totalRules).toBe(23);
+      expect(stats.builtinRules).toBe(23);
       expect(stats.learnedRules).toBe(0);
       expect(stats.negations).toBe(0);
     });
