@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 export default defineConfig({
   test: {
@@ -13,6 +14,11 @@ export default defineConfig({
       reporter: ['text', 'json-summary'],
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/test*.ts'],
+    },
+  },
+  resolve: {
+    alias: {
+      '@capacitor/core': path.resolve(__dirname, 'src/__mocks__/@capacitor/core.ts'),
     },
   },
 });
