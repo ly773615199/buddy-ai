@@ -1,8 +1,9 @@
-# 三脑能力迭代执行计划 v1.0
+# 三脑能力迭代执行计划 v1.1
 
 > 日期: 2026-06-13
 > 目标: 三脑意图理解能力 + 三脑资源决策能力
 > 原则: 基于项目实际代码，不依赖 BuddyLM，不依赖三进制训练
+> v1.1 变更: 补充 ByteEncoder TS 重实现（Step 0），修正依赖链
 
 ---
 
@@ -34,6 +35,7 @@
 
 | 组件 | 为什么缺 | 影响 |
 |------|----------|------|
+| **ByteEncoder (TextEncoder)** | Python 已实现，TS 未重实现 | 意图理解无语义向量输入，四信号融合缺一信号 |
 | **ResourceHub** | 从未实现 | 资源决策基于硬编码估算，无统一资源画像 |
 | **PerceptionState** | 从未实现 | 意图分类重复调用，结果不共享 |
 | **ConfidenceCalibrator** | 从未实现 | 置信度硬编码，跨模块不可比 |
@@ -42,6 +44,10 @@
 | **setEditingPipeline()** | subsystems.ts 缺失 | v5 碰撞管线形同虚设 |
 | **工具结果直连路由** | 从未实现 | 工具结果走了冗余的向量检索 |
 | **搜索源精准路由** | 从未实现 | 10+ 源全查，大部分无关 |
+
+> **ByteEncoder 补充说明**: Python 实现（lewye/buddy）已有可用的字节级文本编码器。
+> TS 代码库中不存在，需要基于 `IMPLEMENTATION_PLAN_PHASE0.md` 重新实现。
+> 详细设计见 `THREE_BRAIN_EVOLUTION_PLAN.md` Phase 0。
 
 ---
 
@@ -80,12 +86,94 @@
             └──────────────────┬───────────────────┘
                                ▼
                     ┌─────────────────────┐
-                    │   ByteEncoder       │ ← 已有，256 维向量
-                    │   语义编码基座       │
+                    │   ByteEncoder       │ ← 需重新实现（Python 已有，TS 缺失）
+                    │   语义编码基座       │    设计见 IMPLEMENTATION_PLAN_PHASE0.md
                     └─────────────────────┘
 ```
 
 ### 2.3 执行步骤
+
+#### Step 0: ByteEncoder (TextEncoder) TS 重实现
+
+**前置文档**: `IMPLEMENTATION_PLAN_PHASE0.md`, `THREE_BRAIN_EVOLUTION_PLAN.md` Phase 0
+
+**背景**: ByteEncoder 在 Python 实现（lewye/buddy）中已可用，但 TS 代码库中不存在。
+当前 `classifyFromText()` 只有关键词匹配，无语义向量输入能力。
+Step 2 的四信号融合依赖 ByteEncoder 输出的语义向量，必须先完成此步。
+
+**文件**: `src/brain/right/features/text-encoder.ts`（新建，~250 行）
+
+**组件**:
+| 组件 | 规格 | 参数量 |
+|------|------|--------|
+| ByteEmbedding | 256 字节 → 32 维查表 | 8,192 |
+| EntropyEstimator | 基于字节频率的局部熵估算 | 0（纯计算） |
+| DynamicMerge | 熵驱动动态合并（高熵保留，低熵合并） | 0（纯计算） |
+| Projection | 32 → 128 维线性投影 | 4,096 |
+| EncoderBlock×2 | 复用现有 attention.ts + ffn.ts (d=128, h=4, ffn=256) | ~133,000 |
+| **总计** | | **~145K** |
+
+**接口**:
+```typescript
+export interface TextEncoderConfig {
+  byteEmbedDim: number;          // 默认 32
+  outputDim: number;             // 默认 128
+  numLayers: number;             // 默认 2
+  numHeads: number;              // 默认 4
+  ffnDim: number;                // 默认 256
+  mergeEntropyThreshold: number; // 默认 1.5
+  maxSeqLen: number;             // 默认 512
+}
+
+export class TextEncoder {
+  constructor(config?: Partial<TextEncoderConfig>)
+  forward(text: string): Tensor           // [S', outputDim]
+  forwardPooled(text: string): Tensor      // [1, outputDim]（池化输出）
+  parameters(): Tensor[]                   // 可训练参数
+  countParams(): number
+  serialize(): ArrayBuffer                 // 独立序列化
+  static deserialize(data: ArrayBuffer): TextEncoder
+}
+```
+
+**关键设计 — DynamicMerge（熵驱动动态合并）**:
+- 受 BLT (Meta 2024) + MrT5 (Stanford 2024) 启发
+- 高熵位置（"部署"、"deploy"）→ 保留独立 token，保留细节
+- 低熵位置（"的"、"the"）→ 合并为 1 个 patch，节省计算
+- 中文 UTF-8 三字节一组，熵模式与英文不同 → 动态适配
+- 不是简单 Conv1D 固定窗口，是逐字节判断
+
+**联动改动**:
+
+1. `src/brain/right/features/encoder.ts` — 新增 `encodeFeaturesV2()`（+30 行）
+   - 有 TextEncoder + rawText → 文本走 TextEncoder 输出拼接到序列前部
+   - 否则 → fallback 到原 `encodeFeatures()`
+
+2. `src/brain/right/nn/model.ts` — 新增 `forwardWithText()`（+40 行）
+   - 门控加法融合：`fused = pooled + gate * textPooled`
+   - `gate = sigmoid(linear(pooled))` — 可学习门控
+   - 输出头维度不变（128），零破坏
+
+3. `src/brain/right/index.ts` — 改造 `classifyFromText()`（+50 行 / 改 30 行）
+   - 有 TextEncoder → 走 NN 路径（TextEncoder → 原型匹配 → 意图分类）
+   - 无 TextEncoder → fallback 到关键词规则（保持不变）
+
+**测试**: `src/brain/right/features/text-encoder.test.ts`（~150 行）
+- ByteEmbedding 前向
+- 动态合并（纯 ASCII / 中文 / 混合）
+- 完整 forward 输出维度
+- 序列化/反序列化
+- 推理延迟 <3ms
+
+**验收**:
+- `npx vitest run` 全绿（含现有测试）
+- TextEncoder.forward("测试文本") 返回 Float32Array[128]
+- 推理延迟 < 3ms
+- 序列化/反序列化后输出一致
+- classifyFromText() 有 TextEncoder 时走 NN 路径，无时走关键词规则
+- 参数量 ~145K，总计 ~445K（含现有 300K）
+
+**工作量**: 2d
 
 #### Step 1: 新建 PerceptionState（统一感知结果容器）
 
@@ -726,29 +814,36 @@ const DOMAIN_TO_SOURCES: Record<string, string[]> = {
 
 ## 四、执行顺序与依赖关系
 
+### 修正说明（v1.1）
+
+1. **新增 Step 0**: ByteEncoder TS 重实现 — 意图理解的语义基座，Step 2 的前置依赖
+2. **移除 BuddyLM 权重加载修复**: 不属于本项目范围，已舍弃
+3. **重新排列依赖**: Step 0 → Step 1 → Step 2（ByteEncoder 是 PerceptionState → classifyFromText 的底层依赖）
+
 ```
-Phase 1 (Week 1-2): 基础设施 + 意图理解
+Phase 1 (Week 1-3): 语义基座 + 意图理解
+├── Step 0:  ByteEncoder TS 重实现              [2d]  ← 新增，前置依赖
 ├── Step 1:  PerceptionState 类型定义           [0.5d]
-├── Step 2:  classifyFromText 多信号融合         [2d]
+├── Step 2:  classifyFromText 多信号融合         [2d]  ← 依赖 Step 0
 ├── Step 3:  collectSignals 改用 PerceptionState [1d]
+├── Step 13: 规则引擎扩展 17→40+                 [1d]  ← 无依赖，可并行
+└── Step 14: 工具结果跳过检索                     [1d]  ← 无依赖，可并行
+    验收: ByteEncoder 推理 <3ms, 意图分类覆盖提升, classifyFromText 四信号融合
+
+Phase 2 (Week 4-5): 资源决策 + 反馈闭环
+├── Step 4:  细粒度意图层集成                    [1d]
+├── Step 5:  IntuitionNet + PrototypeMemory 接入 [2d]
 ├── Step 6:  ResourceHub 创建                    [2d]
 ├── Step 7:  ModelPoolResourceBridge             [1d]
 ├── Step 8:  feedback() 闭环打通                 [1.5d]
-└── Step 13: 规则引擎扩展 17→40+                 [1d]
-    验收: 意图分类覆盖提升, ResourceHub 注册资源, feedback 被调用
-
-Phase 2 (Week 3-4): 资源决策 + 决策闭环
-├── Step 4:  细粒度意图层集成                    [1d]
-├── Step 5:  IntuitionNet + PrototypeMemory 接入 [2d]
 ├── Step 9:  ConfidenceCalibrator                 [1d]
+└── Step 15: 搜索源精准路由                      [1d]  ← 无依赖，可并行
+    验收: 意图理解 4 信号融合, ResourceHub 注册资源, feedback 被调用
+
+Phase 3 (Week 6-7): 资源感知 + 执行优化
 ├── Step 10: collectResourceState 改造            [1d]
 ├── Step 11: PlanExecutor 资源感知                [1.5d]
 ├── Step 12: setEditingPipeline 注入              [0.5d]
-└── Step 14: 工具结果跳过检索                     [1d]
-    验收: 意图理解 4 信号融合, 资源决策基于实时数据, 执行层感知约束
-
-Phase 3 (Week 5-6): 优化 + 验证
-├── Step 15: 搜索源精准路由                      [1d]
 ├── 竞争裁决框架 (ProposalCollector + Arbiter)    [3d]
 ├── 端到端测试: 意图→决策→执行→反馈 全链路        [2d]
 └── 性能基准: 意图分类 <5ms, 资源决策 <10ms       [1d]
@@ -758,8 +853,12 @@ Phase 3 (Week 5-6): 优化 + 验证
 ### 依赖关系
 
 ```
-Step 1 (PerceptionState) ──→ Step 2 (classifyFromText) ──→ Step 3 (collectSignals)
-                                                              │
+Step 0 (ByteEncoder) ──→ Step 1 (PerceptionState) ──→ Step 2 (classifyFromText) ──→ Step 3 (collectSignals)
+                                                         │
+                                                         └──→ Step 5 (IntuitionNet + PrototypeMemory 接入)
+                                                         │
+Step 4 (细粒度意图层) ← 无强依赖，可并行               │
+                                                         │
 Step 6 (ResourceHub) ──→ Step 7 (Bridge) ──→ Step 8 (feedback) ──→ Step 9 (Calibrator)
                                                               │
                                                               └──→ Step 10 (collectResourceState)
@@ -775,7 +874,19 @@ Step 15 (搜索路由) ← 无依赖，可并行
 
 ## 五、验收标准总表
 
-### 能力一：意图理解
+### 能力零：ByteEncoder 语义基座（Step 0）
+
+| 指标 | 当前状态 | 目标 | 验收方式 |
+|------|----------|------|----------|
+| 文本→向量能力 | 不存在 | TextEncoder.forward() 返回 Float32Array[128] | 单元测试 |
+| 推理延迟 | — | <3ms（纯 CPU） | 性能测试 |
+| 中文支持 | — | UTF-8 字节级，无分词依赖 | 中文输入测试 |
+| 动态合并 | — | 高熵保留/低熵合并，序列长度减少 ~50% | 序列长度对比 |
+| 序列化/反序列化 | — | 权重可独立保存和加载 | round-trip 测试 |
+| classifyFromText 集成 | 关键词匹配 | 有 TextEncoder 时走 NN 路径 | 集成测试 |
+| 参数量 | 0（不存在） | ~145K（总计 ~445K） | countParams() |
+
+### 能力一：意图理解（Step 1-5）
 
 | 场景 | 当前行为 | 目标行为 | 验收方式 |
 |------|----------|----------|----------|
@@ -787,7 +898,7 @@ Step 15 (搜索路由) ← 无依赖，可并行
 | 意图分类耗时 | ~1ms (纯关键词) | <5ms (多信号融合) | 性能测试 |
 | classifyFromText 调用次数 | 2 次 (detectDomains + assessComplexity) | 1 次 (PerceptionState) | 代码审查 |
 
-### 能力二：资源决策
+### 能力二：资源决策（Step 6-12）
 
 | 场景 | 当前行为 | 目标行为 | 验收方式 |
 |------|----------|----------|----------|
