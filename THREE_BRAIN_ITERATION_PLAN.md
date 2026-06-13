@@ -1,10 +1,11 @@
-# 三脑能力迭代执行计划 v1.2
+# 三脑能力迭代执行计划 v1.3
 
 > 日期: 2026-06-13
 > 目标: 三脑意图理解能力 + 三脑资源决策能力
 > 原则: 基于项目实际代码，不依赖 BuddyLM，不依赖三进制训练
 > v1.1 变更: 补充 ByteEncoder TS 重实现（Step 0），修正依赖链
 > v1.2 变更: 新增法则系统（Step 16）、知识分层冷启动（Step 17）、ByteEncoder 实例单例化（Step 18）
+> v1.3 变更: 补充运行时断裂修复（Step 19-22）、效率提升（Step 23-25）
 
 ---
 
@@ -899,29 +900,140 @@ const DOMAIN_TO_SOURCES: Record<string, string[]> = {
 
 **工作量**: 0.5d
 
+#### Step 19: QualityAssessor 传入 actualOutput
+
+**来源**: `COLD_START_VALIDATION_FIX_PLAN.md` (A1)
+
+**问题**: `brain.ts:370` feedback() 中 QualityAssessor 收到 `output=''`，四维质量评估中 completeness/accuracy/conciseness 三个维度形同虚设，只有 executionSuccess 和 latencyMs 有效。
+
+**改动**:
+- `src/brain/brain.ts` — feedback() 方法签名增加 `actualOutput` 参数
+- `src/core/agent.ts` — orchestrateWithThreeBrain() 中将 LLM 实际输出透传到 feedback()
+- QualityAssessor.assess() 收到非空 output 后，completeness/accuracy/conciseness 维度正常评分
+
+**验收**: 单元测试验证 QualityAssessor 收到非空 output 时，四维评分均有值
+
+**工作量**: 0.5d
+
+#### Step 20: A/B 测试用真实决策数据替代随机数
+
+**来源**: `COLD_START_VALIDATION_FIX_PLAN.md` (A2)
+
+**问题**: `shadow/index.ts:575` runOfflineABTest() 用 Math.random() 模拟 A/B 结果，进化锁第 3 锁（回归风险评估）基于随机数据做判断。
+
+**改动**:
+- 从 DecisionMemory 获取真实聚类统计作为 production 组基线
+- 用影子规则回放真实样本作为 shadow 组结果
+- A/B 结果基于真实数据对比，而非随机数
+
+**验收**: A/B 测试结果可追溯到真实决策样本
+
+**工作量**: 1d
+
+#### Step 21: CrossSession → ModelPool 参数恢复桥接
+
+**来源**: `NEURAL_FLOW_FIX_PLAN.md`
+
+**问题**: ModelPool 和 CrossSessionLearner 各自维护 Thompson Sampling 参数，session 内通过 setFeedbackCallback 同步，但跨 session 启动时无桥接，模型选择质量下降。
+
+**改动**: `src/core/subsystems.ts` — pool.initializeFromProviders() 完成后，从 CrossSession 恢复全局 Thompson 参数到 ModelPool
+
+**验收**: 启动日志显示 "从 CrossSession 恢复 N 个 Thompson 参数"
+
+**工作量**: 0.5d
+
+#### Step 22: 7 个未接入端点打通
+
+**来源**: `ENDPOINT_WIRING_PLAN.md`
+
+**问题**: 7 个已实现但未接入主流程的端点：
+
+| # | 端点 | 优先级 | 接入点 |
+|---|------|--------|--------|
+| 1 | L2 意图扩展写回 | P0 | ShadowBrain.applyProposal() |
+| 2 | World Model 训练 | P0 | ConvergenceLayer 回调 |
+| 3 | autoEvolve() | P1 | ShadowBrain.onInteraction() |
+| 4 | hypothesize() | P1 | ShadowBrain.onInteraction() |
+| 5 | distill() | P1 | ThreeBrain 生命周期 |
+| 6 | 小脑自适应层 | P2 | Cerebellum 构造函数 |
+| 7 | CrossSessionLearner | P2 | Subsystems 初始化 |
+
+**改动**: 逐个接入，每个端点 ~30-50 行代码
+
+**验收**: 7 个端点均有实际调用路径，日志可验证
+
+**工作量**: 2d
+
+#### Step 23: 世界模型触发条件改造
+
+**来源**: `WORLD_MODEL_REFORM.md`
+
+**问题**: 当前触发条件是"经验不足+规则没把握"才用世界模型，但世界模型需要经验来学因果关系。且输入是空 tokens，在空图上跑 GNN 无意义。
+
+**改动**:
+- 触发条件从"经验不足"→"选择困难"（多个候选方案置信度差距 ≤ 0.3）
+- 输入从空 tokens → 真实状态 SceneGraph
+- 从选执行模式 → 选最优方案
+
+**验收**: 世界模型在有经验时介入，输入非空图
+
+**工作量**: 1d
+
+#### Step 24: 定时机制自适应优化
+
+**来源**: `TIMING_OPTIMIZATION_PLAN.md`
+
+**问题**: World Model 训练（每 5 分钟）、autoEvolve（每 50 次交互）、distill（每 100 次决策）三个固定间隔机制不考虑负载、无效果门控、未错开触发。
+
+**改动**:
+- World Model 训练: 固定间隔 → 1 分钟检查 + 缓冲区 urgency 驱动
+- autoEvolve: 固定次数 → 与 distill 错开 + 效果门控
+- distill: 固定次数 → 检查决策多样性 + 蒸馏质量
+
+**验收**: 三个机制不再同时触发 CPU 尖峰，无效果时跳过
+
+**工作量**: 1.5d
+
+#### Step 25: 全局缓存自动清理
+
+**来源**: `INTELLIGENCE_UPGRADE_PLAN.md` (H1)
+
+**问题**: `globalToolCache` 和 `globalSemanticCache` 有 `purge()` 方法但无人调用，长期运行内存只增不减。
+
+**改动**: `src/core/subsystems.ts` — 初始化时注册 60 秒间隔的定时清理
+
+**验收**: 长期运行后缓存大小有上限
+
+**工作量**: 0.5h
+
 ---
 
 ## 四、执行顺序与依赖关系
 
-### 修正说明（v1.2）
+### 修正说明（v1.3）
 
-1. **新增 Step 0**: ByteEncoder TS 重实现 — 意图理解的语义基座，Step 2 的前置依赖
-2. **移除 BuddyLM 权重加载修复**: 不属于本项目范围，已舍弃
-3. **重新排列依赖**: Step 0 → Step 1 → Step 2（ByteEncoder 是 PerceptionState → classifyFromText 的底层依赖）
-4. **新增 Step 16**: 法则系统 — 6 条法则替代 if-else 链
-5. **新增 Step 17**: 知识分层冷启动 — 种子经验 15→100+
-6. **新增 Step 18**: ByteEncoder 实例单例化 — 消除 5 个实例的内存浪费
+1-6. 同 v1.2
+7. **新增 Step 19**: QualityAssessor 传入 actualOutput — 质量自评修复
+8. **新增 Step 20**: A/B 测试用真实数据 — 进化锁修复
+9. **新增 Step 21**: CrossSession → ModelPool 参数恢复 — 跨 session 模型选择
+10. **新增 Step 22**: 7 个未接入端点打通 — 已有能力激活
+11. **新增 Step 23**: 世界模型触发条件改造 — 决策质量提升
+12. **新增 Step 24**: 定时机制自适应 — 资源效率提升
+13. **新增 Step 25**: 全局缓存自动清理 — 内存泄漏修复
 
 ```
-Phase 1 (Week 1-3): 语义基座 + 意图理解
-├── Step 0:  ByteEncoder TS 重实现              [2d]  ← 新增，前置依赖
+Phase 1 (Week 1-3): 语义基座 + 意图理解 + 紧急修复
+├── Step 0:  ByteEncoder TS 重实现              [2d]  ← 前置依赖
 ├── Step 1:  PerceptionState 类型定义           [0.5d]
 ├── Step 2:  classifyFromText 多信号融合         [2d]  ← 依赖 Step 0
 ├── Step 3:  collectSignals 改用 PerceptionState [1d]
 ├── Step 13: 规则引擎扩展 17→40+                 [1d]  ← 无依赖，可并行
 ├── Step 14: 工具结果跳过检索                     [1d]  ← 无依赖，可并行
-└── Step 18: ByteEncoder 实例单例化              [0.5d] ← 无依赖，可并行
-    验收: ByteEncoder 推理 <3ms, 意图分类覆盖提升, classifyFromText 四信号融合
+├── Step 18: ByteEncoder 实例单例化              [0.5d] ← 无依赖，可并行
+├── Step 19: QualityAssessor 传入 actualOutput   [0.5d] ← 无依赖，可并行
+├── Step 21: CrossSession → ModelPool 参数恢复   [0.5d] ← 无依赖，可并行
+└── Step 25: 全局缓存自动清理                    [0.5h] ← 无依赖，可并行
+    验收: ByteEncoder 推理 <3ms, 意图分类覆盖提升, 质量自评四维有效
 
 Phase 2 (Week 4-6): 资源决策 + 反馈闭环 + 法则系统
 ├── Step 4:  细粒度意图层集成                    [1d]
@@ -931,18 +1043,22 @@ Phase 2 (Week 4-6): 资源决策 + 反馈闭环 + 法则系统
 ├── Step 8:  feedback() 闭环打通                 [1.5d]
 ├── Step 9:  ConfidenceCalibrator                 [1d]
 ├── Step 15: 搜索源精准路由                      [1d]  ← 无依赖，可并行
-├── Step 16: 法则系统                            [3d]  ← 新增
-└── Step 17: 知识分层冷启动                      [2d]  ← 新增
+├── Step 16: 法则系统                            [3d]
+├── Step 17: 知识分层冷启动                      [2d]
+├── Step 20: A/B 测试用真实数据                  [1d]  ← 无依赖，可并行
+└── Step 22: 7 个未接入端点打通                  [2d]  ← 无依赖，可并行
     验收: 意图理解 4 信号融合, ResourceHub 注册资源, feedback 被调用, 法则系统 6 条覆盖
 
-Phase 3 (Week 7-8): 资源感知 + 执行优化
+Phase 3 (Week 7-9): 资源感知 + 执行优化 + 世界模型
 ├── Step 10: collectResourceState 改造            [1d]
 ├── Step 11: PlanExecutor 资源感知                [1.5d]
 ├── Step 12: setEditingPipeline 注入              [0.5d]
+├── Step 23: 世界模型触发条件改造                [1d]
+├── Step 24: 定时机制自适应优化                   [1.5d]
 ├── 竞争裁决框架 (ProposalCollector + Arbiter)    [3d]
 ├── 端到端测试: 意图→决策→执行→反馈 全链路        [2d]
 └── 性能基准: 意图分类 <5ms, 资源决策 <10ms       [1d]
-    验收: 全链路跑通, 反馈闭环生效, 性能达标
+    验收: 全链路跑通, 反馈闭环生效, 世界模型在选择困难时介入, 性能达标
 ```
 
 ### 依赖关系
@@ -965,7 +1081,14 @@ Step 14 (工具直连) ← 无依赖，可并行
 Step 15 (搜索路由) ← 无依赖，可并行
 Step 16 (法则系统) ← 依赖 Step 13（规则扩展后法则 1 才能完整覆盖）
 Step 17 (知识分层) ← 无强依赖，可并行
-Step 18 (ByteEncoder 单例) ← 依赖 Step 0（ByteEncoder 实现后才有实例可单例化）
+Step 18 (ByteEncoder 单例) ← 依赖 Step 0
+Step 19 (QualityAssessor) ← 无依赖，可并行
+Step 20 (A/B 测试) ← 无依赖，可并行
+Step 21 (CrossSession 桥) ← 无依赖，可并行
+Step 22 (端点打通) ← 部分依赖 Step 8（feedback 接入后 distill/autoEvolve 才有意义）
+Step 23 (世界模型改造) ← 无强依赖，可并行
+Step 24 (定时自适应) ← 无强依赖，可并行
+Step 25 (缓存清理) ← 无依赖，可并行
 ```
 
 ---
