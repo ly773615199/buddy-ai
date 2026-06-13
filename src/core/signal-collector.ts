@@ -131,6 +131,7 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
       confidence: intent.confidence,
       hit: intent.hit,
       suggestedTools: intent.suggestedTools,
+      protoMatch: intent.protoMatch,
     },
     domains,
     complexity,
@@ -138,6 +139,7 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
     shouldUseDAG,
     dagReason,
     intentConfidence: intent.confidence,
+    embedding: intent.embedding,
     timestamp: Date.now(),
     computeMs: performance.now() - t0,
   };

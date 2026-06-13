@@ -337,57 +337,143 @@ export class RightBrain {
   /**
    * 轻量文本分类（兼容 IntentClassifier 接口）
    *
+   * 四信号融合：关键词规则 + 原型匹配 + TextEncoder 语义向量 + IntuitionNet
    * 不需要 TaskSignal/ResourceState，用于 collectSignals() 和 message-processor.ts
-   * 当 NN 模型未训练时，使用内置关键词规则（与 IntentClassifier 相同逻辑）
-   * 当 NN 模型训练后，自动切换为 NN 预测
+   *
+   * 融合策略：
+   *   关键词命中 → 直接用（高精确度）
+   *   关键词未命中 + 原型匹配 → 用原型（扩展覆盖）
+   *   全未命中 → conversation
    */
   classifyFromText(input: string): {
     category: string;
     confidence: number;
     suggestedTools: string[];
     hit: boolean;
+    /** 原型匹配结果（可选） */
+    protoMatch?: { prototypeId: string; distance: number; confidence: number };
+    /** TextEncoder 输出的池化语义向量（可选，供下游复用） */
+    embedding?: Float32Array;
   } {
-    // 新路径：有 TextEncoder 时走 NN
+    // 信号 1: 关键词规则匹配（始终执行，高精确度）
+    const keywordResult = this.classifyFromTextRules(input);
+
+    // 信号 2+3: TextEncoder + 原型匹配（有 TextEncoder 时）
+    let protoResult: { prototypeId: string; distance: number; confidence: number } | null = null;
+    let embedding: Float32Array | undefined;
+
     if (this.textEncoder) {
       try {
-        return this.classifyFromTextNN(input);
+        const textEmb = this.textEncoder.forwardPooled(input); // [1, 128]
+        embedding = new Float32Array(textEmb.data);
+
+        // 原型匹配
+        const match = this.prototypeMemory.findNearest(embedding);
+        if (match && !match.isNovel) {
+          protoResult = {
+            prototypeId: match.prototype.label,
+            distance: match.distance,
+            confidence: Math.min(1, match.confidence),
+          };
+        }
       } catch {
-        // NN 路径失败，降级到关键词规则
+        // TextEncoder/原型匹配失败，降级到纯关键词
       }
     }
 
-    // 旧路径：关键词规则（保持不变）
-    return this.classifyFromTextRules(input);
+    // 融合决策
+    return this.fuseSignals(keywordResult, protoResult, embedding);
   }
 
   /**
-   * NN 路径分类 — TextEncoder + 原型匹配
+   * 四信号融合决策
    */
-  private classifyFromTextNN(input: string): {
+  private fuseSignals(
+    keyword: { category: string; confidence: number; suggestedTools: string[]; hit: boolean },
+    proto: { prototypeId: string; distance: number; confidence: number } | null,
+    embedding?: Float32Array,
+  ): {
+    category: string;
+    confidence: number;
+    suggestedTools: string[];
+    hit: boolean;
+    protoMatch?: { prototypeId: string; distance: number; confidence: number };
+    embedding?: Float32Array;
+  } {
+    // 关键词命中 → 直接用（高精确度）
+    if (keyword.hit && keyword.confidence >= 0.6) {
+      return { ...keyword, protoMatch: proto ?? undefined, embedding };
+    }
+
+    // 原型匹配命中 → 用原型（扩展覆盖）
+    if (proto && proto.confidence > 0.3) {
+      const protoTools = this.prototypeMemory.findNearest(embedding!)?.prototype.topTools(4) ?? keyword.suggestedTools;
+      return {
+        category: proto.prototypeId,
+        confidence: proto.confidence,
+        suggestedTools: protoTools,
+        hit: true,
+        protoMatch: proto,
+        embedding,
+      };
+    }
+
+    // 关键词低置信度命中 → 降级使用
+    if (keyword.hit) {
+      return { ...keyword, protoMatch: proto ?? undefined, embedding };
+    }
+
+    // 全未命中 → conversation
+    return {
+      category: 'conversation',
+      confidence: 0.2,
+      suggestedTools: [],
+      hit: false,
+      protoMatch: proto ?? undefined,
+      embedding,
+    };
+  }
+
+  /**
+   * 关键词规则匹配（兜底路径，零延迟）
+   * 基于 intent-classifier.ts 的相同逻辑
+   */
+  private classifyFromTextRules(input: string): {
     category: string;
     confidence: number;
     suggestedTools: string[];
     hit: boolean;
   } {
-    const textEmb = this.textEncoder!.forwardPooled(input); // [1, 128]
-    const hidden = new Float32Array(textEmb.data);
+    const lower = input.toLowerCase();
 
-    // 原型匹配
-    const protoMatch = this.prototypeMemory.findNearest(hidden);
-    if (protoMatch && !protoMatch.isNovel) {
-      const proto = protoMatch.prototype;
-      const tools = proto.topTools(4);
-      const confidence = Math.min(1, protoMatch.confidence);
-      return {
-        category: proto.label,
-        confidence,
-        suggestedTools: tools,
-        hit: confidence > 0.3,
-      };
+    const rules: Array<{ category: string; keywords: string[]; tools: string[] }> = [
+      { category: 'file_operations', keywords: ['读', '查看', '打开', '写', '创建', '保存', '删除', '移动', '复制', 'read', 'cat', 'write', 'create', 'save', 'delete', 'move', 'copy', '文件', 'file', '目录', 'folder', 'ls', 'dir'], tools: ['read_file', 'write_file', 'list_files', 'exec'] },
+      { category: 'code_operations', keywords: ['代码', 'code', '函数', 'function', '类', 'class', '模块', 'module', '分析', 'analyze', '重构', 'refactor', '搜索', 'search', 'grep', '测试', 'test', '构建', 'build', '编译', 'compile', 'lint', '快排', '排序', '算法', 'bug', 'debug', '修复', 'fix'], tools: ['read_file', 'write_file', 'exec', 'search_files', 'code_intel'] },
+      { category: 'git_operations', keywords: ['git', '提交', 'commit', '分支', 'branch', '合并', 'merge', '推送', 'push', '拉取', 'pull', 'diff', 'log', 'checkout', 'stash', 'rebase'], tools: ['git_status', 'git_diff', 'git_commit', 'git_branch', 'exec'] },
+      { category: 'web_operations', keywords: ['搜', '搜索', 'search', 'google', '百度', 'bing', '网页', 'web', 'url', '链接', '抓取', 'fetch', '爬', '天气', 'weather', '访问', 'visit', 'browse'], tools: ['search_web', 'fetch_url', 'browse'] },
+      { category: 'system_operations', keywords: ['运行', 'run', '执行', 'exec', '命令', 'command', '进程', 'process', '端口', 'port', '服务', 'service', '安装', 'install', '配置', 'config', 'docker', 'npm', 'pip', 'yarn', 'ps', 'top'], tools: ['exec', 'get_time'] },
+      { category: 'knowledge_query', keywords: ['是什么', '什么是', '为什么', '怎么', '如何', '区别', '原理', 'what is', 'why', 'how to', 'explain', 'difference', '推荐', 'recommend', '建议', 'suggest', '对比', '比较', 'compare'], tools: ['search_web'] },
+    ];
+
+    let bestCategory = 'conversation';
+    let bestConfidence = 0.2;
+    let bestTools: string[] = [];
+    let bestHit = false;
+
+    for (const rule of rules) {
+      const matchedKeywords = rule.keywords.filter(k => lower.includes(k));
+      if (matchedKeywords.length > 0) {
+        const confidence = Math.min(0.95, 0.5 + matchedKeywords.length * 0.15);
+        if (confidence > bestConfidence) {
+          bestCategory = rule.category;
+          bestConfidence = confidence;
+          bestTools = rule.tools;
+          bestHit = true;
+        }
+      }
     }
 
-    // 无匹配原型，返回 conversation
-    return { category: 'conversation', confidence: 0.2, suggestedTools: [], hit: false };
+    return { category: bestCategory, confidence: bestConfidence, suggestedTools: bestTools, hit: bestHit };
   }
 
   /**

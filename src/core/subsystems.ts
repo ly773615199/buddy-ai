@@ -821,6 +821,16 @@ export class Subsystems {
     this.rightBrain = this.threeBrain.right;
     this.cerebellum = this.threeBrain.cerebellum;
 
+    // Step 18: 注入 TextEncoder 全局单例到 RightBrain
+    try {
+      const { getGlobalTextEncoder } = await import('../brain/right/features/text-encoder-singleton.js');
+      const textEnc = getGlobalTextEncoder();
+      this.rightBrain.setTextEncoder(textEnc);
+      if (verbose) console.log(`[ThreeBrain] TextEncoder 单例已注入: ${textEnc.countParams()} 参数`);
+    } catch (err) {
+      if (verbose) console.warn('[ThreeBrain] TextEncoder 单例注入失败:', (err as Error).message);
+    }
+
     // 同步注入 ModelRouter 到 UnifiedScheduler（消除异步竞态）
     // ModelPool 可能尚未初始化，但 router.select() 内部已处理 pool=null 的情况
     const llmRouter = this._llm.getRouter();

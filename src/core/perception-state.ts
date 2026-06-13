@@ -15,6 +15,8 @@ export interface PerceptionState {
     confidence: number;         // 0-1
     hit: boolean;               // 是否命中规则
     suggestedTools: string[];   // 推荐工具
+    /** 原型匹配结果（四信号融合） */
+    protoMatch?: { prototypeId: string; distance: number; confidence: number };
   };
   domains: string[];            // 任务域标签
   complexity: 'simple' | 'medium' | 'complex';
@@ -110,7 +112,7 @@ export function mapTaskType(category: string): PerceptionState['taskType'] {
     system_operations: 'tools',
     knowledge_query: 'reasoning',
     conversation: 'chat',
-    complex_task: 'complex',
+    complex_task: 'domain',
   };
   return CATEGORY_TO_TASK[category] ?? 'chat';
 }

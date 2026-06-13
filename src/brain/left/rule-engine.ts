@@ -431,6 +431,333 @@ export class RuleEngine {
         stats: { hits: 0, successes: 0, lastUsed: 0 },
         createdAt: now,
       },
+
+      // ── Git 高级规则 ──
+      {
+        id: 'builtin-git-advanced',
+        name: 'git stash/cherry-pick/revert/reset → 直接执行',
+        priority: 90,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^git\s+(stash|cherry-pick|revert|reset|tag|blame|bisect|reflog|clean)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Git 高级命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+      {
+        id: 'builtin-git-init-clone',
+        name: 'git init/clone → 直接执行',
+        priority: 89,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^git\s+(init|clone)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Git 初始化/克隆，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 文件高级操作规则 ──
+      {
+        id: 'builtin-file-perms',
+        name: 'chmod/chown/ln/mkdir/rm → 直接执行',
+        priority: 86,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(chmod|chown|chgrp|ln|mkdir|rmdir|rm|cp|mv|touch|install)\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '文件操作命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+      {
+        id: 'builtin-file-search-advanced',
+        name: 'locate/whereis/realpath/readlink → 直接执行',
+        priority: 79,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(locate|whereis|realpath|readlink|basename|dirname|stat|file)\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '文件查找命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 文本处理规则 ──
+      {
+        id: 'builtin-text-process',
+        name: 'sed/awk/tr/sort/uniq/cut → 直接执行',
+        priority: 80,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(sed|awk|tr|sort|uniq|cut|paste|join|comm|diff|patch|xargs)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '文本处理命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 压缩/归档规则 ──
+      {
+        id: 'builtin-archive',
+        name: 'tar/zip/unzip/gzip → 直接执行',
+        priority: 81,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(tar|zip|unzip|gzip|gunzip|bzip2|xz|7z|zstd)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '压缩/归档命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.9, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── SSH/远程规则 ──
+      {
+        id: 'builtin-remote',
+        name: 'ssh/scp/rsync → 直接执行',
+        priority: 78,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(ssh|scp|rsync|sftp)\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '远程操作命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── Python 规则 ──
+      {
+        id: 'builtin-python',
+        name: 'python/pytest/python -m → 直接执行',
+        priority: 85,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(python3?|pytest|pylint|mypy|black|ruff|isort|flake8)\b/.test(content)
+            || /^python3?\s+-m\s/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Python 命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── Node.js 规则 ──
+      {
+        id: 'builtin-node',
+        name: 'node/npx/tsx/ts-node → 直接执行',
+        priority: 84,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(node|npx|tsx|ts-node|bun|deno)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Node.js 命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 系统信息规则 ──
+      {
+        id: 'builtin-sysinfo',
+        name: '系统信息查询 → 直接执行',
+        priority: 76,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(hostname|uptime|date|cal|last|lastlog|w|id|groups|finger)\b/.test(content)
+            || /^查看(系统|主机|内存|磁盘|CPU|负载)/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '系统信息查询，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.85, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 管道/组合命令规则 ──
+      {
+        id: 'builtin-pipeline',
+        name: '管道/重定向命令 → 直接执行',
+        priority: 75,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          // 包含管道符或重定向的命令
+          return /\|/.test(content) || />/.test(content) || /&&/.test(content) || /;\s*\w/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '管道/组合命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 环境变量/Shell 规则 ──
+      {
+        id: 'builtin-shell',
+        name: 'Shell 环境命令 → 直接执行',
+        priority: 74,
+        condition: (signal) => {
+          const content = (signal.content ?? "")?.trim() ?? "";
+          return /^(echo|printf|test|true|false|set|unset|alias|unalias|source|eval|exec)\b/.test(content)
+            || /^\$\{?\w+\}?/.test(content); // 变量引用
+        },
+        action: (signal) => ({
+          mode: 'single', reason: 'Shell 环境命令，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 下载规则 ──
+      {
+        id: 'builtin-download',
+        name: '下载/获取资源 → 直接执行',
+        priority: 73,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase();
+          return content.includes('下载') || content.includes('download')
+            || /^https?:\/\/\S+$/.test(content.trim()); // 纯 URL
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '下载/获取资源',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.7, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 翻译/语言规则 ──
+      {
+        id: 'builtin-translate',
+        name: '翻译请求 → LLM 处理',
+        priority: 68,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase();
+          return content.includes('翻译') || content.includes('translate')
+            || /^(英译中|中译英|日译中|中译日|韩译中)/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '翻译请求，使用 LLM',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 解释/总结规则 ──
+      {
+        id: 'builtin-explain',
+        name: '解释/总结/概括 → LLM 处理',
+        priority: 67,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase();
+          return /^(解释|总结|概括|归纳|梳理|分析一下|帮我分析|帮我总结|帮我解释|summarize|explain|analyze)\b/.test(content);
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '解释/总结请求，使用 LLM',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.75, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 写作/生成规则 ──
+      {
+        id: 'builtin-writing',
+        name: '写作/生成/创作 → LLM 处理',
+        priority: 66,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase();
+          return /^(写|撰写|起草|生成|创作|帮我写|write|draft|compose|generate)\b/.test(content)
+            && !content.includes('代码') && !content.includes('code');
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '写作/生成请求，使用 LLM',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.75, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
+
+      // ── 调试/诊断规则 ──
+      {
+        id: 'builtin-debug',
+        name: '调试/诊断/日志查看 → 直接执行',
+        priority: 72,
+        condition: (signal) => {
+          const content = (signal.content ?? "").toLowerCase();
+          return /^(查看|检查|诊断|调试|debug|diagnose|tail\s+-f|dmesg|strace|ltrace|gdb)\b/.test(content)
+            || content.includes('日志') || content.includes('log');
+        },
+        action: (signal) => ({
+          mode: 'single', reason: '调试/诊断请求，直接执行',
+          selectedNodes: [{ id: 'auto', type: 'cloud_node' }],
+          confidence: 0.8, source: 'rule',
+        }),
+        source: 'builtin',
+        stats: { hits: 0, successes: 0, lastUsed: 0 },
+        createdAt: now,
+      },
     ];
   }
 
