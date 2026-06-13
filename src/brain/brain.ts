@@ -284,27 +284,34 @@ export class ThreeBrain {
 
     const latencyMs = performance.now() - t0;
 
-    // Step 3.5: 脑内构图 — 高不确定性时预评估候选方案
+    // Step 3.5: 脑内构图 — Step 23 改造：触发条件从"经验不足"→"选择困难"
+    // 当多个候选方案置信度差距 ≤ 0.3 时触发（有选择困难）
     let mentalSimulation: DecisionResult['mentalSimulation'];
-    if (intuition && intuition.qualityEstimate < 0.5 && plan.confidence < 0.6) {
+    const hasChoiceDifficulty = plan.confidence < 0.7 &&
+      plan.selectedNodes.length >= 2 &&
+      (intuition === undefined || intuition.qualityEstimate < 0.6);
+    if (hasChoiceDifficulty) {
       try {
-        // 检查右脑 NN 是否已训练（至少有 10 个样本）
         const rightStats = this.right.getLearnStats();
         if (rightStats.totalSamples >= 10) {
-          const candidates = [
-            { type: 0, params: [], label: 'sequential' },
-            { type: 1, params: [], label: 'parallel' },
-            { type: 2, params: [], label: 'single' },
-          ];
-          const best = this.right.bestAction([], candidates);
-          if (best) {
+          // Step 23: 用真实 SceneGraph 替代空 tokens
+          const sceneGraph = this.buildSceneFromContext(signal, plan);
+          const sceneActions = plan.selectedNodes.map((node, i) => ({
+            type: node.id ?? `option_${i}`,
+            params: new Float32Array([i / Math.max(1, plan.selectedNodes.length - 1)]),
+          }));
+          const predictions = this.right.imagineScene(sceneGraph, sceneActions);
+          if (predictions.length > 0) {
+            // 选预测收益最高的方案
+            const scored = predictions.map((pred, i) => ({
+              label: plan.selectedNodes[i]?.id ?? `option_${i}`,
+              confidence: pred.completionProb ?? 0,
+              topologyChange: pred.riskScore ?? 0,
+            }));
+            scored.sort((a, b) => b.confidence - a.confidence);
             mentalSimulation = {
-              candidates: candidates.map(c => ({
-                label: c.label,
-                confidence: best.prediction.confidence,
-                topologyChange: best.prediction.topologyChangeProb,
-              })),
-              selected: best.label,
+              candidates: scored,
+              selected: scored[0].label,
             };
           }
         } else if (this.verbose) {
@@ -645,6 +652,42 @@ export class ThreeBrain {
    * - 对多个候选动作分别预测
    * - 选置信度最高、拓扑变化最小的方案
    */
+
+  /**
+   * Step 23: 从信号+计划构建 SceneGraph（替代空 tokens）
+   *
+   * 将当前决策上下文编码为场景图：
+   * - 任务域 → 节点
+   * - 候选方案 → 边（关系）
+   */
+  private buildSceneFromContext(signal: TaskSignal, plan: ExecutionPlan): SceneGraph {
+    const nodes: SceneGraph['nodes'] = [];
+    const edges: SceneGraph['edges'] = [];
+
+    // 用户输入 → 根节点
+    nodes.push({ id: 'input', category: 'text', attributes: { x: 0.5, y: 0.5 } });
+
+    // 任务域 → 域节点
+    for (const domain of signal.domains.slice(0, 4)) {
+      const domainHash = domain.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xff, 0) / 255;
+      nodes.push({ id: `domain_${domain}`, category: 'concept', attributes: { weight: domainHash } });
+      edges.push({ source: 'input', target: `domain_${domain}`, relation: 'has_domain' });
+    }
+
+    // 候选方案 → 方案节点
+    for (const node of plan.selectedNodes.slice(0, 4)) {
+      nodes.push({ id: `plan_${node.id}`, category: 'action', attributes: { priority: 0.7 } });
+      edges.push({ source: 'input', target: `plan_${node.id}`, relation: 'has_option' });
+    }
+
+    // 复杂度 → 约束边
+    if (signal.complexity === 'complex') {
+      edges.push({ source: 'input', target: nodes[Math.min(1, nodes.length - 1)]?.id ?? 'input', relation: 'constrained_by' });
+    }
+
+    return { nodes, edges };
+  }
+
   imagine(input: string, signal: TaskSignal, candidates: Array<{ type: number; params?: number[]; label: string }>) {
     // 用信号特征编码当前状态（简化版）
     const tokens = signal.domains.length > 0

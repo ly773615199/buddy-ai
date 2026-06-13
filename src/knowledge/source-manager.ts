@@ -101,10 +101,10 @@ export class KnowledgeSourceManager {
       return cached.result;
     }
 
-    // 确定要查询的源
+    // 确定要查询的源（Step 15: 按领域精准路由）
     const targetSources = options?.sources
       ? options.sources.map(id => this.sources.get(id)).filter((s): s is KnowledgeSource => !!s?.isAvailable())
-      : this.getAvailableSourcesByPriority();
+      : this.getSourcesByDomain(options?.domain);
 
     // 并行查询所有源
     const searchPromises = targetSources.map(async source => {
@@ -242,6 +242,48 @@ export class KnowledgeSourceManager {
    * 按优先级获取可用源
    * 本地 → 对话 → 飞书 → 网络
    */
+  /**
+   * Step 15: 按领域选择知识源（精准路由）
+   *
+   * 替代全量查询，根据任务领域只查相关源：
+   * - code → 本地源（代码仓库）+ web（GitHub/StackOverflow）
+   * - data → 本地源 + web（arxiv/wikipedia）
+   * - writing → 本地源 + feishu + web（wikipedia）
+   * - web → web（搜索引擎）
+   * - 其他 → 全部可用源
+   */
+  private static readonly DOMAIN_SOURCES: Record<string, KnowledgeNode['sourceType'][]> = {
+    code: ['local', 'web'],
+    data: ['local', 'web'],
+    writing: ['local', 'feishu', 'web'],
+    web: ['web'],
+    knowledge: ['local', 'feishu', 'web'],
+    chat: [],  // 闲聊不需要知识检索
+    tools: [], // 工具调用不需要知识检索
+  };
+
+  private getSourcesByDomain(domain?: string): KnowledgeSource[] {
+    if (!domain) return this.getAvailableSourcesByPriority();
+
+    const preferredTypes = KnowledgeSourceManager.DOMAIN_SOURCES[domain];
+    if (!preferredTypes || preferredTypes.length === 0) {
+      // 未知领域或不需要检索的领域，返回空（跳过检索）
+      if (domain === 'chat' || domain === 'tools') return [];
+      return this.getAvailableSourcesByPriority();
+    }
+
+    const available = [...this.sources.values()].filter(s => s.isAvailable());
+    const preferred = available.filter(s => preferredTypes.includes(s.type));
+    // 如果偏好源全部不可用，降级到全量
+    return preferred.length > 0 ? preferred : available;
+  }
+
+  /** 获取领域相关的源 ID 列表 */
+  getPreferredSourceIds(domain?: string): string[] {
+    const sources = this.getSourcesByDomain(domain);
+    return sources.map(s => s.id);
+  }
+
   private getAvailableSourcesByPriority(): KnowledgeSource[] {
     const priorityOrder: KnowledgeNode['sourceType'][] = ['local', 'conversation', 'feishu', 'web'];
     const available = [...this.sources.values()].filter(s => s.isAvailable());

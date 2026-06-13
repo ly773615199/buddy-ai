@@ -833,6 +833,18 @@ export class RuleEngine {
       }
     }
 
+    // 管道/重定向/链式命令：以已知命令开头，允许管道和重定向
+    const chained = trimmed.match(/^((?:git|npm|yarn|pnpm|pip3?|tsc|npx|make|cargo|docker|docker-compose|curl|wget|ping|cat|ls|grep|rg|find|head|tail|wc|sort|awk|sed|ps|df|du|free|node|python3?|tsx|bun|deno)\b.+[|>&;]{1,}.+)$/i);
+    if (chained) {
+      return { name: 'exec', args: { command: chained[1] } };
+    }
+
+    // sudo 命令
+    const sudoMatch = trimmed.match(/^(sudo\s+.+)$/i);
+    if (sudoMatch) {
+      return { name: 'exec', args: { command: sudoMatch[1] } };
+    }
+
     return null;
   }
 
