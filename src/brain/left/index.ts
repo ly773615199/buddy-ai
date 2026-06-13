@@ -75,7 +75,7 @@ export class LeftBrain {
     // 1. 规则引擎优先
     const ruleResult = this.ruleEngine.evaluate(signal, resources, intuition, body);
     if (ruleResult) {
-      return this.enrichPlanWithRouter(ruleResult, signal, body);
+      return await this.enrichPlanWithRouter(ruleResult, signal, body);
     }
 
     // 2. 调度器兜底（Phase 4: async，支持 predictDetailed）
@@ -96,16 +96,16 @@ export class LeftBrain {
    * 当 selectedNodes 中有 cloud_node 缺少 provider/model 时，
    * 通过 ModelRouter 从统一池选出具体模型注入。
    */
-  private enrichPlanWithRouter(
+  private async enrichPlanWithRouter(
     plan: ExecutionPlan,
     signal: TaskSignal,
     body?: BodyState,
-  ): ExecutionPlan {
+  ): Promise<ExecutionPlan> {
     const router = this.scheduler.getRouter();
     if (!router) return plan;
 
     let enriched = false;
-    const nodes = plan.selectedNodes.map(node => {
+    const nodes = await Promise.all(plan.selectedNodes.map(async node => {
       // 只处理 cloud_node 且缺少模型信息的节点
       if (node.type !== 'cloud_node' || (node.provider && node.model)) {
         return node;
@@ -113,7 +113,7 @@ export class LeftBrain {
 
       try {
         const taskType = signal.taskType as import('../../core/model-router.js').TaskType;
-        const selection = router.select(taskType, {
+        const selection = await router.select(taskType, {
           content: signal.content ?? '',
           bodyState: body,
         });
@@ -139,7 +139,7 @@ export class LeftBrain {
       }
 
       return node;
-    });
+    }));
 
     if (!enriched) return plan;
 

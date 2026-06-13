@@ -651,6 +651,8 @@ function mergePrototypes(a: Prototype, b: Prototype, dim: number): Prototype {
     firstSeen: Math.min(a.firstSeen, b.firstSeen),
     lastSeen: Math.max(a.lastSeen, b.lastSeen),
     isSeed: a.isSeed || b.isSeed,
+    qualityScore: Math.max(a.qualityScore, b.qualityScore),
+    failureStreak: 0,
     tags: ['merged', `from:${a.id}`, `from:${b.id}`],
   };
 }

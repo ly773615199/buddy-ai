@@ -194,7 +194,7 @@ export class UnifiedScheduler {
 
       // 极低信心 → 强制 LLM（跳过所有经验路由）
       if (quality < this.config.metacognitiveForceLlm) {
-        return this.selectViaRouter('metacognitive_override', signal, body,
+        return await this.selectViaRouter('metacognitive_override', signal, body,
           `元认知降级: quality=${quality.toFixed(2)} < ${this.config.metacognitiveForceLlm}`);
       }
 
@@ -216,7 +216,7 @@ export class UnifiedScheduler {
 
     // 极高新颖度 → LLM 为主
     if (novelty >= this.config.noveltyExtremeThreshold) {
-      return this.selectViaRouter('llm_only', signal, body,
+      return await this.selectViaRouter('llm_only', signal, body,
         `极高新颖度(${novelty.toFixed(2)})`);
     }
 
@@ -270,13 +270,13 @@ export class UnifiedScheduler {
       // Phase 4: 优先用 predictDetailed 的概率分布加权
       const tsResult = this._rightBrainPredictDetailed
         ? await this.thompsonSelectWithProbs(signal, resources, body)
-        : this.thompsonSelect(signal, resources, intuition, body);
+        : await this.thompsonSelect(signal, resources, intuition, body);
       if (tsResult) return tsResult;
     }
 
     // ── Layer 4: 右脑直觉信号注入 ──
     if (intuition?.hit && intuition.intent.confidence > 0.7) {
-      return this.selectViaRouter('llm_with_hint', signal, body,
+      return await this.selectViaRouter('llm_with_hint', signal, body,
         `直觉推荐: ${intuition.intent.category} (conf=${intuition.intent.confidence.toFixed(2)})`);
     }
 
@@ -284,19 +284,19 @@ export class UnifiedScheduler {
     if (body) {
       // 高负载 → 降级到轻量模型
       if (body.load > 80) {
-        return this.selectViaRouter('budget_fallback', signal, body,
+        return await this.selectViaRouter('budget_fallback', signal, body,
           `高负载降级(load=${body.load})`);
       }
 
       // 低精力 → 简化回复
       if (body.energy < 30) {
-        return this.selectViaRouter('budget_fallback', signal, body,
+        return await this.selectViaRouter('budget_fallback', signal, body,
           `低精力(energy=${body.energy})`);
       }
 
       // 高困惑度 → 强模型详细解释
       if (body.confusionLevel > 70) {
-        return this.selectViaRouter('llm_only', signal, body,
+        return await this.selectViaRouter('llm_only', signal, body,
           `高困惑度(confusion=${body.confusionLevel})`);
       }
     }
@@ -319,7 +319,7 @@ export class UnifiedScheduler {
 
         // 工具不可靠 → 强制 LLM 路径，经验仅作参考
         if (hasUnreliable) {
-          return this.selectViaRouter('llm_with_hint', signal, body,
+          return await this.selectViaRouter('llm_with_hint', signal, body,
             `工具不可靠(${targetTools.filter(t => unreliableTools.includes(t!)).join(',')}), 经验降级为参考`);
         }
 
@@ -336,7 +336,7 @@ export class UnifiedScheduler {
     }
 
     // ── Layer 6: 默认兜底 ──
-    return this.selectViaRouter('llm_only', signal, body, '默认调度');
+    return await this.selectViaRouter('llm_only', signal, body, '默认调度');
   }
 
   /**
@@ -345,12 +345,12 @@ export class UnifiedScheduler {
    * 从直觉推荐的工具中，用 Thompson Sampling 选出最优组合
    * 平衡探索（尝试新工具）和利用（使用已知好工具）
    */
-  private thompsonSelect(
+  private async thompsonSelect(
     signal: TaskSignal,
     resources: ResourceState,
     intuition: IntuitionSignal,
     body?: BodyState,
-  ): ExecutionPlan | null {
+  ): Promise<ExecutionPlan | null> {
     if (!intuition.suggestedTools || intuition.suggestedTools.length === 0) {
       return null;
     }
@@ -377,7 +377,7 @@ export class UnifiedScheduler {
     toolScores.sort((a, b) => b.sample - a.sample);
     const best = toolScores[0];
 
-    return this.selectViaRouter('llm_with_hint', signal, body,
+    return await this.selectViaRouter('llm_with_hint', signal, body,
       `Thompson Sampling: ${best.tool} (sample=${best.sample.toFixed(3)})`);
   }
 
@@ -424,7 +424,7 @@ export class UnifiedScheduler {
         console.log(`[Scheduler] Thompson+Prob: ${best.tool} (sample=${best.sample.toFixed(3)}, prob=${best.prob.toFixed(2)})`);
       }
 
-      return this.selectViaRouter('llm_with_hint', signal, body,
+      return await this.selectViaRouter('llm_with_hint', signal, body,
         `Thompson+Prob: ${best.tool} (sample=${best.sample.toFixed(3)}, prob=${best.prob.toFixed(2)})`);
     } catch (err) {
       if (this.verbose) console.warn('[Scheduler] predictDetailed 失败，降级基础 TS:', (err as Error).message);
@@ -470,16 +470,16 @@ export class UnifiedScheduler {
    * 本方法负责从统一池选出具体模型节点。
    * router 不可用时降级到本地专家。
    */
-  private selectViaRouter(
+  private async selectViaRouter(
     routePath: RoutePath,
     signal: TaskSignal,
     body: BodyState | undefined,
     reason: string,
-  ): ExecutionPlan {
+  ): Promise<ExecutionPlan> {
     if (this.router) {
       try {
         const taskType = signal.taskType as TaskType;
-        const selection = this.router.select(taskType, {
+        const selection = await this.router.select(taskType, {
           content: signal.content ?? '',
           bodyState: body,
         });

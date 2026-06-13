@@ -404,7 +404,7 @@ export class RuleEngine {
         priority: 74,
         condition: (signal, resources) => resources.experienceHit !== null,
         action: (signal, resources) => ({
-          mode: 'single', reason: `经验路由命中: ${resources.experienceHit!.id}`,
+          mode: 'single', reason: `经验路由命中: ${(resources.experienceHit as any)?.skill?.id ?? (resources.experienceHit as any)?.path ?? 'unknown'}`,
           selectedNodes: [{ id: 'auto', type: 'cloud_node' }, { id: 'exp', type: 'experience' }],
           confidence: 0.8, source: 'rule',
         }),

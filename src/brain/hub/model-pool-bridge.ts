@@ -19,7 +19,7 @@ interface ModelPoolLike {
     tier?: string;
     costPer1kInput?: number;
   }>;
-  recordFeedback?(profileId: string, taskType: string, success: boolean, latencyMs: number, cost?: number): void;
+  recordFeedback?(profileId: string, taskType: string, success: boolean, latencyMs: number, cost?: number, qualityScore?: number): void;
 }
 
 export class ModelPoolResourceBridge {

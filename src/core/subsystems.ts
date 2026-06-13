@@ -826,14 +826,13 @@ export class Subsystems {
     this.cerebellum = this.threeBrain.cerebellum;
 
     // Step 18: 注入 TextEncoder 全局单例到 RightBrain
-    try {
-      const { getGlobalTextEncoder } = await import('../brain/right/features/text-encoder-singleton.js');
+    import('../brain/right/features/text-encoder-singleton.js').then(({ getGlobalTextEncoder }) => {
       const textEnc = getGlobalTextEncoder();
-      this.rightBrain.setTextEncoder(textEnc);
+      this.rightBrain?.setTextEncoder(textEnc);
       if (verbose) console.log(`[ThreeBrain] TextEncoder 单例已注入: ${textEnc.countParams()} 参数`);
-    } catch (err) {
-      if (verbose) console.warn('[ThreeBrain] TextEncoder 单例注入失败:', (err as Error).message);
-    }
+    }).catch(err => {
+      if (verbose) console.warn('[ThreeBrain] TextEncoder 单例注入失败:', err.message);
+    });
 
     // 同步注入 ModelRouter 到 UnifiedScheduler（消除异步竞态）
     // ModelPool 可能尚未初始化，但 router.select() 内部已处理 pool=null 的情况
@@ -842,19 +841,19 @@ export class Subsystems {
     if (verbose) console.log('[ThreeBrain] ModelRouter 已同步注入 UnifiedScheduler');
 
     // Step 6+7: ResourceHub + ModelPoolResourceBridge 初始化
-    try {
-      const { ResourceHub } = await import('../brain/hub/resource-hub.js');
-      const { ModelPoolResourceBridge } = await import('../brain/hub/model-pool-bridge.js');
-      this.resourceHub = new ResourceHub();
-      const pool = llmRouter?.getPool?.();
-      if (pool) {
-        this.modelPoolBridge = new ModelPoolResourceBridge(pool, this.resourceHub);
-        const synced = this.modelPoolBridge.fullSync();
-        if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源`);
-      }
-    } catch (err) {
-      if (verbose) console.warn('[ResourceHub] 初始化失败:', (err as Error).message);
-    }
+    import('../brain/hub/resource-hub.js').then(({ ResourceHub }) => {
+      return import('../brain/hub/model-pool-bridge.js').then(({ ModelPoolResourceBridge }) => {
+        this.resourceHub = new ResourceHub();
+        const pool = llmRouter?.getPool?.();
+        if (pool) {
+          this.modelPoolBridge = new ModelPoolResourceBridge(pool as any, this.resourceHub);
+          const synced = this.modelPoolBridge.fullSync();
+          if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源`);
+        }
+      });
+    }).catch(err => {
+      if (verbose) console.warn('[ResourceHub] 初始化失败:', err.message);
+    });
 
     // 将 SensorFusion 的 STMP 写入桥接（替代 FusionBuffer）
     this.cerebellum.sensorFusion.setStmpWriter((entry) => {
