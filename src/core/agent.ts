@@ -415,10 +415,19 @@ export class BuddyAgent {
           }
           console.log(`\n  🔧 ${tc.name}(${JSON.stringify(tc.args).slice(0, 100)})`);
           this.sys.cerebellum?.onToolSuccess();
-          this.sys.audit.logToolResult(tc.name, !tc.result.startsWith('['), tc.result.slice(0, 200));
+          const toolSuccess = !tc.result.startsWith('[');
+          this.sys.audit.logToolResult(tc.name, toolSuccess, tc.result.slice(0, 200));
           this.sys.pet.trackFeature(tc.name);
           this.sys.tools.recordUsage(tc.name);
           this.behavior.trackTool(tc.name);
+          // 反馈到统一资源系统
+          if (this.sys.resourceSystem) {
+            this.sys.resourceSystem.hub.recordOutcome(`tool/${tc.name}`, {
+              success: toolSuccess,
+              latencyMs: 0,
+              taskType: 'tools',
+            });
+          }
         }
       }
 

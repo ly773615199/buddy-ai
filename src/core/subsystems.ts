@@ -879,10 +879,23 @@ export class Subsystems {
     import('../brain/hub/index.js').then(({ createResourceSystem }) => {
       return import('../brain/hub/model-pool-bridge.js').then(({ ModelPoolResourceBridge }) => {
         const system = createResourceSystem({
-          schedulerAutoRefresh: false, // 手动控制启动时机
+          schedulerAutoRefresh: false,
         });
         this.resourceSystem = system;
-        this.resourceHub = system.adapter as any; // 向后兼容：adapter 实现旧 ResourceHub 接口
+        this.resourceHub = system.adapter as any; // 向后兼容
+
+        // 生命周期事件监听
+        system.hub.onLifecycleEvent((event) => {
+          if (event.to === 'degraded') {
+            console.warn(`[ResourceHub] ⚠️ 资源降级: ${event.resourceId} (${event.reason})`);
+          }
+          if (event.to === 'deprecated') {
+            console.warn(`[ResourceHub] 🗑️ 资源淘汰: ${event.resourceId} (${event.reason})`);
+          }
+          if (event.from === 'degraded' && event.to === 'active') {
+            console.log(`[ResourceHub] ✅ 资源恢复: ${event.resourceId}`);
+          }
+        });
 
         const pool = llmRouter?.getPool?.();
         if (pool) {
@@ -911,6 +924,24 @@ export class Subsystems {
           }
           if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源（统一资源系统）`);
         }
+
+        // 启动探测调度器（延迟 60s，等系统稳定）
+        setTimeout(() => {
+          system.scheduler.start();
+          if (verbose) console.log('[ResourceHub] 探测调度器已启动');
+        }, 60_000);
+
+        // 定期审计（每 6 小时）
+        setInterval(() => {
+          try {
+            const report = system.hub.runAudit();
+            if (report.retired.length > 0) {
+              console.log(`[ResourceHub] 审计: ${report.retired.length} 个资源被淘汰`);
+            }
+          } catch (e: any) {
+            if (verbose) console.warn('[ResourceHub] 审计异常:', e.message);
+          }
+        }, 6 * 60 * 60 * 1000);
       });
     }).catch(err => {
       if (verbose) console.warn('[ResourceHub] 初始化失败:', err.message);

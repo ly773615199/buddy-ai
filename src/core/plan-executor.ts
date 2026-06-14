@@ -13,6 +13,43 @@ import type { WSHandler } from './ws-handler.js';
 import type { BuddyConfig } from '../types.js';
 import { logger } from '../audit/structured-logger.js';
 import { CerebellumExecutionMonitor } from '../orchestrate/executor.js';
+
+// ==================== 资源反馈辅助 ====================
+
+/**
+ * 将执行结果反馈到统一资源系统
+ */
+function recordResourceOutcome(
+  sys: Subsystems,
+  resourceId: string,
+  success: boolean,
+  latencyMs: number,
+  cost?: number,
+  taskType?: string,
+  domain?: string,
+): void {
+  const rs = sys.resourceSystem;
+  if (!rs) return;
+  try {
+    rs.hub.recordOutcome(resourceId, { success, latencyMs, cost, taskType, domain });
+  } catch { /* 静默失败，不阻塞主流程 */ }
+}
+
+/**
+ * 从 OrchestrationNode 构造资源 ID
+ */
+function nodeId(node: OrchestrationNode): string | null {
+  if (node.type === 'cloud_node' && node.provider && node.model) {
+    return `model/${node.provider}/${node.model}`;
+  }
+  if (node.type === 'experience' && node.skillId) {
+    return `skill/${node.skillId}`;
+  }
+  if (node.type === 'local_expert' && node.domain) {
+    return `expert/${node.domain}`;
+  }
+  return null;
+}
 import { CapabilityScheduler, type SubTask, type CapabilityState } from './capability-scheduler.js';
 import { LLMProfiler } from './llm-profiler.js';
 import { GenerationCache } from './generation-cache.js';
@@ -339,8 +376,8 @@ async function executeWithConcreteNode(
     { role: 'user', content, timestamp: Date.now() },
   ];
 
+  const startTime = Date.now();
   try {
-    const startTime = Date.now();
     const providerConfig = node.apiKey
       ? { apiKey: node.apiKey, baseUrl: node.baseUrl }
       : ctx.config.models?.providers?.find((p: any) => p.id === node.provider);
@@ -377,10 +414,14 @@ async function executeWithConcreteNode(
           selection.profile.costPer1kInput * (result.text?.length ?? 0) / 1000,
         );
       }
+      // 反馈到统一资源系统
+      recordResourceOutcome(ctx.sys, `model/${node.provider}/${node.model}`, true, elapsed, undefined, 'chat');
     }
 
     return { text: result.text ?? '', source: `unified_pool/${node.provider}/${node.model}`, toolCalls: result.toolCalls ?? [] };
   } catch (err) {
+    // 反馈失败到统一资源系统
+    recordResourceOutcome(ctx.sys, `model/${node.provider}/${node.model}`, false, Date.now() - startTime, undefined, 'chat');
     console.warn(`[PlanExecutor] 统一池执行失败，退回默认: ${(err as Error).message}`);
     log.warn('统一池执行失败，退回默认');
     return executeSingle(ctx, fallbackPlan(content));
@@ -414,11 +455,17 @@ async function executeLocal(ctx: ExecutionContext, plan: OrchestrationPlan): Pro
   const node = plan.selectedNodes[0];
   if (node?.domain) {
     try {
+      const start = Date.now();
       const result = await ctx.sys.ternaryRouter.query(node.domain, plan.content);
+      const elapsed = Date.now() - start;
       if (result.answer && result.answer.length > 10) {
+        recordResourceOutcome(ctx.sys, `expert/${node.domain}`, true, elapsed, undefined, 'chat', node.domain);
         return { text: result.answer, source: `local/${node.domain}`, toolCalls: [] };
       }
-    } catch { /* fallback */ }
+      recordResourceOutcome(ctx.sys, `expert/${node.domain}`, false, elapsed, undefined, 'chat', node.domain);
+    } catch {
+      recordResourceOutcome(ctx.sys, `expert/${node.domain}`, false, 0, undefined, 'chat', node.domain);
+    }
   }
   return executeSingle(ctx, plan);
 }
@@ -454,6 +501,8 @@ async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Pr
         selection.profile.costPer1kInput * (result.text?.length ?? 0) / 1000,
       );
     }
+    // 反馈到统一资源系统
+    recordResourceOutcome(ctx.sys, `model/${selection.profile.id}`, true, elapsed, undefined, 'chat');
   }
 
   return { text: result.text, source: 'single', toolCalls: result.toolCalls ?? [] };
@@ -497,6 +546,15 @@ async function executeParallel(ctx: ExecutionContext, plan: OrchestrationPlan): 
   const expertResults = results
     .map(r => r.status === 'fulfilled' ? r.value : null)
     .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  // 反馈每个专家/模型的执行结果到统一资源系统
+  for (const er of expertResults) {
+    const node = plan.selectedNodes.find(n => n.id === er.nodeId);
+    if (node) {
+      const rid = nodeId(node);
+      if (rid) recordResourceOutcome(ctx.sys, rid, er.success, er.latencyMs);
+    }
+  }
 
   const fused = fuseResults(expertResults, plan.content);
   return { text: fused, source: 'parallel', toolCalls: [], expertResults };
