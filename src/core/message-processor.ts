@@ -301,22 +301,36 @@ export class MessageProcessor {
       budget.add({ id: 'memories', source: 'memory', priority: PRIORITY.MEMORY + (priorityBoost.get('memory') ?? 0), content: this.sanitizeInjected('memory', memoryPrompt), required: false });
     }
 
-    // 5.1 Phase 1.2: 待恢复任务注入（优先级 65，高于记忆低于情绪）
+    // 5.1 Phase 1.2 + Sprint 3.1: 待恢复任务注入（优先级 65，高于记忆低于情绪）
     try {
       const store = getProjectStore();
       const pendingTasks = store.getPendingExecutionCheckpoints(3);
       if (pendingTasks.length > 0) {
         const pendingPrompt = pendingTasks.map(cp => {
-          const completed = cp.completedSteps.length;
-          const failed = cp.failedSteps.length;
-          const pending = cp.pendingSteps.length;
-          return `- 「${cp.goal.slice(0, 80)}」: 完成${completed}步, 失败${failed}步, 待执行${pending}步 (ID: ${cp.id})`;
+          const progress = cp.progress;
+          const resume = cp.resumePlan;
+          // 进度条可视化
+          const progressBar = progress
+            ? ` [${'█'.repeat(Math.floor(progress.percent / 10))}${'░'.repeat(10 - Math.floor(progress.percent / 10))}] ${progress.percent}%`
+            : ` 完成${cp.completedSteps.length}步, 失败${cp.failedSteps.length}步, 待执行${cp.pendingSteps.length}步`;
+
+          let resumeInfo = '';
+          if (resume) {
+            resumeInfo = `\n  → 下一步: ${resume.nextStep}`;
+            if (resume.requiredContext.length > 0) {
+              resumeInfo += `\n  → 需要: ${resume.requiredContext.join(', ')}`;
+            }
+            resumeInfo += `\n  → 剩余约 ${resume.estimatedRemaining} 步`;
+          }
+
+          return `- 「${cp.goal.slice(0, 80)}」${progressBar}${resumeInfo}`;
         }).join('\n');
+
         budget.add({
           id: 'pending-tasks',
           source: 'memory',
           priority: 65,
-          content: `\n## 待恢复的任务\n用户之前未完成的任务，如果相关可以主动询问是否继续：\n${pendingPrompt}`,
+          content: `\n## 待恢复的任务\n用户之前未完成的任务，如果相关可以主动询问是否继续：\n${pendingPrompt}\n\n如果用户说"继续"或提到相关任务，从下一步开始执行。`,
           required: false,
         });
         if (this.verbose) console.log(`  [Checkpoint] 注入 ${pendingTasks.length} 个待恢复任务`);

@@ -212,4 +212,17 @@ export interface ExecutionCheckpoint {
   updatedAt: number;
   resumedAt?: number;
   resumeCount: number;
+  // 结构化续做信息（Sprint 3.1）
+  resumePlan?: {
+    nextStep: string;              // 下一步具体做什么
+    requiredContext: string[];     // 需要的上下文（文件路径、变量名等）
+    estimatedRemaining: number;    // 预估剩余步骤数
+  };
+  progress?: {
+    total: number;                 // 总步骤数
+    done: number;                  // 已完成
+    failed: number;                // 失败
+    current: string;               // 当前步骤描述
+    percent: number;               // 完成百分比
+  };
 }

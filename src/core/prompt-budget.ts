@@ -154,12 +154,21 @@ export class PromptBudgetManager {
         result.push(this.wrapSegment(seg, content));
         budget -= tokens;
       } else if (seg.required && budget > 30) {
-        // required 段：截断到剩余预算
+        // required 段：智能截断到剩余预算
         const truncated = this.truncateToTokens(content, budget);
         result.push(this.wrapSegment(seg, truncated));
         budget = 0;
+      } else if (!seg.required && tokens > 200 && budget > 50) {
+        // 大段非 required 内容：尝试压缩保留
+        const compressed = this.compressSegment(content, budget * 2);
+        const compressedTokens = this.estimateTokens(compressed);
+        if (compressedTokens <= budget) {
+          result.push(this.wrapSegment(seg, compressed));
+          budget -= compressedTokens;
+        }
+        // 压缩后仍超预算 → 丢弃
       }
-      // 非 required 段超预算 → 丢弃
+      // 其他非 required 段超预算 → 丢弃
     }
 
     return result.join('\n\n');
@@ -226,12 +235,57 @@ export class PromptBudgetManager {
   }
 
   /**
-   * 截断到指定 token 数
+   * 智能截断 — 按句子边界切割，保留首尾
    */
   private truncateToTokens(text: string, maxTokens: number): string {
     const maxChars = maxTokens * 2;
     if (text.length <= maxChars) return text;
-    return text.slice(0, maxChars) + '\n...[budget truncated]';
+
+    // 尝试按句子边界截断
+    const sentences = text.split(/(?<=[。！？.!?\n])/);
+    let result = '';
+
+    for (const sentence of sentences) {
+      if ((result + sentence).length > maxChars) break;
+      result += sentence;
+    }
+
+    // 如果句子截断后太短（<50%），回退到段落压缩
+    if (result.length < maxChars * 0.5) {
+      return this.compressSegment(text, maxChars);
+    }
+
+    return result + '\n...[已截断]';
+  }
+
+  /**
+   * 段落压缩 — 保留首尾 + 重要行
+   */
+  private compressSegment(text: string, maxChars: number): string {
+    const lines = text.split('\n');
+
+    if (lines.length <= 3) {
+      return text.slice(0, maxChars) + '\n...[已截断]';
+    }
+
+    // 保留前 2 行和后 1 行
+    const head = lines.slice(0, 2).join('\n');
+    const tail = lines[lines.length - 1];
+    const middleBudget = maxChars - head.length - tail.length - 30;
+
+    if (middleBudget > 50) {
+      // 中间部分保留重要行（包含标题、状态标记的行）
+      const middleLines = lines.slice(2, -1);
+      const important = middleLines
+        .filter(l => l.includes('**') || l.includes('##') || l.includes('→') || l.includes('✅') || l.includes('❌') || l.includes('⚠️'))
+        .slice(0, 3);
+
+      if (important.length > 0) {
+        return `${head}\n...[${middleLines.length - important.length} 行已省略]\n${important.join('\n')}\n${tail}`;
+      }
+    }
+
+    return `${head}\n...[已压缩]\n${tail}`;
   }
 
   /**

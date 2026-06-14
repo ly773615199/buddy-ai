@@ -296,6 +296,22 @@ export class ExecutionSession {
       .filter(s => !s.completedAt)
       .map(s => ({ tool: s.tool, args: s.args }));
 
+    // 结构化续做信息
+    const nextStep = this.steps.find(s => !s.completedAt);
+    const resumePlan = nextStep ? {
+      nextStep: `${nextStep.tool}(${JSON.stringify(nextStep.args).slice(0, 100)})`,
+      requiredContext: this.extractRequiredContext(nextStep),
+      estimatedRemaining: pendingSteps.length,
+    } : undefined;
+
+    const progress = {
+      total: this.steps.length,
+      done: completedSteps.length,
+      failed: failedSteps.length,
+      current: nextStep?.tool ?? '已完成',
+      percent: this.steps.length > 0 ? Math.round(completedSteps.length / this.steps.length * 100) : 100,
+    };
+
     return {
       id: this.id,
       goal: this.goal,
@@ -309,10 +325,28 @@ export class ExecutionSession {
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
       resumeCount: 0,
+      resumePlan,
+      progress,
     };
   }
 
   /** 从 ExecutionCheckpoint 恢复会话 */
+  /** 从步骤中提取需要的上下文信息 */
+  private extractRequiredContext(step: ExecutionStep): string[] {
+    const context: string[] = [];
+    // 从 args 中提取文件路径、关键参数
+    for (const [key, val] of Object.entries(step.args)) {
+      if (typeof val === 'string') {
+        if (val.includes('/') || val.includes('\\') || val.includes('.')) {
+          context.push(`${key}: ${val}`); // 可能是文件路径
+        } else if (val.length > 10 && val.length < 200) {
+          context.push(`${key}: ${val.slice(0, 80)}`);
+        }
+      }
+    }
+    return context;
+  }
+
   static fromCheckpoint(cp: import('../project/types.js').ExecutionCheckpoint): ExecutionSession {
     const session = new ExecutionSession({
       id: cp.id,
@@ -326,6 +360,41 @@ export class ExecutionSession {
     (session as any).status = cp.status === 'completed' ? 'done' : cp.status === 'failed' ? 'failed' : 'paused';
     (session as any).createdAt = cp.createdAt;
     (session as any).updatedAt = cp.updatedAt;
+
+    // 恢复 steps（从 checkpoint 的 completedSteps + failedSteps + pendingSteps 重建）
+    const steps: ExecutionStep[] = [];
+    for (const cs of cp.completedSteps) {
+      steps.push({
+        id: `restored-${steps.length}`,
+        tool: cs.tool,
+        args: {},
+        result: cs.result,
+        success: cs.success,
+        retryCount: 0,
+        completedAt: cp.updatedAt,
+      });
+    }
+    for (const fs of cp.failedSteps) {
+      steps.push({
+        id: `restored-${steps.length}`,
+        tool: fs.tool,
+        args: {},
+        result: fs.error,
+        success: false,
+        retryCount: 0,
+        completedAt: cp.updatedAt,
+      });
+    }
+    for (const ps of cp.pendingSteps) {
+      steps.push({
+        id: `restored-${steps.length}`,
+        tool: ps.tool,
+        args: ps.args,
+        retryCount: 0,
+      });
+    }
+    (session as any).steps = steps;
+
     return session;
   }
 
