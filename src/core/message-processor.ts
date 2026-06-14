@@ -12,6 +12,51 @@ import type { STMPStore, MemoryNode as STMPNode } from '../memory/stmp.js';
 import { PromptInjector } from '../intelligence/prompt-injector.js';
 import type { KnowledgeInterviewer, InterviewQuestion } from '../intelligence/knowledge-interviewer.js';
 import { PromptBudgetManager, PRIORITY } from './prompt-budget.js';
+
+/**
+ * 意图驱动的动态优先级调整
+ * 根据用户意图动态调整各 segment 的优先级
+ */
+function getDynamicPriorityBoost(category: string): Map<string, number> {
+  const boost = new Map<string, number>();
+  switch (category) {
+    case 'code_operations':
+    case 'debugging':
+    case 'data_analysis':
+      boost.set('emotion', -15);        // 代码/调试任务不需要情绪注入
+      boost.set('cognitive', +10);      // 需要了解用户水平
+      boost.set('domain-knowledge', +20);
+      boost.set('skills', +10);
+      break;
+    case 'conversation':
+      boost.set('emotion', +10);        // 闲聊需要情绪感知
+      boost.set('cognitive', +5);
+      boost.set('domain-knowledge', -20);
+      boost.set('skills', -15);
+      break;
+    case 'knowledge_query':
+    case 'planning':
+    case 'writing':
+      boost.set('domain-knowledge', +25);
+      boost.set('memory', +10);
+      boost.set('emotion', -20);
+      break;
+    case 'file_operations':
+    case 'system_operations':
+    case 'devops':
+      boost.set('emotion', -25);
+      boost.set('domain-knowledge', -15);
+      boost.set('skills', +5);
+      break;
+    case 'git_operations':
+      boost.set('emotion', -20);
+      boost.set('domain-knowledge', -10);
+      break;
+    default:
+      break;
+  }
+  return boost;
+}
 import { globalToolCache, ToolCache } from '../tools/cache.js';
 import { ReasoningChainStore } from '../memory/reasoning-chain.js';
 import { ClarificationEngine } from './clarifier.js';
@@ -221,9 +266,21 @@ export class MessageProcessor {
     // E3: 静态段使用预序列化缓存（信任度不变时直接复用）
     budget.add({ id: 'static-cached', source: 'cache', priority: PRIORITY.CORE_INSTRUCTION, content: this.contextCache.static.cachedStaticPrompt, required: true });
 
-    // 3. 情绪状态（动态层，优先级 60）
+    // 动态优先级：根据意图调整各 segment 优先级
+    let priorityBoost = new Map<string, number>();
+    try {
+      const intentResult = this.sys.threeBrain?.right?.classifyFromText(content);
+      if (intentResult?.category) {
+        priorityBoost = getDynamicPriorityBoost(intentResult.category);
+        if (this.verbose && priorityBoost.size > 0) {
+          console.log(`  [PriorityBoost] ${intentResult.category}:`, [...priorityBoost.entries()].map(([k, v]) => `${k}${v > 0 ? '+' : ''}${v}`).join(', '));
+        }
+      }
+    } catch { /* 分类失败不调整 */ }
+
+    // 3. 情绪状态（动态层，优先级 60，按意图调整）
     if (emotionPrompt) {
-      budget.add({ id: 'emotion', source: 'emotion', priority: PRIORITY.EMOTION, content: emotionPrompt, required: false });
+      budget.add({ id: 'emotion', source: 'emotion', priority: PRIORITY.EMOTION + (priorityBoost.get('emotion') ?? 0), content: emotionPrompt, required: false });
     }
 
     // 3.5 欲望状态（动态层，优先级 55）
@@ -236,12 +293,12 @@ export class MessageProcessor {
       this.sanitizeInjected('cognitive',
         '\n## 你对用户的了解\n' + this.sys.cognitive.getUserPromptFragment()
         + '\n\n## 你对自己的认知\n' + this.sys.cognitive.getSelfPromptFragment());
-    budget.add({ id: 'cognitive', source: 'cognitive', priority: PRIORITY.COGNITIVE, content: cognitivePrompt, required: false });
+    budget.add({ id: 'cognitive', source: 'cognitive', priority: PRIORITY.COGNITIVE + (priorityBoost.get('cognitive') ?? 0), content: cognitivePrompt, required: false });
 
     // 5. 记忆检索（E1: 已并行获取）— ISSUE-005: 注入防御
     if (relevantMemories.length > 0) {
       const memoryPrompt = relevantMemories.map(m => `[${m.key}] ${m.value}`).join('\n');
-      budget.add({ id: 'memories', source: 'memory', priority: PRIORITY.MEMORY, content: this.sanitizeInjected('memory', memoryPrompt), required: false });
+      budget.add({ id: 'memories', source: 'memory', priority: PRIORITY.MEMORY + (priorityBoost.get('memory') ?? 0), content: this.sanitizeInjected('memory', memoryPrompt), required: false });
     }
 
     // 5.1 Phase 1.2: 待恢复任务注入（优先级 65，高于记忆低于情绪）
@@ -307,7 +364,7 @@ export class MessageProcessor {
     try {
       const injectionResult = await this.promptInjector.buildInjection(content);
       if (!injectionResult.skipped) {
-        budget.add({ id: 'domain-knowledge', source: 'prompt-injector', priority: PRIORITY.DOMAIN_KNOWLEDGE, content: injectionResult.prompt, required: false });
+        budget.add({ id: 'domain-knowledge', source: 'prompt-injector', priority: PRIORITY.DOMAIN_KNOWLEDGE + (priorityBoost.get('domain-knowledge') ?? 0), content: injectionResult.prompt, required: false });
         if (this.verbose) {
           console.log(`  [PromptInjector] 注入领域: ${injectionResult.domains.join(', ')} (${injectionResult.nodeCount} 节点)`);
         }
@@ -369,7 +426,7 @@ export class MessageProcessor {
     // 7. Skill 注入（动态层，优先级 20）— ISSUE-005: 注入防御
     const skillInjection = this.skillOps.getPromptInjection(content);
     if (skillInjection) {
-      budget.add({ id: 'skill-injection', source: 'skill-ops', priority: PRIORITY.SKILLS, content: this.sanitizeInjected('skill', skillInjection), required: false });
+      budget.add({ id: 'skill-injection', source: 'skill-ops', priority: PRIORITY.SKILLS + (priorityBoost.get('skills') ?? 0), content: this.sanitizeInjected('skill', skillInjection), required: false });
     }
     const dynamicSkillList = this.buildDynamicSkillPrompt();
     if (dynamicSkillList) {

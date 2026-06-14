@@ -232,6 +232,9 @@ export interface ModelSelection {
 export interface ThompsonParams {
   alpha: number;   // 加权成功次数 + 1
   beta: number;    // 加权失败次数 + 1
+  totalCalls: number;   // 总调用次数
+  avgQuality: number;   // 平均质量分（滑动窗口）
+  lastUsed: number;     // 最后使用时间
 }
 
 // ==================== 任务类型 → 能力需求映射 ====================
@@ -960,7 +963,7 @@ export class ModelPool {
   private layer2ThompsonSelect(candidates: ModelProfile[], req: ModelRequirement): ModelSelection {
     const scored = candidates.map((p) => {
       const key = `${req.taskType}:${p.id}`;
-      const params = this.tsParams.get(key) ?? { alpha: 1, beta: 1 };
+      const params = this.tsParams.get(key) ?? { alpha: 1, beta: 1, totalCalls: 0, avgQuality: 0.5, lastUsed: 0 };
 
       let sample = this.betaSample(params.alpha, params.beta);
 
@@ -969,23 +972,17 @@ export class ModelPool {
         sample *= 1.5;
       }
 
-      // Phase 3: 任务亲和度加权（从历史反馈学习 + 置信度衰减）
-      const taskStats = p.stats.byTaskType[req.taskType];
-      if (taskStats && taskStats.attempts >= 1) {
-        const quality = (taskStats.avgQuality ?? 0) > 0
-          ? taskStats.avgQuality!
-          : taskStats.successes / taskStats.attempts;
-        // 置信度随样本数增长：1次=0.1, 3次=0.3, 10次=1.0
-        const confidence = Math.min(1, taskStats.attempts / 10);
-        // 低置信度时接近 1.0（不惩罚新模型），高置信度时按质量加权
+      // 冷启动保护：per-task-type 调用次数越少，探索奖励越大
+      if (params.totalCalls < 5) {
+        sample *= 1.5 + (5 - params.totalCalls) * 0.1;  // 0次→2.0, 1次→1.9, ..., 4次→1.6
+      }
+
+      // 任务亲和度加权（基于 avgQuality 滑动平均）
+      if (params.totalCalls >= 5) {
+        const quality = params.avgQuality;
+        const confidence = Math.min(1, params.totalCalls / 20);
         const affinityFactor = 1.0 - confidence * (1.0 - (0.5 + quality * 0.5));
         sample *= affinityFactor;
-      } else {
-        // 新模型探索奖励（UCB 风格）：样本越少，探索奖励越大
-        // 总调用次数 0 次 → bonus 1.3, 1-2 次 → bonus 1.15, 3+ 次 → 无 bonus
-        const totalCalls = p.stats.totalCalls;
-        if (totalCalls === 0) sample *= 1.3;
-        else if (totalCalls <= 2) sample *= 1.15;
       }
 
       // 策略加权
@@ -1101,19 +1098,27 @@ export class ModelPool {
 
   recordFeedback(modelId: string, taskType: TaskType, success: boolean, latencyMs: number, costEstimate: number, qualityScore?: number): void {
     const key = `${taskType}:${modelId}`;
-    const params = this.tsParams.get(key) ?? { alpha: 1, beta: 1 };
+    const params = this.tsParams.get(key) ?? { alpha: 1, beta: 1, totalCalls: 0, avgQuality: 0.5, lastUsed: 0 };
 
     // 多维加权成功分
+    const quality = qualityScore ?? 0.5;
     let weightedSuccess = 0;
     if (success) {
-      weightedSuccess = qualityScore ?? 1.0;  // 用质量评分替代二值成功
+      // 质量加权的成功：质量越高，alpha 增量越大
+      weightedSuccess = 0.5 + quality * 0.5;  // 范围 0.5 ~ 1.0
       if (latencyMs > 5000) weightedSuccess *= 0.7;
       else if (latencyMs > 2000) weightedSuccess *= 0.85;
       if (costEstimate > 0.1) weightedSuccess *= 0.8;
+    } else {
+      // 失败但质量高（可能是工具问题而非模型问题）→ 减少惩罚
+      weightedSuccess = 0.3 * quality;  // 范围 0 ~ 0.3
     }
 
     params.alpha += weightedSuccess;
     params.beta += (1 - weightedSuccess);
+    params.totalCalls++;
+    params.avgQuality = params.avgQuality * 0.9 + quality * 0.1;  // 滑动平均
+    params.lastUsed = Date.now();
     this.tsParams.set(key, params);
 
     // 更新画像统计
@@ -1752,7 +1757,14 @@ export class ModelPool {
       if (fs.existsSync(tsFile)) {
         const raw = JSON.parse(fs.readFileSync(tsFile, 'utf-8'));
         for (const [key, params] of Object.entries(raw)) {
-          this.tsParams.set(key, params as ThompsonParams);
+          const p = params as Record<string, unknown>;
+          this.tsParams.set(key, {
+            alpha: (p.alpha as number) ?? 1,
+            beta: (p.beta as number) ?? 1,
+            totalCalls: (p.totalCalls as number) ?? 0,
+            avgQuality: (p.avgQuality as number) ?? 0.5,
+            lastUsed: (p.lastUsed as number) ?? 0,
+          });
         }
       }
 
