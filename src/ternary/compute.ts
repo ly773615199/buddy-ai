@@ -80,6 +80,40 @@ export function loraForward(
 }
 
 /**
+ * 批量矩阵乘（多个输入向量）
+ */
+export function batchMatVecMul(
+  weights: Int8Array,
+  inputs: Float32Array[],
+  rows: number,
+  cols: number,
+): Float32Array[] {
+  return inputs.map(input => {
+    const output = new Float32Array(rows);
+    matVecMul(weights, input, output, rows, cols);
+    return output;
+  });
+}
+
+/**
+ * 向量加法: out = a + b
+ */
+export function vecAdd(a: Float32Array, b: Float32Array, out: Float32Array): void {
+  for (let i = 0; i < a.length; i++) {
+    out[i] = a[i] + b[i];
+  }
+}
+
+/**
+ * 向量缩放: out = vec * scale
+ */
+export function vecScale(vec: Float32Array, scale: number, out: Float32Array): void {
+  for (let i = 0; i < vec.length; i++) {
+    out[i] = vec[i] * scale;
+  }
+}
+
+/**
  * Softmax
  */
 export function softmax(logits: Float32Array): Float32Array {
@@ -143,6 +177,35 @@ export function gelu(x: Float32Array): Float32Array {
     result[i] = 0.5 * v * (1 + Math.tanh(0.7978845608 * (v + 0.044715 * v * v * v)));
   }
   return result;
+}
+
+/**
+ * 注意力计算 (简化版)
+ *
+ * 对于三进制模型，Q/K/V 都是三进制权重。
+ * 注意力分数 = softmax(Q @ K^T / sqrt(d)) @ V
+ */
+export function ternaryAttention(
+  Q: Int8Array,
+  K: Int8Array,
+  V: Int8Array,
+  input: Float32Array,
+  seqLen: number,
+  headDim: number,
+): Float32Array {
+  // 简化：单 token 注意力 (seqLen=1 时退化为线性变换)
+  // 对于完整序列，需要 KV cache
+  const qVec = new Float32Array(headDim);
+  const kVec = new Float32Array(headDim);
+  const vVec = new Float32Array(headDim);
+
+  matVecMul(Q, input, qVec, headDim, input.length);
+  matVecMul(K, input, kVec, headDim, input.length);
+  matVecMul(V, input, vVec, headDim, input.length);
+
+  // 简化：直接返回 V 的变换（无 KV cache 时）
+  // 实际推理时由 engine.ts 管理 KV cache
+  return vVec;
 }
 
 /**
