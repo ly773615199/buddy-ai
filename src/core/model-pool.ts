@@ -466,6 +466,7 @@ export class ModelPool {
    */
   hasModelWithCapability(cap: 'toolCallingMode', value: string): boolean {
     for (const profile of this.profiles.values()) {
+      if (profile.active === false) continue;
       if (profile.capabilities[cap] === value) return true;
     }
     return false;
@@ -846,6 +847,7 @@ export class ModelPool {
     // Layer 1: 元数据快筛
     candidates = this.layer1MetadataFilter(candidates, requirement);
     if (candidates.length === 0) {
+      console.log(`[ModelPool] layer1(${requirement.taskType}): 0 候选, 降级到无 taskType`);
       // 降级：放宽约束重试（不传 taskType）
       candidates = this.layer0StaticFilter();
       if (candidates.length === 0) return null;
@@ -876,6 +878,7 @@ export class ModelPool {
 
   private layer0StaticFilter(taskType?: TaskType): ModelProfile[] {
     const result: ModelProfile[] = [];
+    let filteredByTask = 0;
     for (const profile of this.profiles.values()) {
       if (profile.active === false) continue;
       if (this.isExcluded(profile.id)) continue;
@@ -888,11 +891,20 @@ export class ModelPool {
       if (taskType && profile.derived) {
         const needsChat = taskType === 'chat' || taskType === 'tools'
           || taskType === 'reasoning' || taskType === 'domain' || taskType === 'background';
-        if (needsChat && !profile.derived.chatCapable) continue;
-        if (taskType === 'embedding' && !profile.derived.embedCapable) continue;
+        if (needsChat && !profile.derived.chatCapable) {
+          filteredByTask++;
+          continue;
+        }
+        if (taskType === 'embedding' && !profile.derived.embedCapable) {
+          filteredByTask++;
+          continue;
+        }
       }
 
       result.push(profile);
+    }
+    if (taskType && filteredByTask > 0) {
+      console.log(`[ModelPool] layer0(${taskType}): 过滤 ${filteredByTask} 个不兼容模型, 剩余 ${result.length}`);
     }
     return result;
   }
