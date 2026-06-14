@@ -63,6 +63,25 @@ export async function reflect(
         };
         await sys.intelligence?.learn?.(snapshot);
         if (verbose) console.log(`  [Reflect] 经验编译: ${result.toolCalls.length} 个工具调用`);
+
+        // Phase 3.1: 持久化成功模式到 ProjectStore
+        try {
+          const { getProjectStore } = await import('../project/tools.js');
+          const store = getProjectStore();
+          const toolNames = result.toolCalls.map(tc => tc.name).join('+');
+          store.createLesson({
+            id: `les-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            projectId: 'global',
+            category: 'pattern',
+            title: `成功模式: ${toolNames}`,
+            description: `工具组合 [${toolNames}] 在 ${signal.taskType} 任务中成功执行`,
+            context: `taskType=${signal.taskType}, domains=${signal.domains.join(',')}`,
+            impact: 'low',
+            applicableCategories: signal.domains,
+            createdAt: Date.now(),
+            verified: true,
+          });
+        } catch { /* 持久化失败不影响主流程 */ }
       } catch (err) {
         if (verbose) console.warn('[Reflect] 经验编译失败:', (err as Error).message);
       }
@@ -78,7 +97,7 @@ export async function reflect(
       }
     }
 
-    // ③ 教训提取（失败路径）
+    // ③ 教训提取（失败路径）+ Phase 3.1: 持久化到 ProjectStore
     const failedCalls = result.toolCalls.filter(tc => tc.result.startsWith('['));
     if (failedCalls.length > 0) {
       for (const failed of failedCalls) {
@@ -91,18 +110,55 @@ export async function reflect(
             `${failed.name}_failed`,
             `工具 ${failed.name} 执行失败: ${failed.result.slice(0, 80)}`,
           );
+
+          // Phase 3.1: 持久化教训到 ProjectStore
+          try {
+            const { getProjectStore } = await import('../project/tools.js');
+            const store = getProjectStore();
+            store.createLesson({
+              id: `les-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              projectId: 'global',
+              category: 'mistake',
+              title: `工具 ${failed.name} 执行失败`,
+              description: failed.result.slice(0, 200),
+              context: `taskType=${signal.taskType}, domains=${signal.domains.join(',')}`,
+              correction: undefined,
+              impact: failed.result.includes('timeout') ? 'high' : 'medium',
+              applicableCategories: signal.domains,
+              createdAt: Date.now(),
+              verified: false,
+            });
+          } catch { /* 持久化失败不影响主流程 */ }
         } catch { /* 教训提取失败不影响主流程 */ }
       }
       if (verbose) console.log(`  [Reflect] 教训提取: ${failedCalls.length} 个失败工具`);
     }
 
-    // ④ 幻觉检测
+    // ④ 幻觉检测 + Phase 3.1: 持久化到 ProjectStore
     const hallucinations = detectHallucinations(sys, result.toolCalls, signal);
     if (hallucinations.length > 0) {
       if (verbose) console.log(`  [Reflect] 幻觉检测: ${hallucinations.join(', ')}`);
       try {
         for (const h of hallucinations) {
           sys.intelligence?.evolver?.onFailure?.(h, 'hallucination_detected');
+
+          // Phase 3.1: 持久化幻觉教训
+          try {
+            const { getProjectStore } = await import('../project/tools.js');
+            const store = getProjectStore();
+            store.createLesson({
+              id: `les-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              projectId: 'global',
+              category: 'warning',
+              title: `幻觉检测: ${h}`,
+              description: `工具 ${h} 执行成功但结果与任务无关`,
+              context: `taskType=${signal.taskType}, domains=${signal.domains.join(',')}`,
+              impact: 'high',
+              applicableCategories: signal.domains,
+              createdAt: Date.now(),
+              verified: false,
+            });
+          } catch { /* 持久化失败不影响主流程 */ }
         }
       } catch { /* 注入失败不影响主流程 */ }
     }
@@ -141,6 +197,25 @@ export async function reflect(
     let failureAnalysis: FailureAnalysis | undefined;
     if (shouldRetry) {
       failureAnalysis = analyzeFailure(quality, failedTools, retryHallucinations, result, signal, plan);
+
+      // Phase 3.1: 持久化失败分析教训
+      try {
+        const { getProjectStore } = await import('../project/tools.js');
+        const store = getProjectStore();
+        store.createLesson({
+          id: `les-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          projectId: 'global',
+          category: failureAnalysis.category === 'tool_failure' ? 'mistake' : 'warning',
+          title: `[${failureAnalysis.category}] ${failureAnalysis.detail.slice(0, 60)}`,
+          description: failureAnalysis.detail,
+          context: `taskType=${signal.taskType}, strategy=${failureAnalysis.suggestedStrategy}`,
+          correction: `建议策略: ${failureAnalysis.suggestedStrategy}`,
+          impact: quality < 0.2 ? 'high' : 'medium',
+          applicableCategories: signal.domains,
+          createdAt: Date.now(),
+          verified: false,
+        });
+      } catch { /* 持久化失败不影响主流程 */ }
     }
 
     if (verbose && shouldRetry) {

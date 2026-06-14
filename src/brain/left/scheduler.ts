@@ -241,6 +241,20 @@ export class UnifiedScheduler {
       }
     }
 
+    // ── Layer 0.5: 经验资源偏好注入（Phase 3.2）──
+    const expHit = resources.experienceHit as { resourceHints?: { preferredModels?: string[]; avoidModels?: string[] } } | null;
+    const expHints = expHit?.resourceHints;
+    if (expHints) {
+      // 经验推荐排除某些模型
+      if (expHints.avoidModels && expHints.avoidModels.length > 0) {
+        const existing = (resources as any)._excludeModelIds as string[] ?? [];
+        (resources as any)._excludeModelIds = [...existing, ...expHints.avoidModels];
+      }
+      if (this.verbose && expHints.preferredModels?.length) {
+        console.log(`[Scheduler] 经验偏好: 推荐模型=${expHints.preferredModels.join(',')}`);
+      }
+    }
+
     // ── Layer 1: 预算硬约束 ──
     if (resources.budgetRemaining <= 0) {
       return this.makePlan('budget_fallback', 'local_only', '预算耗尽，使用本地模型', 0.6, [

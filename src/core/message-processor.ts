@@ -264,8 +264,34 @@ export class MessageProcessor {
         });
         if (this.verbose) console.log(`  [Checkpoint] 注入 ${pendingTasks.length} 个待恢复任务`);
       }
+
+      // Phase 3.1: 注入相关教训（优先级 63，略低于待恢复任务）
+      const allLessons = store.getLessonsByCategory('mistake', 10);
+      const hallucinationLessons = store.getLessonsByCategory('warning', 5);
+      // 简单匹配：教训的标题/描述包含当前内容的关键词
+      const contentLower = content.toLowerCase();
+      const relevantLessons = [...allLessons, ...hallucinationLessons].filter(l => {
+        const lessonText = (l.title + l.description + l.context).toLowerCase();
+        // 领域匹配或内容关键词匹配
+        return l.applicableCategories.some(cat => contentLower.includes(cat)) ||
+          lessonText.split(/[\s,，]+/).some(w => w.length > 2 && contentLower.includes(w));
+      }).slice(0, 5);
+
+      if (relevantLessons.length > 0) {
+        const lessonPrompt = relevantLessons.map(l =>
+          `⚠️ ${l.title}: ${l.description.slice(0, 100)}${l.correction ? ` → 修正: ${l.correction}` : ''}`
+        ).join('\n');
+        budget.add({
+          id: 'lessons',
+          source: 'memory',
+          priority: 63,
+          content: `\n## 历史教训\n以下是之前类似任务中遇到的问题，注意避免：\n${lessonPrompt}`,
+          required: false,
+        });
+        if (this.verbose) console.log(`  [Lessons] 注入 ${relevantLessons.length} 条相关教训`);
+      }
     } catch (err) {
-      if (this.verbose) console.debug('[Checkpoint] 查询待恢复任务失败:', (err as Error).message);
+      if (this.verbose) console.debug('[Checkpoint] 查询待恢复任务/教训失败:', (err as Error).message);
     }
 
     // I3: 推理链注入（优先级略低于记忆）

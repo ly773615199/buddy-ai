@@ -109,6 +109,13 @@ export interface RouteDecision {
   reason?: string;
   confidence?: number;
   novelty?: number;         // 新颖度 0-1，越高越没见过
+  /** Phase 3.2: 资源偏好 — 经验推荐的模型/工具 */
+  resourceHints?: {
+    preferredModels?: string[];    // 这个任务用什么模型效果好
+    preferredTools?: string[];     // 用什么工具组合
+    avoidModels?: string[];        // 什么模型不适合
+    avoidTools?: string[];         // 什么工具不适合
+  };
 }
 
 // ── 执行结果 ──
