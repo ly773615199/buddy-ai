@@ -899,7 +899,9 @@ export interface ExecutionResult {
   text: string;
   source: string;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
-  expertResults?: Array<{ nodeId?: string; text: string; success: boolean; latencyMs?: number }>;
+  expertResults?: Array<{ nodeId?: string; text: string; success: boolean; latencyMs?: number; quality?: number }>;
+  /** 级联模式的质量分 */
+  cascadeQuality?: number;
 }
 
 export const DEFAULT_CONFIG: BuddyConfig = {

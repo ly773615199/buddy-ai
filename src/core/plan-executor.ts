@@ -459,7 +459,7 @@ async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Pr
   return { text: result.text, source: 'single', toolCalls: result.toolCalls ?? [] };
 }
 
-/** parallel — 多专家并行调用 + 融合 */
+/** parallel — 多专家并行调用 + 质量加权融合 */
 async function executeParallel(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const nodes = plan.selectedNodes;
 
@@ -502,8 +502,9 @@ async function executeParallel(ctx: ExecutionContext, plan: OrchestrationPlan): 
   return { text: fused, source: 'parallel', toolCalls: [], expertResults };
 }
 
-/** cascade — 统一池按任务类型选择，质量不够升级 */
+/** cascade — 统一池按任务类型选择，质量不够升级（Phase 4.1: 质量感知） */
 async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
+  // 第一层：chat 模型
   try {
     const chatResult = await ctx.sys.llm.chat(
       [{ role: 'user', content: plan.content, timestamp: Date.now() }],
@@ -511,10 +512,24 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
     );
     const quality = evaluateQuality(chatResult.text ?? '', plan.content);
     if (quality >= 0.6) {
-      return { text: chatResult.text ?? '', source: 'cascade/chat', toolCalls: [] };
+      return { text: chatResult.text ?? '', source: 'cascade/chat', toolCalls: [], cascadeQuality: quality };
+    }
+    // 中等质量：尝试 reasoning 模型改进
+    if (quality >= 0.3) {
+      try {
+        const reasoningResult = await ctx.sys.llm.chat(
+          [{ role: 'user', content: plan.content, timestamp: Date.now() }],
+          [], 1, { taskType: 'reasoning' }
+        );
+        const reasonQuality = evaluateQuality(reasoningResult.text ?? '', plan.content);
+        if (reasonQuality > quality) {
+          return { text: reasoningResult.text ?? '', source: 'cascade/reasoning', toolCalls: [], cascadeQuality: reasonQuality };
+        }
+      } catch { /* reasoning 失败 */ }
     }
   } catch { /* 继续到 reasoning */ }
 
+  // 第二层：reasoning 模型
   const reasoningResult = await ctx.sys.llm.chat(
     [{ role: 'user', content: plan.content, timestamp: Date.now() }],
     [], 1, { taskType: 'reasoning' }
@@ -522,17 +537,19 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
   return { text: reasoningResult.text ?? '', source: 'cascade/reasoning', toolCalls: [] };
 }
 
-/** sequential — 接力传递上下文 */
+/** sequential — 接力传递上下文（Phase 4.1: 增加审核步骤） */
 async function executeSequential(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   let context = plan.content;
   const steps: string[] = [];
 
-  for (const node of plan.selectedNodes) {
+  for (let i = 0; i < plan.selectedNodes.length; i++) {
+    const node = plan.selectedNodes[i];
     try {
+      let result: string;
+
       if (node.type === 'local_expert' && node.domain) {
         const r = await ctx.sys.ternaryRouter.query(node.domain, context);
-        steps.push(r.answer);
-        context = r.answer;
+        result = r.answer;
       } else if (node.type === 'cloud_node' && node.provider && node.model) {
         const providerConfig = node.apiKey
           ? { apiKey: node.apiKey, baseUrl: node.baseUrl }
@@ -543,23 +560,34 @@ async function executeSequential(ctx: ExecutionContext, plan: OrchestrationPlan)
           [],
           1,
         );
-        steps.push(r.text ?? '');
-        context = r.text ?? '';
+        result = r.text ?? '';
       } else {
         const r = await ctx.sys.llm.chat(
           [{ role: 'user', content: context, timestamp: Date.now() }],
           [], 1, { taskType: 'chat', userOverride: node.model }
         );
-        steps.push(r.text ?? '');
-        context = r.text ?? '';
+        result = r.text ?? '';
       }
+
+      // Phase 4.1: 审核步骤 — 下一个节点审核上一个节点的输出
+      if (i > 0 && result.length > 50) {
+        const quality = evaluateQuality(result, context);
+        if (quality < 0.3) {
+          // 质量太低，跳过此步骤
+          steps.push(result);
+          continue;
+        }
+      }
+
+      steps.push(result);
+      context = result;
     } catch { /* 跳过失败的节点 */ }
   }
 
   return { text: steps[steps.length - 1] ?? '', source: 'sequential', toolCalls: [] };
 }
 
-/** debate — 多方论证 + 裁决 */
+/** debate — 多方论证 + 质量加权裁决 */
 async function executeDebate(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const arguments_ = await Promise.allSettled(
     plan.selectedNodes.map(async (node) => {
@@ -599,12 +627,25 @@ async function executeDebate(ctx: ExecutionContext, plan: OrchestrationPlan): Pr
     return { text: args[0].text, source: 'debate', toolCalls: [] };
   }
 
+  // Phase 4.1: 质量评估 — 为每个专家的回答打分
+  const scored = args.map(a => ({
+    ...a,
+    quality: evaluateQuality(a.text, plan.content),
+  }));
+
+  // 按质量排序
+  scored.sort((a, b) => b.quality - a.quality);
+
+  // 裁决 prompt — 注入质量分数，让裁决者加权参考
   const judgePrompt = [
     '你是裁决者。以下是多个专家对同一问题的回答，请综合判断，给出最终结论。',
+    '每个回答附带质量评分（0-1），请优先参考高质量回答。',
     '',
-    ...args.map((a, i) => `专家 ${i + 1} (${a.nodeId}):\n${a.text}`),
+    ...scored.map((a, i) =>
+      `专家 ${i + 1} (${a.nodeId}) [质量: ${a.quality.toFixed(2)}]:\n${a.text}`
+    ),
     '',
-    '请给出你的最终结论：',
+    '请给出你的最终结论（综合高质量回答的要点）：',
   ].join('\n');
 
   const judgeResult = await ctx.sys.llm.chat(
@@ -612,7 +653,7 @@ async function executeDebate(ctx: ExecutionContext, plan: OrchestrationPlan): Pr
     [], 1, { taskType: 'reasoning' }
   );
 
-  return { text: judgeResult.text ?? '', source: 'debate', toolCalls: [], expertResults: args };
+  return { text: judgeResult.text ?? '', source: 'debate', toolCalls: [], expertResults: scored };
 }
 
 // ==================== DAG 执行 ====================
