@@ -670,7 +670,25 @@ export function setupRESTAPI(ctx: RESTContext): void {
       let discoveryError: string | undefined;
       if (unifiedPool) {
         unifiedPool.updateProviderCredentials(id, { apiKey, baseUrl });
-        try { const result = await unifiedPool.refreshPlatform(newProvider as any); modelCount = result.models.length; }
+        try {
+          const result = await unifiedPool.refreshPlatform(newProvider as any);
+          modelCount = result.models.length;
+          // 同步新发现的模型到 ResourceHub
+          if (sys.modelPoolBridge && result.models.length > 0) {
+            for (const profile of result.models) {
+              sys.modelPoolBridge.onModelDiscovered(profile.id, profile.displayName);
+            }
+            if (verbose) console.log(`[ResourceHub] 同步 ${result.models.length} 个新模型 (${id})`);
+          }
+          // 异步补全缺少 enrichment 的模型（不阻塞响应）
+          unifiedPool.enrichMissingProfiles().then((updated) => {
+            if (updated > 0) {
+              if (verbose) console.log(`[ModelPool] enrichment 补全: ${updated} 个模型已更新`);
+              // 补全后重新同步 ResourceHub
+              if (sys.modelPoolBridge) sys.modelPoolBridge.fullSync();
+            }
+          }).catch(() => {});
+        }
         catch (err) { discoveryError = (err as Error).message; if (verbose) console.warn(`[ModelPool] 刷新新端点 ${id} 失败:`, discoveryError); }
       }
 
@@ -693,7 +711,16 @@ export function setupRESTAPI(ctx: RESTContext): void {
       await patchConfig({ models: { providers: updatedProviders } as any });
       config.models = { ...config.models, providers: updatedProviders } as any;
       const unifiedPool = sys.llm.getUnifiedPool();
-      if (unifiedPool) { for (const p of unifiedPool.getProfilesByPlatform(id)) unifiedPool.removeProfile(p.id); }
+      if (unifiedPool) {
+        const profilesToRemove = unifiedPool.getProfilesByPlatform(id);
+        for (const p of profilesToRemove) {
+          unifiedPool.removeProfile(p.id);
+          // 同步移除 ResourceHub 中的资源
+          if (sys.modelPoolBridge) {
+            sys.resourceHub?.unregister(`model/${p.id}`);
+          }
+        }
+      }
       // 清理模型知识缓存中该平台的数据
       try {
         const { ModelKnowledgeUpdater } = await import('./model-knowledge-updater.js');

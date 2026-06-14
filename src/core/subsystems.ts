@@ -285,6 +285,18 @@ export class Subsystems {
           const reSynced = this.modelPoolBridge.fullSync();
           if (verbose && reSynced > 0) console.log(`[ResourceHub] 重新同步: ${reSynced} 个模型资源`);
         }
+        // 异步补全缺少 enrichment 数据的模型（不阻塞启动）
+        pool.enrichMissingProfiles().then((updated) => {
+          if (verbose && updated > 0) {
+            console.log(`[UnifiedPool] enrichment 补全: ${updated} 个模型已更新`);
+            // 补全后再次同步到 ResourceHub（derived 能力可能变化）
+            if (this.modelPoolBridge) {
+              this.modelPoolBridge.fullSync();
+            }
+          }
+        }).catch((err) => {
+          if (verbose) console.debug('[UnifiedPool] enrichment 补全跳过:', err.message);
+        });
       }).catch((err) => {
         if (verbose) console.warn('[UnifiedPool] 初始化失败:', err.message);
       });

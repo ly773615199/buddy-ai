@@ -713,6 +713,11 @@ export class ModelPool {
       this.saveUnifiedState();
       const activeCount = [...this.profiles.values()].filter(p => p.active !== false).length;
       console.log(`[ModelPool] 后台刷新完成，当前 ${this.profiles.size} 个模型, 激活 ${activeCount} 个`);
+
+      // 异步补全缺少 enrichment 数据的模型（不阻塞）
+      this.enrichMissingProfiles().catch((err) => {
+        console.debug('[ModelPool] enrichment 补全失败:', (err as Error).message);
+      });
     });
 
     // 异步启动刷新（不阻塞）
@@ -1557,6 +1562,123 @@ export class ModelPool {
       this.updater.stop();
       this.updater = null;
     }
+  }
+
+  /**
+   * 异步补全缺少 enrichment 数据的模型画像
+   *
+   * 后台运行，不阻塞主流程。对没有 category/pipelineTag 的模型
+   * 尝试从 HuggingFace 补全元数据，并重新派生 derived 能力。
+   */
+  async enrichMissingProfiles(): Promise<number> {
+    const { getModelEnricher } = await import('./model-enrichment.js');
+    const enricher = getModelEnricher(this.dataDir);
+
+    const needEnrich: ModelProfile[] = [];
+    for (const profile of this.profiles.values()) {
+      // 跳过已有 enrichment 数据的模型
+      if (profile.category && profile.pipelineTag) continue;
+      // 跳过非平台 API 来源的
+      if (profile.source !== 'platform_api') continue;
+      needEnrich.push(profile);
+    }
+
+    if (needEnrich.length === 0) return 0;
+
+    console.log(`[ModelPool] 异步补全 ${needEnrich.length} 个模型的 enrichment 数据...`);
+
+    let updated = 0;
+    const CONCURRENCY = 3;
+    const DELAY_MS = 500;
+
+    for (let i = 0; i < needEnrich.length; i += CONCURRENCY) {
+      const batch = needEnrich.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (profile) => {
+          // 从 profile.id 中提取原始模型 ID（去掉 platform 前缀）
+          const rawId = profile.id.includes('/') ? profile.id.split('/').slice(1).join('/') : profile.id;
+          const enrichment = await enricher.enrichOne(rawId);
+          return { profile, enrichment };
+        }),
+      );
+
+      for (const r of results) {
+        if (r.status !== 'fulfilled' || !r.value) continue;
+        const { profile, enrichment } = r.value;
+
+        // 只在有有效 enrichment 数据时更新
+        if (enrichment.category && enrichment.category !== 'unknown') {
+          profile.category = enrichment.category;
+          profile.pipelineTag = enrichment.pipelineTag;
+          profile.parameters = enrichment.parameters ?? profile.parameters;
+          profile.contextLength = enrichment.contextLength ?? profile.contextLength;
+          profile.realMaxOutput = enrichment.maxOutput ?? profile.realMaxOutput;
+          profile.modelType = enrichment.modelType ?? profile.modelType;
+          profile.license = enrichment.license ?? profile.license;
+          profile.hfId = enrichment.hfId ?? profile.hfId;
+          profile.enrichmentSource = enrichment.source;
+
+          // 重新派生 derived 能力（用新 enrichment 数据）
+          profile.derived = this.deriveCapabilitiesFromProfile(profile);
+          updated++;
+        }
+      }
+
+      if (i + CONCURRENCY < needEnrich.length) {
+        await new Promise(r => setTimeout(r, DELAY_MS));
+      }
+    }
+
+    if (updated > 0) {
+      this.saveUnifiedState();
+      console.log(`[ModelPool] enrichment 补全完成: ${updated}/${needEnrich.length} 个模型已更新`);
+    }
+
+    return updated;
+  }
+
+  /**
+   * 从 ModelProfile 派生能力硬约束（供异步补全使用）
+   * 逻辑与 model-discovery.ts 的 deriveCapabilities 一致
+   */
+  private deriveCapabilitiesFromProfile(profile: ModelProfile): ModelProfile['derived'] {
+    // 复用 model-discovery 的逻辑：构造临时 profile 调用
+    // 由于 deriveCapabilities 是 model-discovery 的内部函数，这里内联关键逻辑
+    const pipelineTag = profile.pipelineTag ?? null;
+    const category = profile.category ?? null;
+
+    const CHAT_TAGS = new Set(['text-generation', 'image-text-to-text', 'any-to-any',
+      'conversational', 'question-answering', 'visual-question-answering']);
+    const NON_CHAT_TAGS = new Set(['feature-extraction', 'sentence-similarity', 'sentence-transformers',
+      'text-ranking', 'text-classification', 'fill-mask', 'text-to-image', 'image-to-image',
+      'image-to-video', 'text-to-video', 'text-to-speech', 'audio-to-audio', 'audio-to-text',
+      'object-detection', 'image-segmentation', 'depth-estimation', 'table-question-answering',
+      'translation', 'summarization', 'zero-shot-classification', 'token-classification',
+      'video-classification', 'reinforcement-learning']);
+    const CHAT_CATS = new Set(['chat', 'vl-chat', 'omni-chat']);
+    const EMBED_CATS = new Set(['embedding']);
+    const EMBED_TAGS = new Set(['feature-extraction', 'sentence-similarity', 'sentence-transformers']);
+
+    let chatCapable: boolean;
+    if (pipelineTag) {
+      if (CHAT_TAGS.has(pipelineTag)) chatCapable = true;
+      else if (NON_CHAT_TAGS.has(pipelineTag)) chatCapable = false;
+      else chatCapable = true;
+    } else if (category) {
+      if (CHAT_CATS.has(category)) chatCapable = true;
+      else if (EMBED_CATS.has(category) || category === 'reranker') chatCapable = false;
+      else if (['image-gen', 'image-edit', 'video-gen', 'tts', 'asr', 'ocr'].includes(category)) chatCapable = false;
+      else chatCapable = true;
+    } else {
+      chatCapable = profile.capabilities.toolCallingMode !== 'none';
+    }
+
+    const toolCapable = chatCapable && profile.capabilities.toolCalling && profile.capabilities.toolCallingMode !== 'none';
+    const embedCapable = (category && EMBED_CATS.has(category)) || (pipelineTag && EMBED_TAGS.has(pipelineTag)) || false;
+    const visionCapable = category === 'vl-chat' || category === 'omni-chat' || profile.capabilities.vision
+      || pipelineTag === 'image-text-to-text' || pipelineTag === 'visual-question-answering' || false;
+
+    return { chatCapable, toolCapable, embedCapable, visionCapable };
   }
 
   // ==================== 内部工具 ====================

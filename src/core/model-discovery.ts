@@ -659,7 +659,16 @@ function deriveCapabilities(profile: ModelProfile): ModelProfile['derived'] {
   } else {
     // 无 enrichment 数据 → 静态知识或名称推断
     // 有 toolCallingMode 说明是已知聊天模型
-    chatCapable = profile.capabilities.toolCallingMode !== 'none' || profile.capabilities.streaming;
+    if (profile.capabilities.toolCallingMode !== 'none') {
+      chatCapable = true; // 明确支持工具调用 → 大概率是聊天模型
+    } else {
+      // 仅凭 streaming=true 不能判断为聊天模型（embedding 模型也支持 streaming）
+      // 回退到静态知识：如果 capabilities 中有聊天相关评分，认为是聊天模型
+      const caps = profile.capabilities;
+      const hasChatSignal = (caps.reasoning ?? 0) > 0 || (caps.creative ?? 0) > 0
+        || (caps.chinese ?? 0) > 0 || (caps.english ?? 0) > 0;
+      chatCapable = hasChatSignal;
+    }
   }
 
   // ── toolCapable 判断 ──
