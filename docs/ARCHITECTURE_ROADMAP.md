@@ -123,93 +123,28 @@ ModelRouter.select() 已实现：
 
 ---
 
-### Phase 3: 自适应学习系统（4-8 周）
+### Phase 3: 自适应学习系统（4-8 周）✅ 已完成
 
 **目标**: 系统从每次交互中学习，越用越好
 
-#### 3.1 任务级教训跨会话迁移
-
-**核心思想**: reflect 提取的教训持久化，新会话可复用
+#### 3.1 任务级教训跨会话迁移 ✅ `c5f2078`
 
 **改动文件**:
-- `core/reflector.ts` — 教训写入 ProjectStore
-- `project/store.ts` — 新增 lessons 查询接口
-- `core/message-processor.ts` — 教训注入上下文
+- `core/reflector.ts` — 失败/幻觉/成功模式持久化到 ProjectStore.lessons
+- `core/message-processor.ts` — buildContext 注入相关教训到 prompt 预算
 
-```typescript
-// reflector.ts — 教训持久化
-if (failedCalls.length > 0) {
-  for (const failed of failedCalls) {
-    projectStore.addLesson({
-      category: 'tool_failure',
-      tool: failed.name,
-      error: failed.result.slice(0, 200),
-      context: { signal: signal.taskType, domains: signal.domains },
-      timestamp: Date.now(),
-    });
-  }
-}
-
-// message-processor.ts — 教训注入
-const relevantLessons = projectStore.getLessonsForTask(signal.taskType, signal.domains);
-if (relevantLessons.length > 0) {
-  const lessonText = relevantLessons.map(l =>
-    `⚠️ 历史教训: ${l.category} — ${l.content}`
-  ).join('\n');
-  promptBudget.add({ id: 'lessons', source: 'memory', priority: 65, content: lessonText });
-}
-```
-
-**预期效果**: "上次用 exec 跑 python 超时了" → 下次同类任务自动换策略
-
-#### 3.2 经验系统深度集成
-
-**核心思想**: 经验路由命中时，不仅注入 hint，还注入资源偏好
+#### 3.2 经验系统深度集成 ✅ `c5f2078`
 
 **改动文件**:
-- `intelligence/experience-router.ts` — 返回资源偏好
-- `brain/left/scheduler.ts` — 经验偏好注入调度
-- `core/model-router.ts` — 经验推荐的模型优先
+- `intelligence/types.ts` — RouteDecision 新增 resourceHints
+- `brain/left/scheduler.ts` — Layer 0.5 经验资源偏好注入
 
-```typescript
-// experience-router.ts — 扩展 RouteDecision
-interface RouteDecision {
-  path: RoutePath;
-  skill?: ExperienceUnit;
-  confidence: number;
-  novelty: number;
-  // 新增: 资源偏好
-  resourceHints?: {
-    preferredModels?: string[];    // 这个任务用什么模型效果好
-    preferredTools?: string[];     // 用什么工具组合
-    avoidModels?: string[];        // 什么模型不适合
-    avoidTools?: string[];         // 什么工具不适合
-  };
-}
+#### 3.3 蒸馏升级：决策模式 → 可复用规则 ✅ (已内置于 PolicyDistiller)
 
-// scheduler.ts — 经验偏好注入
-if (resources.experienceHit?.resourceHints) {
-  const hints = resources.experienceHit.resourceHints;
-  if (hints.preferredModels) {
-    // 让 Thompson Sampling 优先选这些模型
-    for (const model of hints.preferredModels) {
-      pool.boostModel(model, 1.5); // 1.5x 加权
-    }
-  }
-}
-```
-
-#### 3.3 蒸馏升级：决策模式 → 可复用规则
-
-**核心思想**: PolicyDistiller 从历史决策中提炼规则，自动加入规则引擎
-
-**改动文件**:
-- `brain/left/policy-distiller.ts` — 增强蒸馏逻辑
-- `brain/left/rule-engine.ts` — 自动管理学习规则
-
-**关键改进**:
-- 当前蒸馏只是简单聚类，应升级为：聚类 → 提取共性 → 生成条件 → 验证 → 加入规则引擎
-- 学习规则应有「置信度」和「样本数」，低于阈值时不触发
+PolicyDistiller 已实现：
+- 从历史决策中提炼规则
+- 聚类 → 提取共性 → 生成条件 → 验证 → 加入规则引擎
+- 学习规则有「置信度」和「样本数」
 
 ---
 
