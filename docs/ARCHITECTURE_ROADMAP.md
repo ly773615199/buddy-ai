@@ -1,7 +1,7 @@
 # Buddy 架构改造路线图
 
 > 日期: 2026-06-14
-> 状态: 分析完成，待实施
+> 状态: Phase 1 已完成，待实施 Phase 2
 > 基于: 全链路代码审计 + 网络研究
 
 ---
@@ -63,122 +63,37 @@
 
 ## 三、改造路线图
 
-### Phase 1: 失败感知路由 + 任务记忆（1-2 周）
+### Phase 1: 失败感知路由 + 任务记忆（1-2 周）✅ 已完成
 
 **目标**: 失败时换路走，任务可跨会话恢复
 
-#### 1.1 失败感知重试（最小改动，最大收益）
-
-**核心思想**: reflect retry 时注入「失败上下文」，让决策系统换路
+#### 1.1 失败感知重试 ✅ `a9a0948`
 
 **改动文件**:
-- `core/reflector.ts` — 返回结构化失败原因
-- `core/ws-handler.ts` — retry 时构造 failureContext
-- `brain/left/scheduler.ts` — 接受 failureContext 调整策略
-- `core/model-router.ts` — 排除失败模型
+- `core/reflector.ts` — 新增 FailureAnalysis 结构化失败分析（5类×6策略）
+- `brain/left/scheduler.ts` — Layer 0 失败上下文注入，排除失败模型
+- `core/agent.ts` — orchestrate() 接受 failureContext 参数
+- `brain/brain.ts` — ThreeBrain.decide() 透传 failureContext
+- `core/ws-handler.ts` — 重试时注入 failureAnalysis
+- `core/agent-types.ts` + `brain/types.ts` — FailureAnalysis 类型定义
 
-**实现**:
-
-```typescript
-// reflector.ts — 返回结构化失败分析
-interface FailureAnalysis {
-  category: 'prompt_issue' | 'tool_failure' | 'model_weakness' | 'resource_mismatch' | 'unknown';
-  detail: string;
-  suggestedStrategy: 'switch_model' | 'switch_tools' | 'decompose_task' | 'inject_knowledge' | 'simplify';
-  failedModelId?: string;
-  failedTools?: string[];
-}
-
-// ws-handler.ts — retry 时注入失败上下文
-const analysis = analyzeFailure(reflectResult, result);
-if (analysis.category === 'model_weakness') {
-  // 排除失败模型，让 Thompson Sampling 选别的
-  router.excludeForRetry(analysis.failedModelId);
-}
-if (analysis.category === 'tool_failure') {
-  // 降级工具，让规则引擎换路径
-  signal._failedTools = analysis.failedTools;
-  signal._retryStrategy = analysis.suggestedStrategy;
-}
-// 重新 orchestrate — 带着失败信息
-const newPlan = await this.agentRef.orchestrate(content, { failureContext: analysis });
-```
-
-**预期效果**: retry 成功率从 ~20% 提升到 ~50%（不同路走而非重复）
-
-#### 1.2 任务检查点持久化
-
-**核心思想**: ExecutionSession 完成时写入 ProjectStore，新会话恢复
+#### 1.2 任务检查点持久化 ✅ `47f1500`
 
 **改动文件**:
-- `core/execution-session.ts` — onComplete 写入 ProjectStore
-- `core/subsystems.ts` — 启动时查询未完成任务
-- `core/message-processor.ts` — 上下文注入未完成任务
-- `behavior/context-provider.ts` — 维护任务进度状态
+- `project/store.ts` — 新增 execution_checkpoints 表 + CRUD
+- `project/types.ts` — ExecutionCheckpoint 接口
+- `core/execution-session.ts` — toCheckpoint()/fromCheckpoint()
+- `core/ws-handler.ts` — session 完成时自动保存检查点
+- `core/message-processor.ts` — buildContext 注入待恢复任务
 
-**实现**:
-
-```typescript
-// execution-session.ts — 完成时持久化
-session.onComplete(() => {
-  projectStore.saveCheckpoint({
-    projectId: inferProjectId(session.goal),
-    stepIndex: session.currentStep,
-    status: session.status,
-    completedSteps: session.steps.filter(s => s.success),
-    failedSteps: session.steps.filter(s => !s.success),
-    lessons: reflector.extractedLessons,
-    context: { signal: lastSignal, plan: lastPlan },
-  });
-});
-
-// subsystems.ts — 启动时查询
-const pendingTasks = projectStore.getPendingCheckpoints();
-if (pendingTasks.length > 0) {
-  this._pendingTasks = pendingTasks;
-}
-
-// message-processor.ts — 注入上下文
-if (this.sys.pendingTasks?.length > 0) {
-  promptBudget.add({
-    id: 'pending-tasks',
-    source: 'memory',
-    priority: 70,
-    content: formatPendingTasks(this.sys.pendingTasks),
-  });
-}
-```
-
-**预期效果**: 用户说"继续"时，系统能恢复上次任务进度
-
-#### 1.3 记忆语义检索升级
-
-**核心思想**: FTS5 关键词匹配 → 向量语义检索
+#### 1.3 记忆语义检索升级 ✅ `9121611`
 
 **改动文件**:
-- `memory/store.ts` — 新增 embedding 存储 + 向量检索
-- `core/message-processor.ts` — buildContext 用语义检索
-
-**方案选择**:
-- **轻量方案**: 用 TextEncoder 的 embedding 做余弦相似度（零外部依赖）
-- **标准方案**: 用本地 embedding 模型（如 bge-small-zh）做向量检索
-
-**推荐**: 先用轻量方案（TextEncoder 已有），后续升级到标准方案
-
-```typescript
-// memory/store.ts — 新增语义检索
-searchMemoriesSemantic(queryEmbedding: Float32Array, limit = 5): Memory[] {
-  const all = this.getAllMemories();
-  const scored = all.map(m => ({
-    ...m,
-    similarity: cosineSimilarity(queryEmbedding, m.embedding),
-  }));
-  scored.sort((a, b) => b.similarity - a.similarity);
-  return scored.slice(0, limit);
-}
-```
-
-**预期效果**: "上次那个 auth 模块的重构" 能找到相关记忆，即使关键词不完全匹配
+- `memory/store.ts` — searchMemoriesSemantic() + searchMemoriesHybrid()
+  - 中文 bigram + 英文空格分词
+  - TF-IDF 稀疏向量 + 余弦相似度
+  - 混合检索: FTS5(0.6) + 语义(0.4) 加权
+- `core/message-processor.ts` — retrieveMemories 使用混合检索
 
 ---
 
