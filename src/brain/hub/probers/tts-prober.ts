@@ -16,7 +16,7 @@ export class TTSProber implements ResourceProber {
     const caps: CapabilitySnapshot['capabilities'] = {};
 
     if (backend === 'disabled') {
-      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       return {
         timestamp: Date.now(),
         source: 'probe',
@@ -31,10 +31,10 @@ export class TTSProber implements ResourceProber {
       try {
         const { execSync } = await import('child_process');
         execSync('edge-tts --list-voices', { timeout: 5000, stdio: 'pipe' });
-        caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now() };
-        caps.serviceAlive = { value: true, verified: true, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+        caps.serviceAlive = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       } catch {
-        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       }
     }
 
@@ -49,14 +49,14 @@ export class TTSProber implements ResourceProber {
             headers: { Authorization: `Bearer ${apiKey}` },
             signal: AbortSignal.timeout(this.probeTimeoutMs),
           });
-          caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
-          caps.tokenValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
+          caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+          caps.tokenValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         } catch {
-          caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+          caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         }
       } else {
-        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
-        caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+        caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       }
     }
 

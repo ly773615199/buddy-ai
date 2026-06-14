@@ -214,11 +214,11 @@ export class ExperiencePackageManager {
       const { scanForPII } = require('../shop/publish-sanitizer.js');
       const allText = [
         pkg.description,
-        ...pkg.knowledge.map(k => k.summary + ' ' + k.content),
+        ...pkg.knowledge.map(k => k.content),
       ].join('\n');
-      const piiResults = scanForPII({ name: pkg.name, version: pkg.version, domain: pkg.domain, description: pkg.description, author: 'user', knowledge: pkg.knowledge.map(k => ({ title: k.summary, content: k.content, type: k.type })) });
+      const piiResults = scanForPII({ name: pkg.name, version: pkg.metadata.version, domain: pkg.domain, description: pkg.description, author: 'user', knowledge: pkg.knowledge.map(k => ({ title: k.content.slice(0, 50), content: k.content, type: k.type })) });
       if (piiResults.length > 0) {
-        console.warn(`[PublishSanitizer] 能力包 "${pkg.name}" 包含 ${piiResults.length} 项 PII:`, piiResults.map(r => r.type));
+        console.warn(`[PublishSanitizer] 能力包 "${pkg.name}" 包含 ${piiResults.length} 项 PII:`, piiResults.map((r: { type: string }) => r.type));
       }
     } catch { /* 扫描失败不阻塞导出 */ }
 

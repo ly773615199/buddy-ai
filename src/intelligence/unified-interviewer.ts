@@ -13,6 +13,7 @@ import type { STMPStore } from '../memory/stmp.js';
 import type { CognitiveEngine } from '../cognitive/engine.js';
 import type { Message } from '../types.js';
 import { KnowledgeInterviewer, type InterviewQuestion, type KnowledgeGap } from './knowledge-interviewer.js';
+export type { InterviewQuestion } from './knowledge-interviewer.js';
 import { CAPABILITY_GATE, getDiscoverableCapabilities, type CapabilityDef } from '../core/capability-gate.js';
 import { getIntimacyStage, type IntimacyStageName } from '../types.js';
 

@@ -27,8 +27,8 @@ export class KnowledgeSourceProber implements ResourceProber {
             accessible++;
           } catch { /* 不可达 */ }
         }
-        caps.reachable = { value: accessible > 0, verified: true, lastVerifiedAt: Date.now() };
-        caps.dataFresh = { value: true, verified: false, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: accessible > 0, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+        caps.dataFresh = { value: true, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         break;
       }
       case 'web': {
@@ -37,9 +37,9 @@ export class KnowledgeSourceProber implements ResourceProber {
         if (searchUrl) {
           try {
             const resp = await fetch(searchUrl, { method: 'HEAD', signal: AbortSignal.timeout(this.probeTimeoutMs) });
-            caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
+            caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           } catch {
-            caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+            caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           }
         }
         break;
@@ -48,8 +48,8 @@ export class KnowledgeSourceProber implements ResourceProber {
         // 飞书知识源：检查 token 有效性
         const appId = resource.metadata.appId as string;
         const appSecret = resource.metadata.appSecret as string;
-        caps.reachable = { value: !!(appId && appSecret), verified: false, lastVerifiedAt: Date.now() };
-        caps.tokenValid = { value: true, verified: false, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: !!(appId && appSecret), verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+        caps.tokenValid = { value: true, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         break;
       }
     }

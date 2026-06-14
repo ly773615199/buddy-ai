@@ -17,7 +17,7 @@ export class PlatformProber implements ResourceProber {
 
     // 基本配置完整性检查
     const hasConfig = !!(resource.metadata.enabled);
-    caps.reachable = { value: hasConfig, verified: false, lastVerifiedAt: Date.now() };
+    caps.reachable = { value: hasConfig, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
 
     // 平台特定探测
     switch (platform) {
@@ -29,11 +29,11 @@ export class PlatformProber implements ResourceProber {
               signal: AbortSignal.timeout(this.probeTimeoutMs),
             });
             const data = await resp.json() as any;
-            caps.tokenValid = { value: data.ok === true, verified: true, lastVerifiedAt: Date.now() };
-            caps.reachable = { value: data.ok === true, verified: true, lastVerifiedAt: Date.now() };
+            caps.tokenValid = { value: data.ok === true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+            caps.reachable = { value: data.ok === true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           } catch {
-            caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now() };
-            caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+            caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+            caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           }
         }
         break;
@@ -46,17 +46,17 @@ export class PlatformProber implements ResourceProber {
               headers: { Authorization: `Bot ${token}` },
               signal: AbortSignal.timeout(this.probeTimeoutMs),
             });
-            caps.tokenValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
-            caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
+            caps.tokenValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+            caps.reachable = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           } catch {
-            caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now() };
+            caps.tokenValid = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
           }
         }
         break;
       }
       default:
         // 未知平台：只做配置检查
-        caps.tokenValid = { value: hasConfig, verified: false, lastVerifiedAt: Date.now() };
+        caps.tokenValid = { value: hasConfig, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
     }
 
     return {

@@ -269,7 +269,12 @@ export class Subsystems {
               // 只恢复 pool 中尚无数据或数据更少的 key
               const existing = pool.getThompsonParamByKey(gp.key);
               if (!existing || (existing.alpha + existing.beta) < (decayed.alpha + decayed.beta)) {
-                pool.setThompsonParamByKey(gp.key, decayed);
+                pool.setThompsonParamByKey(gp.key, {
+                  ...decayed,
+                  totalCalls: 0,
+                  avgQuality: 0,
+                  lastUsed: Date.now(),
+                });
                 restored++;
               }
             }

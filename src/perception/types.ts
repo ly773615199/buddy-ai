@@ -21,7 +21,8 @@ export type PerceptionSourceType =
   | 'git'         // Git 状态变更
   | 'fs'          // 文件系统变更
   | 'process'     // 进程状态
-  | 'terminal';   // 终端输出
+  | 'terminal'    // 终端输出
+  | 'sensor';     // 传感器综合数据
 
 export type PerceptionCategory = 'vision' | 'audio' | 'sensor' | 'interaction' | 'environment';
 

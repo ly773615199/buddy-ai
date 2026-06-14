@@ -43,8 +43,8 @@ export class HTTPToolProber implements ResourceProber {
       });
       clearTimeout(timer);
 
-      caps.reachable = { value: resp.ok || resp.status < 500, verified: true, lastVerifiedAt: Date.now() };
-      caps.responseValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
+      caps.reachable = { value: resp.ok || resp.status < 500, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+      caps.responseValid = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
 
       if (!resp.ok) {
         return {
@@ -57,7 +57,7 @@ export class HTTPToolProber implements ResourceProber {
         };
       }
     } catch (e: any) {
-      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       return {
         timestamp: Date.now(),
         source: 'probe',

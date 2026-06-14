@@ -67,12 +67,12 @@ export class ModelProber implements ResourceProber {
       latencyMs = Date.now() - start;
 
       // 基础连通性 — 用 create 的结果判断
-      caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now() };
+      caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
 
       // 从静态能力导入
-      caps.toolCalling = { value: capabilities.toolCalling, verified: false, lastVerifiedAt: Date.now() };
-      caps.streaming = { value: capabilities.streaming ?? true, verified: false, lastVerifiedAt: Date.now() };
-      caps.maxContextTokens = { value: capabilities.maxContextTokens, verified: false, lastVerifiedAt: Date.now() };
+      caps.toolCalling = { value: capabilities.toolCalling, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+      caps.streaming = { value: capabilities.streaming ?? true, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+      caps.maxContextTokens = { value: capabilities.maxContextTokens, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
 
       // 探测 tool calling（发送带 tools 的请求验证）
       try {
@@ -95,10 +95,10 @@ export class ModelProber implements ResourceProber {
           }),
           this.config.timeoutMs,
         );
-        caps.toolCalling = { value: true, verified: true, lastVerifiedAt: Date.now() };
+        caps.toolCalling = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       } catch {
         // tool calling 不支持 — 标记为已验证的 false
-        caps.toolCalling = { value: false, verified: true, lastVerifiedAt: Date.now() };
+        caps.toolCalling = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       }
 
       // 探测 vision
@@ -121,9 +121,9 @@ export class ModelProber implements ResourceProber {
             }),
             this.config.timeoutMs,
           );
-          caps.vision = { value: true, verified: true, lastVerifiedAt: Date.now() };
+          caps.vision = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         } catch {
-          caps.vision = { value: false, verified: true, lastVerifiedAt: Date.now() };
+          caps.vision = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         }
       }
 
@@ -141,15 +141,15 @@ export class ModelProber implements ResourceProber {
             }),
             this.config.timeoutMs,
           );
-          caps.embedding = { value: resp.ok, verified: true, lastVerifiedAt: Date.now() };
+          caps.embedding = { value: resp.ok, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         } catch {
-          caps.embedding = { value: false, verified: true, lastVerifiedAt: Date.now() };
+          caps.embedding = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         }
       }
 
     } catch (e: any) {
       errors.push(e.message);
-      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+      caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
     }
 
     return {

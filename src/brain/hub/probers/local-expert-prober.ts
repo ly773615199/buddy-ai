@@ -21,9 +21,9 @@ export class LocalExpertProber implements ResourceProber {
       try {
         const fs = await import('fs/promises');
         await fs.access(modelPath);
-        caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       } catch {
-        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+        caps.reachable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         return {
           timestamp: Date.now(),
           source: 'probe',
@@ -41,11 +41,11 @@ export class LocalExpertProber implements ResourceProber {
       if (router && typeof router.infer === 'function') {
         const start = Date.now();
         const result = await router.infer(domain, 'test input');
-        caps.inferenceWorking = { value: !!result, verified: true, lastVerifiedAt: Date.now() };
-        caps.latencyMs = { value: Date.now() - start, verified: true, lastVerifiedAt: Date.now() };
+        caps.inferenceWorking = { value: !!result, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
+        caps.latencyMs = { value: Date.now() - start, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       }
     } catch {
-      caps.inferenceWorking = { value: false, verified: true, lastVerifiedAt: Date.now() };
+      caps.inferenceWorking = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
     }
 
     return {

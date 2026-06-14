@@ -34,9 +34,9 @@ export class SkillProber implements ResourceProber {
       const skillMd = path.join(skillPath, 'SKILL.md');
       try {
         await fs.access(skillMd);
-        caps.installable = { value: true, verified: true, lastVerifiedAt: Date.now() };
+        caps.installable = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       } catch {
-        caps.installable = { value: false, verified: true, lastVerifiedAt: Date.now() };
+        caps.installable = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         return {
           timestamp: Date.now(),
           source: 'probe',
@@ -52,14 +52,15 @@ export class SkillProber implements ResourceProber {
       try {
         await fs.access(pkgJson);
         const pkg = JSON.parse(await fs.readFile(pkgJson, 'utf-8'));
-        caps.runnable = { value: true, verified: true, lastVerifiedAt: Date.now() };
+        caps.runnable = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 1 };
         caps.compatible = {
           value: !pkg.engines?.node || this.checkNodeVersion(pkg.engines.node),
           verified: true,
           lastVerifiedAt: Date.now(),
+          sourcePriority: 1,
         };
       } catch {
-        caps.runnable = { value: false, verified: false, lastVerifiedAt: Date.now() };
+        caps.runnable = { value: false, verified: false, lastVerifiedAt: Date.now(), sourcePriority: 1 };
       }
     } catch (e: any) {
       return {
