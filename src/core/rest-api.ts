@@ -694,6 +694,24 @@ export function setupRESTAPI(ctx: RESTContext): void {
       config.models = { ...config.models, providers: updatedProviders } as any;
       const unifiedPool = sys.llm.getUnifiedPool();
       if (unifiedPool) { for (const p of unifiedPool.getProfilesByPlatform(id)) unifiedPool.removeProfile(p.id); }
+      // 清理模型知识缓存中该平台的数据
+      try {
+        const { ModelKnowledgeUpdater } = await import('./model-knowledge-updater.js');
+        const dataDir = (await import('path')).join(process.env.HOME ?? '/tmp', '.buddy');
+        const cacheFile = (await import('path')).join(dataDir, 'model-knowledge-cache.json');
+        const fs = await import('fs/promises');
+        const raw = JSON.parse(await fs.readFile(cacheFile, 'utf-8'));
+        let cleaned = 0;
+        if (raw.profiles) {
+          for (const [pid, prof] of Object.entries(raw.profiles as Record<string, { platform?: string }>)) {
+            if (prof.platform === id) { delete raw.profiles[pid]; cleaned++; }
+          }
+        }
+        if (raw.lastRefresh) delete raw.lastRefresh[id];
+        if (raw.lastErrors) delete raw.lastErrors[id];
+        await fs.writeFile(cacheFile, JSON.stringify(raw, null, 2));
+        if (cleaned > 0) console.log(`[ModelPool] 清理 ${id} 的知识缓存: ${cleaned} 个模型`);
+      } catch (e) { console.warn('[ModelPool] 清理知识缓存失败:', e); }
       linkHandler.updateConfigHash(config);
       eb.emit({ type: 'bubble', text: `🗑️ 已删除 API 端点: ${id}` });
       json(res, 200, { ok: true, removedId: id });
