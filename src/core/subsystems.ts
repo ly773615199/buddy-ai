@@ -280,6 +280,11 @@ export class Subsystems {
           }
         }
         if (verbose) console.log(`[UnifiedPool] 已初始化: ${pool.profileCount} 个模型`);
+        // 模型池加载完成后，重新同步到 ResourceHub
+        if (this.modelPoolBridge) {
+          const reSynced = this.modelPoolBridge.fullSync();
+          if (verbose && reSynced > 0) console.log(`[ResourceHub] 重新同步: ${reSynced} 个模型资源`);
+        }
       }).catch((err) => {
         if (verbose) console.warn('[UnifiedPool] 初始化失败:', err.message);
       });
