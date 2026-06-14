@@ -603,7 +603,7 @@ export class MessageProcessor {
   }
 
   /** 批量处理（WS 模式） */
-  async processBatch(content: string, eventBus: { emit: (e: any) => void } | null, options?: { skipDAG?: boolean }): Promise<{
+  async processBatch(content: string, eventBus: { emit: (e: any) => void } | null, options?: { skipDAG?: boolean; taskType?: import('../core/model-router.js').TaskType }): Promise<{
     text: string;
     steps: number;
     toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
@@ -649,7 +649,7 @@ export class MessageProcessor {
 
     let result;
     try {
-      result = await this.sys.llm.chat(messages, availableTools, 5);
+      result = await this.sys.llm.chat(messages, availableTools, 5, { taskType: options?.taskType });
     } catch (err: unknown) {
       const classified = classifyError(err);
       console.error(`⚠️ LLM 调用失败 [${classified.category}]: ${classified.original}`);
@@ -661,7 +661,7 @@ export class MessageProcessor {
             { role: 'system', content: finalPrompt, timestamp: Date.now() },
             { role: 'user', content, timestamp: Date.now() },
           ];
-          result = await this.sys.llm.chat(simpleMessages, availableTools, 3);
+          result = await this.sys.llm.chat(simpleMessages, availableTools, 3, { taskType: options?.taskType });
         } catch (retryErr) {
           if (this.verbose) console.warn('[LLM] 降级重试失败:', (retryErr as Error).message);
           throw new Error(getUserFriendlyMessage(classified));
@@ -692,7 +692,7 @@ export class MessageProcessor {
     content: string,
     onChunk: (chunk: string) => void,
     eventBus: { emit: (e: any) => void } | null,
-    options?: { skipDAG?: boolean; systemHint?: string },
+    options?: { skipDAG?: boolean; systemHint?: string; taskType?: import('../core/model-router.js').TaskType },
   ): Promise<{
     text: string;
     toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }>;
@@ -833,14 +833,16 @@ export class MessageProcessor {
       if (capabilityPrefix) {
         onChunk(capabilityPrefix);
       }
-      result = await this.sys.llm.streamChat(messages, availableTools, 5, onChunk);
+      result = await this.sys.llm.streamChat(messages, availableTools, 5, onChunk, {
+        taskType: options?.taskType,
+      });
     } catch (err: unknown) {
       const classified = classifyError(err);
       console.error(`⚠️ LLM 流式调用失败 [${classified.category}]: ${classified.original}`);
 
       if (classified.recoverable) {
         console.log('  [降级] 流式失败，切换到批量模式...');
-        const fallbackResult = await this.sys.llm.chat(messages, availableTools, 5);
+        const fallbackResult = await this.sys.llm.chat(messages, availableTools, 5, { taskType: options?.taskType });
         onChunk(fallbackResult.text);
         return {
           text: fallbackResult.text,

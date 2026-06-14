@@ -701,7 +701,11 @@ export class WSHandler {
         promptTokens = 0;
       } else {
         // fallback: agentRef 未设置，走旧路径
-        const batchResult = await this.processor.processBatch(content, this.eventBus);
+        // 创建 signal 以统一 taskType 推断，避免 LLMAdapter 重新推断
+        const fallbackSignal = collectSignals(this.sys, content);
+        const batchResult = await this.processor.processBatch(content, this.eventBus, {
+          taskType: fallbackSignal.taskType,
+        });
         result = batchResult;
         promptTokens = batchResult.promptTokens ?? 0;
       }

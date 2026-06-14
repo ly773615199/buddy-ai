@@ -21,6 +21,8 @@ interface ModelPoolLike {
     accessStatus?: string;
     failureStreak?: number;
     stats?: { totalCalls: number; successes: number; avgLatencyMs: number };
+    capabilities?: { toolCalling: boolean; toolCallingMode: string; vision: boolean; streaming: boolean };
+    derived?: { chatCapable: boolean; toolCapable: boolean; embedCapable: boolean; visionCapable: boolean };
   }>;
   recordFeedback?(profileId: string, taskType: string, success: boolean, latencyMs: number, cost?: number, qualityScore?: number): void;
 }

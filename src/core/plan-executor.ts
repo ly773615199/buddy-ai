@@ -129,7 +129,7 @@ export async function executeByPlan(
   }
   // llm_with_hint: 经验作为 hint 注入 LLM prompt
   if (firstNode?.routePath === 'llm_with_hint' && firstNode.skillId) {
-    return executeWithHint(ctx, firstNode.skillId, plan.content);
+    return executeWithHint(ctx, firstNode.skillId, plan.content, plan.taskType);
   }
 
   // Phase 1: 统一模型池 — 如果节点携带具体模型信息，直接用 chatWithNode
@@ -306,6 +306,7 @@ export async function executeWithHint(
   ctx: ExecutionContext,
   skillId: string,
   content: string,
+  taskType?: string,
 ): Promise<ExecutionResult> {
   const skill = ctx.sys.intelligence.graph.getNode(skillId);
   if (!skill) {
@@ -322,6 +323,7 @@ export async function executeWithHint(
   const result = await ctx.processor.processStream(content, () => {}, null, {
     skipDAG: true,
     systemHint: hint,
+    taskType: taskType as any,
   });
   return { text: result.text, source: `llm_hint/${skillId}`, toolCalls: result.toolCalls ?? [] };
 }
@@ -424,7 +426,7 @@ async function executeLocal(ctx: ExecutionContext, plan: OrchestrationPlan): Pro
 /** single — 单 LLM 调用 */
 async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const startTime = Date.now();
-  const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true });
+  const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true, taskType: plan.taskType });
   const elapsed = Date.now() - startTime;
 
   const selection = ctx.sys.llm.consumeLastUnifiedSelection();

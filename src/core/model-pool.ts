@@ -980,6 +980,12 @@ export class ModelPool {
         // 低置信度时接近 1.0（不惩罚新模型），高置信度时按质量加权
         const affinityFactor = 1.0 - confidence * (1.0 - (0.5 + quality * 0.5));
         sample *= affinityFactor;
+      } else {
+        // 新模型探索奖励（UCB 风格）：样本越少，探索奖励越大
+        // 总调用次数 0 次 → bonus 1.3, 1-2 次 → bonus 1.15, 3+ 次 → 无 bonus
+        const totalCalls = p.stats.totalCalls;
+        if (totalCalls === 0) sample *= 1.3;
+        else if (totalCalls <= 2) sample *= 1.15;
       }
 
       // 策略加权

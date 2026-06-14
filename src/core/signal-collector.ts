@@ -247,7 +247,14 @@ export function collectResourceState(
   if (hub) {
     // 从 ResourceHub 读取实时数据
     const allModels = hub.getActive('model');
-    availableModelCount = allModels.length;
+
+    // 如果 ResourceHub 尚未同步（异步初始化中），fallback 到直接查询
+    if (allModels.length === 0) {
+      const pool = sys.router.getPool();
+      availableModelCount = pool?.profileCount ?? 0;
+    } else {
+      availableModelCount = allModels.length;
+    }
 
     const localExperts = hub.getActive('expert');
     const coveredDomains = signal.domains.filter(d =>

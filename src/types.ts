@@ -845,6 +845,8 @@ export interface OrchestrationPlan {
   domains: string[];
   /** 任务复杂度 */
   complexity: 'simple' | 'medium' | 'complex';
+  /** 任务类型（从 signal 透传，避免 LLM 重复推断） */
+  taskType?: 'chat' | 'tools' | 'reasoning' | 'background' | 'domain';
   /** 选定的执行节点 */
   selectedNodes: OrchestrationNode[];
   /** 是否需要 DAG 编排 */
