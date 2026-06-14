@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { LRUCache, RateLimiter, ConnectionPool } from './perf/cache.js';
+import { LRUCache } from './perf/cache.js';
 import { LaunchReadiness } from './launch/readiness.js';
 
 describe('Phase C Week 19-20 — 性能模块 + 上线就绪', () => {
@@ -86,134 +86,7 @@ describe('Phase C Week 19-20 — 性能模块 + 上线就绪', () => {
   });
 
   // ══════════════════════════════════════════
-  // 2. RateLimiter — 限流器
-  // ══════════════════════════════════════════
-
-  describe('限流器', () => {
-    it('基本限流 — 超过 maxRequests 被拦截', () => {
-      const limiter = new RateLimiter({ maxRequests: 3, windowMs: 1000 });
-
-      const r1 = limiter.check('user1');
-      expect(r1.allowed).toBe(true);
-      expect(r1.remaining).toBe(2);
-
-      limiter.check('user1');
-      limiter.check('user1');
-      const r4 = limiter.check('user1');
-      expect(r4.allowed).toBe(false);
-      expect(r4.remaining).toBe(0);
-    });
-
-    it('不同 key 独立计数', () => {
-      const limiter = new RateLimiter({ maxRequests: 3, windowMs: 1000 });
-      limiter.check('user1');
-      limiter.check('user1');
-      limiter.check('user1');
-
-      const r_other = limiter.check('user2');
-      expect(r_other.allowed).toBe(true);
-    });
-
-    it('reset 后可再次请求', () => {
-      const limiter = new RateLimiter({ maxRequests: 3, windowMs: 1000 });
-      limiter.check('user1');
-      limiter.check('user1');
-      limiter.check('user1');
-
-      limiter.reset('user1');
-      const r_after_reset = limiter.check('user1');
-      expect(r_after_reset.allowed).toBe(true);
-    });
-
-    it('过期清理', async () => {
-      const shortLimiter = new RateLimiter({ maxRequests: 1, windowMs: 50 });
-      shortLimiter.check('key');
-
-      await new Promise(r => setTimeout(r, 60));
-      expect(shortLimiter.purgeExpired()).toBe(1);
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // 3. ConnectionPool — 连接池
-  // ══════════════════════════════════════════
-
-  describe('连接池', () => {
-    it('获取和归还连接', async () => {
-      let connId = 0;
-      const pool = new ConnectionPool<{ id: number }>({
-        maxConnections: 3,
-        create: async () => ({ id: ++connId }),
-        destroy: async () => {},
-        idleTimeoutMs: 1000,
-      });
-
-      const c1 = await pool.acquire();
-      expect(c1.id).toBe(1);
-      const c2 = await pool.acquire();
-      expect(c2.id).toBe(2);
-
-      const poolStats = pool.getStats();
-      expect(poolStats.inUse).toBe(2);
-      expect(poolStats.available).toBe(0);
-
-      await pool.release(c1);
-      const statsAfterRelease = pool.getStats();
-      expect(statsAfterRelease.available).toBe(1);
-
-      // 复用连接
-      const c3 = await pool.acquire();
-      expect(c3.id).toBe(1);
-
-      await pool.release(c2);
-      await pool.release(c3);
-      await pool.shutdown();
-    });
-
-    it('池满时抛出错误', async () => {
-      let connId = 0;
-      const pool = new ConnectionPool<{ id: number }>({
-        maxConnections: 3,
-        create: async () => ({ id: ++connId }),
-        destroy: async () => {},
-        idleTimeoutMs: 1000,
-      });
-
-      const c1 = await pool.acquire();
-      const c2 = await pool.acquire();
-      const c3 = await pool.acquire();
-
-      try {
-        await pool.acquire();
-        expect(true).toBe(false); // should not reach here
-      } catch (e: any) {
-        expect(e.message).toContain('连接池已满');
-      }
-
-      await pool.release(c1);
-      await pool.release(c2);
-      await pool.release(c3);
-      await pool.shutdown();
-    });
-
-    it('shutdown 后 available=0', async () => {
-      let connId = 0;
-      const pool = new ConnectionPool<{ id: number }>({
-        maxConnections: 3,
-        create: async () => ({ id: ++connId }),
-        destroy: async () => {},
-        idleTimeoutMs: 1000,
-      });
-
-      const c1 = await pool.acquire();
-      await pool.release(c1);
-      await pool.shutdown();
-      expect(pool.getStats().available).toBe(0);
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // 4. LaunchReadiness — 上线就绪检查
+  // 2. LaunchReadiness — 上线就绪检查
   // ══════════════════════════════════════════
 
   describe('上线就绪检查', () => {

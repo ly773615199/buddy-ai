@@ -74,6 +74,7 @@ import { MCPRegistry } from '../tools/mcp-registry.js';
 import { detectEnvironment } from '../env/detect.js';
 import { PROJECT_TOOLS_ALL } from '../tools/project.js';
 import { z as zod } from 'zod';
+import { syncAllSources } from '../brain/right/scene/entity-adapters.js';
 
 // --- 三脑架构 ---
 import { ThreeBrain } from '../brain/brain.js';
@@ -882,6 +883,9 @@ export class Subsystems {
     this.threeBrain.left.scheduler.setRouter(llmRouter);
     if (verbose) console.log('[ThreeBrain] ModelRouter 已同步注入 UnifiedScheduler');
 
+    // Step 19: EntityRegistry 数据同步 — 从 STMP/ExperienceGraph 灌入实体
+    this._syncEntityRegistry(verbose);
+
     // Step 6+7: ResourceHub + ModelPoolResourceBridge 初始化（P7 升级：统一资源系统）
     import('../brain/hub/index.js').then(({ createResourceSystem }) => {
       return import('../brain/hub/model-pool-bridge.js').then(({ ModelPoolResourceBridge }) => {
@@ -1310,6 +1314,122 @@ export class Subsystems {
     this.pet.close();
     this.memory.close();
     console.log(`👋 ${name} 已关闭`);
+  }
+
+  /**
+   * EntityRegistry 数据同步 — 从 STMP/ExperienceGraph 灌入实体
+   *
+   * 设计来源: RIGHT_BRAIN_ACTIVATION_PLAN.md Phase 2
+   * 断裂点修复: entity-adapters.ts 的 extractFrom* 从未被调用
+   */
+  private _syncEntityRegistry(verbose: boolean): void {
+    if (!this.rightBrain) return;
+
+    const registry = this.rightBrain.entityRegistry;
+    if (!registry) return;
+
+    try {
+      // 适配 STMPStore → STMPSource 接口
+      const stmpAdapter = {
+        getMemoriesInRoom: (roomId: string, limit = 50) => {
+          const nodes = this.stmp.getRecentInRoom(roomId, limit);
+          return nodes.map(n => ({
+            id: n.id,
+            content: n.content,
+            room: n.room,
+            concepts: n.concepts,
+            importance: (n.emotional?.importance ?? 5) / 10, // 归一化到 0-1
+            timestamp: n.timestamp,
+            accessCount: n.lifecycle?.accessCount ?? 0,
+            decay: n.lifecycle?.decay ?? 0,
+          }));
+        },
+        searchMemories: (query: string, limit = 20) => {
+          const nodes = this.stmp.searchNodes(query, limit);
+          return nodes.map(n => ({
+            id: n.id,
+            content: n.content,
+            room: n.room,
+            concepts: n.concepts,
+            importance: (n.emotional?.importance ?? 5) / 10,
+            timestamp: n.timestamp,
+            accessCount: n.lifecycle?.accessCount ?? 0,
+            decay: n.lifecycle?.decay ?? 0,
+          }));
+        },
+        getRooms: () => {
+          return this.stmp.listRooms().map(r => ({
+            id: r.id,
+            name: r.name,
+            tags: r.tags,
+            memoryCount: r.memoryCount,
+          }));
+        },
+      };
+
+      // 适配 ExperienceGraph → ExperienceSource 接口
+      const experienceGraph = this.intelligence?.graph;
+      const experienceAdapter = experienceGraph ? {
+        getAllNodes: () => {
+          return experienceGraph.getAllNodes().map(n => ({
+            id: n.id,
+            name: n.name,
+            description: n.description,
+            trigger: {
+              keywords: n.trigger?.keywords ?? [],
+              contextTags: n.trigger?.contextTags ?? [],
+            },
+            stats: {
+              successCount: n.stats?.successCount ?? 0,
+              failCount: n.stats?.failCount ?? 0,
+              confidence: n.stats?.confidence ?? 0,
+            },
+          }));
+        },
+        getAllEdges: () => {
+          // ExperienceGraph 没有 getAllEdges，用 getEdges 遍历
+          const nodes = experienceGraph.getAllNodes();
+          const edgeSet = new Set<string>();
+          const edges: Array<{ from: string; to: string; type: string; weight: number }> = [];
+          for (const node of nodes) {
+            for (const edge of experienceGraph.getEdges(node.id)) {
+              const key = `${edge.from}->${edge.to}:${edge.type}`;
+              if (!edgeSet.has(key)) {
+                edgeSet.add(key);
+                edges.push({ from: edge.from, to: edge.to, type: edge.type, weight: edge.weight });
+              }
+            }
+          }
+          return edges;
+        },
+      } : undefined;
+
+      const result = syncAllSources(registry, {
+        stmp: stmpAdapter,
+        experience: experienceAdapter,
+      });
+
+      if (verbose) {
+        console.log(`[EntityRegistry] 同步完成: ${result.totalEntities} 实体, ${result.totalEdges} 边`);
+        if (result.stmp.entityCount > 0) console.log(`  STMP: ${result.stmp.entityCount} 实体`);
+        if (result.experience.entityCount > 0) console.log(`  Experience: ${result.experience.entityCount} 实体`);
+      }
+
+      // 定期重新同步（每 30 分钟）
+      setInterval(() => {
+        try {
+          const r = syncAllSources(registry, { stmp: stmpAdapter, experience: experienceAdapter });
+          if (verbose && r.totalEntities > 0) {
+            console.log(`[EntityRegistry] 重新同步: ${r.totalEntities} 实体`);
+          }
+        } catch (e: any) {
+          if (verbose) console.warn('[EntityRegistry] 重新同步失败:', e.message);
+        }
+      }, 30 * 60 * 1000);
+
+    } catch (err: any) {
+      if (verbose) console.warn('[EntityRegistry] 同步失败:', err.message);
+    }
   }
 }
 

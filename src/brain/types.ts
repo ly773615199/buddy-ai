@@ -120,15 +120,6 @@ export interface BodyEvent {
 
 // ==================== 决策上下文 ====================
 
-/** 决策上下文 */
-export interface DecisionContext {
-  input: string;
-  signal: TaskSignal;
-  resources: ResourceState;
-  intuition?: IntuitionSignal;
-  bodyState?: BodyState;
-}
-
 /** 决策结果 */
 export interface DecisionOutcome {
   success: boolean;
@@ -220,18 +211,6 @@ export interface ToolHealthSummary {
 }
 
 // ==================== 右脑相关 ====================
-
-/** 直觉任务类型 */
-export type IntuitionTask = 'intent_classify' | 'tool_select' | 'quality_assess';
-
-/** 直觉结果 */
-export interface IntuitionResult {
-  task: IntuitionTask;
-  prediction: string | string[] | number;
-  confidence: number;
-  latencyMs: number;
-  modelId: string;
-}
 
 /** 调度结果 */
 export interface ScheduleResult {
