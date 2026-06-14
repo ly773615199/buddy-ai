@@ -136,6 +136,89 @@ export class MemoryStore {
     }
   }
 
+  // ==================== Phase 1.3: 语义检索 ====================
+
+  /**
+   * 语义检索 — TF-IDF 向量 + 余弦相似度
+   *
+   * 轻量方案：零外部依赖，用分词 + TF-IDF 构建稀疏向量，
+   * 余弦相似度排序。与 FTS5 互补：FTS5 擅长精确匹配，
+   * 语义检索擅长模糊相关。
+   */
+  searchMemoriesSemantic(query: string, limit = 5): Array<{ key: string; value: string; similarity: number }> {
+    // 1. 获取所有记忆
+    const allMemories = this.db.prepare(
+      'SELECT key, value FROM memories'
+    ).all() as Array<{ key: string; value: string }>;
+
+    if (allMemories.length === 0) return [];
+
+    // 2. 构建 IDF（逆文档频率）
+    const docCount = allMemories.length;
+    const docFreq = new Map<string, number>();
+    const docs = allMemories.map(m => {
+      const tokens = tokenize(m.value);
+      const uniqueTokens = new Set(tokens);
+      for (const t of uniqueTokens) {
+        docFreq.set(t, (docFreq.get(t) ?? 0) + 1);
+      }
+      return { key: m.key, value: m.value, tokens };
+    });
+
+    // 3. 查询向量
+    const queryTokens = tokenize(query);
+    const queryVec = buildTfIdfVector(queryTokens, docFreq, docCount);
+
+    // 4. 计算每个记忆的相似度
+    const scored = docs.map(doc => {
+      const docVec = buildTfIdfVector(doc.tokens, docFreq, docCount);
+      const similarity = cosineSimilarity(queryVec, docVec);
+      return { key: doc.key, value: doc.value, similarity };
+    });
+
+    // 5. 排序返回
+    scored.sort((a, b) => b.similarity - a.similarity);
+    return scored.slice(0, limit).filter(r => r.similarity > 0.01);
+  }
+
+  /**
+   * 混合检索 — FTS5 + 语义检索合并排序
+   *
+   * 两路结果加权合并：FTS5 精确匹配 + 语义模糊匹配
+   */
+  searchMemoriesHybrid(query: string, limit = 5): Array<{ key: string; value: string; score: number }> {
+    const ftsResults = this.searchMemories(query, limit * 2);
+    const semanticResults = this.searchMemoriesSemantic(query, limit * 2);
+
+    // 合并：FTS5 权重 0.6，语义权重 0.4
+    const scoreMap = new Map<string, { key: string; value: string; ftsScore: number; semScore: number }>();
+
+    for (const r of ftsResults) {
+      scoreMap.set(r.key, { key: r.key, value: r.value, ftsScore: Math.abs(r.rank), semScore: 0 });
+    }
+    for (const r of semanticResults) {
+      const existing = scoreMap.get(r.key);
+      if (existing) {
+        existing.semScore = r.similarity;
+      } else {
+        scoreMap.set(r.key, { key: r.key, value: r.value, ftsScore: 0, semScore: r.similarity });
+      }
+    }
+
+    // 归一化 + 加权
+    const maxFts = Math.max(...[...scoreMap.values()].map(r => r.ftsScore), 0.001);
+    const maxSem = Math.max(...[...scoreMap.values()].map(r => r.semScore), 0.001);
+
+    const results = [...scoreMap.values()].map(r => ({
+      key: r.key,
+      value: r.value,
+      score: (r.ftsScore / maxFts) * 0.6 + (r.semScore / maxSem) * 0.4,
+    }));
+
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, limit);
+  }
+
   // ==================== 日记 ====================
 
   addDiaryEntry(content: string, mood = 'neutral', date?: string): void {
@@ -209,4 +292,73 @@ export class MemoryStore {
   close(): void {
     this.db.close();
   }
+}
+
+// ==================== 语义检索辅助函数 ====================
+
+/**
+ * 分词器 — 中文按字符 bigram，英文按空格 + 小写
+ */
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  // 提取英文单词
+  const englishWords = text.toLowerCase().match(/[a-z][a-z0-9_]*/g) ?? [];
+  tokens.push(...englishWords);
+
+  // 中文字符 bigram（滑动窗口）
+  const chineseChars = text.match(/[\u4e00-\u9fff]/g) ?? [];
+  for (let i = 0; i < chineseChars.length - 1; i++) {
+    tokens.push(chineseChars[i] + chineseChars[i + 1]);
+  }
+  // 单字也保留（低频但有意义）
+  for (const c of chineseChars) {
+    tokens.push(c);
+  }
+
+  return tokens.filter(t => t.length > 0);
+}
+
+/**
+ * 构建 TF-IDF 稀疏向量
+ */
+function buildTfIdfVector(
+  tokens: string[],
+  docFreq: Map<string, number>,
+  docCount: number,
+): Map<string, number> {
+  const tf = new Map<string, number>();
+  for (const t of tokens) {
+    tf.set(t, (tf.get(t) ?? 0) + 1);
+  }
+
+  const vec = new Map<string, number>();
+  for (const [term, count] of tf) {
+    const df = docFreq.get(term) ?? 1;
+    const idf = Math.log(docCount / df);
+    vec.set(term, (count / tokens.length) * idf);
+  }
+  return vec;
+}
+
+/**
+ * 余弦相似度 — 两个稀疏向量
+ */
+function cosineSimilarity(a: Map<string, number>, b: Map<string, number>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (const [term, val] of a) {
+    normA += val * val;
+    const bVal = b.get(term);
+    if (bVal !== undefined) dot += val * bVal;
+  }
+  for (const val of b.values()) {
+    normB += val * val;
+  }
+
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
 }

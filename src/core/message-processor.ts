@@ -922,17 +922,19 @@ export class MessageProcessor {
         results.push({ key: '[关联]', value: node.content.slice(0, 150) });
       }
 
-      if (results.length < 2) {
-        const legacy = this.sys.memory.searchMemories(query, 3 - results.length);
-        results.push(...legacy);
+      // Phase 1.3: STMP 结果不足时，用混合检索（FTS5 + 语义）补充
+      if (results.length < 3) {
+        const hybrid = this.sys.memory.searchMemoriesHybrid(query, 3 - results.length);
+        results.push(...hybrid.map(r => ({ key: r.key, value: r.value })));
       }
 
       const final = results.slice(0, 5);
       this.memoryCache.set(cacheKey, JSON.stringify(final));
       return final;
     } catch (err) {
-      if (this.verbose) console.warn('[STMP] 检索异常，回退到基础搜索:', (err as Error).message);
-      const fallback = this.sys.memory.searchMemories(query, 3);
+      if (this.verbose) console.warn('[STMP] 检索异常，回退到混合检索:', (err as Error).message);
+      // Phase 1.3: 异常时用混合检索替代纯 FTS5
+      const fallback = this.sys.memory.searchMemoriesHybrid(query, 3);
       this.memoryCache.set(cacheKey, JSON.stringify(fallback));
       return fallback;
     }
