@@ -122,8 +122,8 @@ describe('UnifiedResourceHub', () => {
     const hub = new UnifiedResourceHub();
     const r = hub.register({ id: 'm1', type: 'model', name: 'test' });
 
-    // Set initial static capability
-    r.capabilities.toolCalling = { value: true, verified: false, lastVerifiedAt: 0 };
+    // Set initial static capability (sourcePriority 0)
+    r.capabilities.toolCalling = { value: true, verified: false, lastVerifiedAt: 0, sourcePriority: 0 };
 
     // Probe says false — should override
     const snap: CapabilitySnapshot = {

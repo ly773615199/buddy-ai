@@ -179,10 +179,10 @@ describe('CapabilityGraph', () => {
 
     const r1 = hub.get('m1')!;
     const r2 = hub.get('m2')!;
-    r1.capabilities.vision = { value: true, verified: true, lastVerifiedAt: Date.now() };
-    r1.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now() };
-    r2.capabilities.vision = { value: false, verified: true, lastVerifiedAt: Date.now() };
-    r2.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now() };
+    r1.capabilities.vision = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+    r1.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+    r2.capabilities.vision = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+    r2.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
 
     const graph = new CapabilityGraph(hub);
     const diff = graph.compareCapabilities('m1', 'm2');

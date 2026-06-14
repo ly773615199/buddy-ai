@@ -50,6 +50,7 @@ export interface CapabilityValue {
   value: boolean | number | string;
   verified: boolean;         // 是否经过实测
   lastVerifiedAt: number;
+  sourcePriority: number;    // 来源优先级（用于合并决策）
 }
 
 // ==================== 漂移检测 ====================
@@ -82,7 +83,8 @@ export interface UnifiedResource {
 
   // 健康度
   healthScore: number;       // 0-100
-  consecutiveFailures: number;
+  consecutiveProbeFailures: number;
+  consecutiveExecFailures: number;
 
   // 边际贡献（审计后填充）
   marginalContribution: MarginalContribution | null;

@@ -97,7 +97,8 @@ export class ModelProber implements ResourceProber {
         );
         caps.toolCalling = { value: true, verified: true, lastVerifiedAt: Date.now() };
       } catch {
-        // tool calling 不支持 — 保留静态值
+        // tool calling 不支持 — 标记为已验证的 false
+        caps.toolCalling = { value: false, verified: true, lastVerifiedAt: Date.now() };
       }
 
       // 探测 vision

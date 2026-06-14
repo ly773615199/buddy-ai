@@ -14,7 +14,8 @@ function makeResource(overrides?: Partial<UnifiedResource>): UnifiedResource {
     driftAlerts: [],
     stats: { totalCalls: 0, successes: 0, failures: 0, avgLatencyMs: 0, totalCost: 0, lastUsedAt: 0, byTaskType: {}, byDomain: {} },
     healthScore: 50,
-    consecutiveFailures: 0,
+    consecutiveProbeFailures: 0,
+    consecutiveExecFailures: 0,
     marginalContribution: null,
     createdAt: Date.now(),
     lastStateChange: Date.now(),
@@ -52,15 +53,15 @@ describe('LifecycleManager', () => {
 
   it('degraded → active on probe success', () => {
     const lm = new LifecycleManager();
-    const r = makeResource({ state: 'degraded', consecutiveFailures: 3 });
+    const r = makeResource({ state: 'degraded', consecutiveProbeFailures: 3 });
     lm.onProbeSucceeded(r);
     expect(r.state).toBe('active');
-    expect(r.consecutiveFailures).toBe(0);
+    expect(r.consecutiveProbeFailures).toBe(0);
   });
 
   it('degraded → deprecated after 5 consecutive failures', () => {
     const lm = new LifecycleManager();
-    const r = makeResource({ state: 'degraded', consecutiveFailures: 3 });
+    const r = makeResource({ state: 'degraded', consecutiveProbeFailures: 3 });
     lm.onProbeFailed(r);
     lm.onProbeFailed(r);
     expect(r.state).toBe('deprecated');

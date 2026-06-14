@@ -900,8 +900,13 @@ export class Subsystems {
                 active: profile.active,
               },
             });
+            // 直接设置状态，避免 discovered → active 双重转换
             if (profile.active) {
-              system.hub.markState(`model/${profile.id}`, 'active');
+              const r = system.hub.get(`model/${profile.id}`);
+              if (r && r.state === 'discovered') {
+                r.state = 'active';
+                r.lastStateChange = Date.now();
+              }
             }
           }
           if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源（统一资源系统）`);

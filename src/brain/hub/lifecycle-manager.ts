@@ -79,7 +79,7 @@ export class LifecycleManager {
    * 探测成功 → 根据当前状态决定转换
    */
   onProbeSucceeded(resource: UnifiedResource): void {
-    resource.consecutiveFailures = 0;
+    resource.consecutiveProbeFailures = 0;
     resource.lastProbeAt = Date.now();
 
     switch (resource.state) {
@@ -102,7 +102,7 @@ export class LifecycleManager {
    * 探测失败 → 根据当前状态决定转换
    */
   onProbeFailed(resource: UnifiedResource, error?: string): void {
-    resource.consecutiveFailures++;
+    resource.consecutiveProbeFailures++;
     resource.lastProbeAt = Date.now();
 
     switch (resource.state) {
@@ -110,13 +110,13 @@ export class LifecycleManager {
         this.transition(resource, 'rejected', `首次探测失败: ${error}`);
         break;
       case 'active':
-        if (resource.consecutiveFailures >= 3) {
-          this.transition(resource, 'degraded', `连续 ${resource.consecutiveFailures} 次失败`);
+        if (resource.consecutiveProbeFailures >= 3) {
+          this.transition(resource, 'degraded', `连续 ${resource.consecutiveProbeFailures} 次探测失败`);
         }
         break;
       case 'degraded':
-        if (resource.consecutiveFailures >= 5) {
-          this.transition(resource, 'deprecated', `连续 ${resource.consecutiveFailures} 次失败`);
+        if (resource.consecutiveProbeFailures >= 5) {
+          this.transition(resource, 'deprecated', `连续 ${resource.consecutiveProbeFailures} 次探测失败`);
         }
         break;
     }
@@ -126,10 +126,10 @@ export class LifecycleManager {
    * 执行反馈失败 → 更新连续失败计数
    */
   onExecutionFailed(resource: UnifiedResource): void {
-    resource.consecutiveFailures++;
+    resource.consecutiveExecFailures++;
 
-    if (resource.state === 'active' && resource.consecutiveFailures >= 3) {
-      this.transition(resource, 'degraded', `执行连续 ${resource.consecutiveFailures} 次失败`);
+    if (resource.state === 'active' && resource.consecutiveExecFailures >= 3) {
+      this.transition(resource, 'degraded', `执行连续 ${resource.consecutiveExecFailures} 次失败`);
     }
   }
 
@@ -137,7 +137,7 @@ export class LifecycleManager {
    * 执行反馈成功 → 重置连续失败计数
    */
   onExecutionSucceeded(resource: UnifiedResource): void {
-    resource.consecutiveFailures = 0;
+    resource.consecutiveExecFailures = 0;
 
     if (resource.state === 'degraded') {
       this.transition(resource, 'active', '执行恢复成功');

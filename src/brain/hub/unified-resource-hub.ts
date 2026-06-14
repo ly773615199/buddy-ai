@@ -94,7 +94,8 @@ export class UnifiedResourceHub {
         byDomain: {},
       },
       healthScore: 50,
-      consecutiveFailures: 0,
+      consecutiveProbeFailures: 0,
+      consecutiveExecFailures: 0,
       marginalContribution: null,
       createdAt: Date.now(),
       lastStateChange: Date.now(),
@@ -433,27 +434,20 @@ export class UnifiedResourceHub {
     const sourcePriority: Record<string, number> = {
       probe: 5, runtime: 4, litellm: 3, hf: 2, static: 1, manual: 6,
     };
-    const currentPriority = this.getSourcePriority(resource, sourcePriority);
+    const newSourcePriority = sourcePriority[snapshot.source] ?? 0;
 
     for (const [dim, newVal] of Object.entries(snapshot.capabilities)) {
       const existing = resource.capabilities[dim];
-      const newPriority = sourcePriority[snapshot.source] ?? 0;
 
-      if (!existing || newPriority >= currentPriority) {
+      if (!existing || newSourcePriority >= existing.sourcePriority) {
         resource.capabilities[dim] = {
           value: newVal.value,
           verified: newVal.verified,
           lastVerifiedAt: snapshot.timestamp,
+          sourcePriority: newSourcePriority,
         };
       }
     }
-  }
-
-  private getSourcePriority(resource: UnifiedResource, priorities: Record<string, number>): number {
-    // 从时间线中找到当前能力的最高来源优先级
-    if (resource.capabilityTimeline.length === 0) return 0;
-    const latest = resource.capabilityTimeline[resource.capabilityTimeline.length - 1];
-    return priorities[latest.source] ?? 0;
   }
 
   // ==================== 健康度 ====================
@@ -546,11 +540,12 @@ export class UnifiedResourceHub {
         avgLatencyMs: legacy.stats.avgLatencyMs,
         totalCost: legacy.stats.totalCost,
         lastUsedAt: legacy.stats.lastUsedAt,
-        byTaskType: legacy.strengths.taskTypes,
-        byDomain: legacy.strengths.domains,
+        byTaskType: JSON.parse(JSON.stringify(legacy.strengths.taskTypes)),
+        byDomain: JSON.parse(JSON.stringify(legacy.strengths.domains)),
       },
       healthScore: legacy.healthScore,
-      consecutiveFailures: 0,
+      consecutiveProbeFailures: 0,
+      consecutiveExecFailures: 0,
       marginalContribution: null,
       createdAt: Date.now(),
       lastStateChange: Date.now(),
