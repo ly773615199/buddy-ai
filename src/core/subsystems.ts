@@ -73,6 +73,7 @@ import { KnowledgeExporter } from '../intelligence/knowledge-export.js';
 import { MCPRegistry } from '../tools/mcp-registry.js';
 import { detectEnvironment } from '../env/detect.js';
 import { PROJECT_TOOLS_ALL } from '../tools/project.js';
+import { setIntegrationDeps } from '../project/tools.js';
 import { z as zod } from 'zod';
 import { syncAllSources } from '../brain/right/scene/entity-adapters.js';
 
@@ -458,6 +459,14 @@ export class Subsystems {
     });
     this.intelligence.init().catch((err) => {
       if (verbose) console.warn('[Intelligence] 初始化失败:', err.message);
+    });
+
+    // 接通项目集成桥接 — STMP / Dream / Cognitive / ExperienceCompiler
+    setIntegrationDeps({
+      stmp: this.stmp,
+      dream: this.dream,
+      cognitive: this.cognitive,
+      experienceCompiler: this.intelligence.compiler,
     });
 
     // --- 能力包 ---

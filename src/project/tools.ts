@@ -18,7 +18,7 @@ import { ArtifactManager } from './artifact-manager.js';
 import { LessonSystem } from './lesson-system.js';
 import { CrossProjectManager } from './cross-project.js';
 import { ProjectSearch } from './search.js';
-import { IntegrationManager } from './integration.js';
+import { IntegrationManager, type IntegrationDeps } from './integration.js';
 
 // ==================== 全局 Store 实例 ====================
 
@@ -106,6 +106,15 @@ export function getIntegrationManager(): IntegrationManager {
     _integrationManager = new IntegrationManager(getProjectStore());
   }
   return _integrationManager;
+}
+
+/**
+ * 注入集成依赖 — 由 Subsystems 初始化时调用
+ *
+ * 接通 STMPStore / DreamEngine / CognitiveEngine / ExperienceCompiler
+ */
+export function setIntegrationDeps(deps: IntegrationDeps): void {
+  getIntegrationManager().setDeps(deps);
 }
 
 // ==================== 工具：创建项目 ====================
