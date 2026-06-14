@@ -8,6 +8,7 @@ import type { MessageProcessor } from './message-processor.js';
 import type { BehaviorTracker } from './behavior-tracker.js';
 import { getFallbackReply } from './constants.js';
 import { TaskExecutor } from '../orchestrate/index.js';
+import { getProjectStore } from '../project/tools.js';
 import type { EventBus } from '../ws/server.js';
 import { LinkHandler } from './link-handler.js';
 import { AdaptiveTaskQueue } from './task-queue.js';
@@ -968,6 +969,22 @@ export class WSHandler {
       if (this.verbose) {
         console.log(`  [Session] ${session.id} 结束: ${stats.completedSteps}/${stats.totalSteps} 步完成, 平均延迟 ${stats.avgLatencyMs.toFixed(0)}ms`);
       }
+
+      // Phase 1.2: 保存执行检查点 — 未完成的任务可跨会话恢复
+      try {
+        const checkpoint = session.toCheckpoint();
+        // 只保存有进展的任务（至少完成 1 步或有失败）
+        if (checkpoint.completedSteps.length > 0 || checkpoint.failedSteps.length > 0) {
+          const store = getProjectStore();
+          store.saveExecutionCheckpoint(checkpoint);
+          if (this.verbose) {
+            console.log(`  [Checkpoint] 已保存: ${checkpoint.id} (完成${checkpoint.completedSteps.length}步, 失败${checkpoint.failedSteps.length}步)`);
+          }
+        }
+      } catch (err) {
+        if (this.verbose) console.warn('[Checkpoint] 保存失败:', (err as Error).message);
+      }
+
       this.currentSession = null;
       this.taskQueue.release(taskId, {
         id: taskId,

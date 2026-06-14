@@ -195,3 +195,21 @@ export interface GlobalProjectStats {
   totalLessons: number;
   categories: Record<string, number>;
 }
+
+// ==================== 执行检查点（Phase 1.2: 任务跨会话恢复） ====================
+
+export interface ExecutionCheckpoint {
+  id: string;
+  goal: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  autonomyLevel: number;
+  completedSteps: Array<{ tool: string; result: string; success: boolean }>;
+  failedSteps: Array<{ tool: string; error: string }>;
+  pendingSteps: Array<{ tool: string; args: Record<string, unknown> }>;
+  lessons: string[];
+  context: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  resumedAt?: number;
+  resumeCount: number;
+}

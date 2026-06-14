@@ -13,7 +13,7 @@ import type {
   Project, Requirement, Plan, PlanStep, Decision,
   DAGBinding, Checkpoint, ProgressCounter,
   Artifact, Lesson, SearchResult,
-  ProjectStats, GlobalProjectStats,
+  ProjectStats, GlobalProjectStats, ExecutionCheckpoint,
 } from './types.js';
 
 // ==================== Migrations ====================
@@ -156,6 +156,25 @@ const PROJECT_MIGRATIONS: Migration[] = [
           tags,
           project_id
         );
+
+        -- 执行检查点表（Phase 1.2: 任务跨会话恢复）
+        CREATE TABLE IF NOT EXISTS execution_checkpoints (
+          id TEXT PRIMARY KEY,
+          goal TEXT NOT NULL,
+          status TEXT NOT NULL,
+          autonomy_level INTEGER DEFAULT 2,
+          completed_steps TEXT DEFAULT '[]',
+          failed_steps TEXT DEFAULT '[]',
+          pending_steps TEXT DEFAULT '[]',
+          lessons TEXT DEFAULT '[]',
+          context TEXT DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          resumed_at INTEGER,
+          resume_count INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_exec_cp_status ON execution_checkpoints(status);
+        CREATE INDEX IF NOT EXISTS idx_exec_cp_updated ON execution_checkpoints(updated_at);
       `);
     },
   },
@@ -800,6 +819,69 @@ export class ProjectStore {
       createdAt: row.created_at,
       verified: row.verified === 1,
     };
+  }
+
+  // ==================== 执行检查点（Phase 1.2: 任务跨会话恢复） ====================
+
+  saveExecutionCheckpoint(cp: ExecutionCheckpoint): void {
+    this.db.prepare(`
+      INSERT INTO execution_checkpoints (id, goal, status, autonomy_level,
+        completed_steps, failed_steps, pending_steps, lessons, context,
+        created_at, updated_at, resumed_at, resume_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        completed_steps = excluded.completed_steps,
+        failed_steps = excluded.failed_steps,
+        pending_steps = excluded.pending_steps,
+        lessons = excluded.lessons,
+        context = excluded.context,
+        updated_at = excluded.updated_at,
+        resumed_at = excluded.resumed_at,
+        resume_count = excluded.resume_count
+    `).run(
+      cp.id, cp.goal, cp.status, cp.autonomyLevel,
+      JSON.stringify(cp.completedSteps), JSON.stringify(cp.failedSteps),
+      JSON.stringify(cp.pendingSteps), JSON.stringify(cp.lessons),
+      JSON.stringify(cp.context), cp.createdAt, cp.updatedAt,
+      cp.resumedAt ?? null, cp.resumeCount,
+    );
+  }
+
+  getPendingExecutionCheckpoints(limit = 10): ExecutionCheckpoint[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM execution_checkpoints WHERE status IN ('pending', 'in_progress') ORDER BY updated_at DESC LIMIT ?"
+    ).all(limit) as Array<{
+      id: string; goal: string; status: string; autonomy_level: number;
+      completed_steps: string; failed_steps: string; pending_steps: string;
+      lessons: string; context: string;
+      created_at: number; updated_at: number; resumed_at: number | null; resume_count: number;
+    }>;
+    return rows.map(r => ({
+      id: r.id,
+      goal: r.goal,
+      status: r.status as ExecutionCheckpoint['status'],
+      autonomyLevel: r.autonomy_level,
+      completedSteps: JSON.parse(r.completed_steps),
+      failedSteps: JSON.parse(r.failed_steps),
+      pendingSteps: JSON.parse(r.pending_steps),
+      lessons: JSON.parse(r.lessons),
+      context: JSON.parse(r.context),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      resumedAt: r.resumed_at ?? undefined,
+      resumeCount: r.resume_count,
+    }));
+  }
+
+  completeExecutionCheckpoint(id: string): void {
+    this.db.prepare(
+      "UPDATE execution_checkpoints SET status = 'completed', updated_at = ? WHERE id = ?"
+    ).run(Date.now(), id);
+  }
+
+  deleteExecutionCheckpoint(id: string): void {
+    this.db.prepare('DELETE FROM execution_checkpoints WHERE id = ?').run(id);
   }
 
   close(): void {

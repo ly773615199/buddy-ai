@@ -16,6 +16,7 @@ import { globalToolCache, ToolCache } from '../tools/cache.js';
 import { ReasoningChainStore } from '../memory/reasoning-chain.js';
 import { ClarificationEngine } from './clarifier.js';
 import { InnerThoughtsEngine } from './inner-thoughts.js';
+import { getProjectStore } from '../project/tools.js';
 
 /**
  * LLM 消息处理管线 — 构建上下文、调用 LLM、智能路由
@@ -241,6 +242,30 @@ export class MessageProcessor {
     if (relevantMemories.length > 0) {
       const memoryPrompt = relevantMemories.map(m => `[${m.key}] ${m.value}`).join('\n');
       budget.add({ id: 'memories', source: 'memory', priority: PRIORITY.MEMORY, content: this.sanitizeInjected('memory', memoryPrompt), required: false });
+    }
+
+    // 5.1 Phase 1.2: 待恢复任务注入（优先级 65，高于记忆低于情绪）
+    try {
+      const store = getProjectStore();
+      const pendingTasks = store.getPendingExecutionCheckpoints(3);
+      if (pendingTasks.length > 0) {
+        const pendingPrompt = pendingTasks.map(cp => {
+          const completed = cp.completedSteps.length;
+          const failed = cp.failedSteps.length;
+          const pending = cp.pendingSteps.length;
+          return `- 「${cp.goal.slice(0, 80)}」: 完成${completed}步, 失败${failed}步, 待执行${pending}步 (ID: ${cp.id})`;
+        }).join('\n');
+        budget.add({
+          id: 'pending-tasks',
+          source: 'memory',
+          priority: 65,
+          content: `\n## 待恢复的任务\n用户之前未完成的任务，如果相关可以主动询问是否继续：\n${pendingPrompt}`,
+          required: false,
+        });
+        if (this.verbose) console.log(`  [Checkpoint] 注入 ${pendingTasks.length} 个待恢复任务`);
+      }
+    } catch (err) {
+      if (this.verbose) console.debug('[Checkpoint] 查询待恢复任务失败:', (err as Error).message);
     }
 
     // I3: 推理链注入（优先级略低于记忆）

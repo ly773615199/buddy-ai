@@ -282,6 +282,53 @@ export class ExecutionSession {
     };
   }
 
+  // ==================== Phase 1.2: 检查点持久化 ====================
+
+  /** 序列化为 ExecutionCheckpoint，供 ProjectStore 持久化 */
+  toCheckpoint(): import('../project/types.js').ExecutionCheckpoint {
+    const completedSteps = this.steps
+      .filter(s => s.completedAt && s.success !== undefined)
+      .map(s => ({ tool: s.tool, result: s.result ?? '', success: s.success! }));
+    const failedSteps = this.steps
+      .filter(s => s.completedAt && s.success === false)
+      .map(s => ({ tool: s.tool, error: s.result ?? 'unknown' }));
+    const pendingSteps = this.steps
+      .filter(s => !s.completedAt)
+      .map(s => ({ tool: s.tool, args: s.args }));
+
+    return {
+      id: this.id,
+      goal: this.goal,
+      status: this.status === 'done' ? 'completed' : this.status === 'failed' ? 'failed' : 'in_progress',
+      autonomyLevel: this.autonomyLevel,
+      completedSteps,
+      failedSteps,
+      pendingSteps,
+      lessons: [],
+      context: {},
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      resumeCount: 0,
+    };
+  }
+
+  /** 从 ExecutionCheckpoint 恢复会话 */
+  static fromCheckpoint(cp: import('../project/types.js').ExecutionCheckpoint): ExecutionSession {
+    const session = new ExecutionSession({
+      id: cp.id,
+      goal: cp.goal,
+      autonomyLevel: cp.autonomyLevel as AutonomyLevel,
+      maxRetries: 2,
+      maxSteps: 20,
+      checkpointInterval: 5,
+    });
+    // 恢复状态
+    (session as any).status = cp.status === 'completed' ? 'done' : cp.status === 'failed' ? 'failed' : 'paused';
+    (session as any).createdAt = cp.createdAt;
+    (session as any).updatedAt = cp.updatedAt;
+    return session;
+  }
+
   // ==================== 统计 ====================
 
   getStats(): {
