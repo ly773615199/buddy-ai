@@ -493,6 +493,67 @@ export class UnifiedScheduler {
   }
 
   /**
+   * Phase 2.1: 多候选方案生成 — 生成 2-3 个备选方案
+   *
+   * 主方案失败时，直接切换到备选方案，无需重新编排。
+   * 候选来源：
+   * 1. 主方案（Thompson Sampling 选的）
+   * 2. 经验路由（如果有）
+   * 3. 本地专家（兜底）
+   */
+  async scheduleMultiple(
+    signal: TaskSignal,
+    resources: ResourceState,
+    intuition?: IntuitionSignal,
+    body?: BodyState,
+    count = 3,
+  ): Promise<{ primary: ExecutionPlan; candidates: ExecutionPlan['candidates'] }> {
+    const primary = await this.schedule(signal, resources, intuition, body);
+    const candidates: NonNullable<ExecutionPlan['candidates']> = [];
+
+    // 候选 1: 如果主方案走 LLM，尝试经验路由作为备选
+    if (primary.source === 'scheduler' && resources.experienceHit) {
+      candidates.push({
+        mode: 'cascade',
+        reason: `备选: 经验+LLM验证 (主方案: ${primary.reason})`,
+        selectedNodes: [
+          { id: 'experience', type: 'experience' },
+          { id: 'local', type: 'local_expert' },
+        ],
+        confidence: resources.localConfidence * 0.8,
+        source: 'candidate-exp',
+      });
+    }
+
+    // 候选 2: 本地专家（最稳的兜底）
+    if (primary.mode !== 'local_only') {
+      candidates.push({
+        mode: 'local_only',
+        reason: `备选: 本地专家兜底 (主方案: ${primary.reason})`,
+        selectedNodes: [{ id: 'local', type: 'local_expert' }],
+        confidence: 0.5,
+        source: 'candidate-local',
+      });
+    }
+
+    // 候选 3: 如果主方案走经验，尝试 LLM 作为备选
+    if (primary.mode === 'local_only' && primary.source !== 'scheduler') {
+      try {
+        const llmPlan = await this.selectViaRouter('llm_only', signal, body, '备选: LLM 路径');
+        candidates.push({
+          mode: llmPlan.mode,
+          reason: `备选: LLM 路径 (主方案: ${primary.reason})`,
+          selectedNodes: llmPlan.selectedNodes,
+          confidence: llmPlan.confidence,
+          source: 'candidate-llm',
+        });
+      } catch { /* LLM 不可用，跳过 */ }
+    }
+
+    return { primary, candidates: candidates.length > 0 ? candidates : undefined };
+  }
+
+  /**
    * 记录 Thompson Sampling 结果（供外部调用）
    */
   recordOutcome(signal: TaskSignal, tool: string, success: boolean, latencyMs: number, costEstimate: number): void {

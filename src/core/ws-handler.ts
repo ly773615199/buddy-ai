@@ -831,9 +831,30 @@ export class WSHandler {
               },
             });
 
-            // Phase 1.1: 重新编排 — 带着失败上下文换路走
+            // Phase 2.1: 先尝试备选方案，再走完整重编排
             if (!this.agentRef) break;
-            const newPlan = await this.agentRef.orchestrate(content, reflectResult.failureAnalysis);
+
+            let newPlan: import('../types.js').OrchestrationPlan;
+            const candidates = planRef?.candidates;
+            if (candidates && candidates.length > 0 && reflectAttempt <= candidates.length) {
+              // 使用备选方案（按顺序切换）
+              const candidate = candidates[reflectAttempt - 1];
+              if (this.verbose) {
+                console.log(`  [Retry] 切换到备选方案 ${reflectAttempt}: ${candidate.reason}`);
+              }
+              newPlan = {
+                ...planRef!,
+                mode: candidate.mode as import('../types.js').CollaborationMode,
+                reason: candidate.reason,
+                selectedNodes: candidate.selectedNodes,
+                confidence: candidate.confidence,
+                source: candidate.source,
+                candidates: candidates.slice(reflectAttempt), // 剩余候选
+              } as import('../types.js').OrchestrationPlan;
+            } else {
+              // 无备选方案或已用完 → 完整重编排（Phase 1.1: 带失败上下文）
+              newPlan = await this.agentRef.orchestrate(content, reflectResult.failureAnalysis);
+            }
             planRef = newPlan;
 
             // 推送 execution trace

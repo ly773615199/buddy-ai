@@ -79,9 +79,21 @@ export function assessTaskComplexity(sys: Subsystems, content: string): {
   const parallelMarkers = ['同时', '并且', '一边', '另外', '分别', 'also', 'and also', 'while', 'simultaneously'];
   const markerCount = parallelMarkers.filter(m => lower.includes(m)).length;
   const clauses = content.split(/[,，;；.。\n]+/).filter(s => s.trim().length > 3);
-  const shouldUseDAG = markerCount >= 3 || clauses.length >= 4;
+
+  // Phase 2.2: 扩展 DAG 触发条件
+  const intentCategory = intent.category;
+  const suggestedTools = intent.suggestedTools ?? [];
+  const multiToolNeed = suggestedTools.length >= 3;
+  const complexAndLong = (intentCategory === 'complex_task') && content.length > 300;
+  const multiDomain = intent.confidence < 0.5 && content.length > 150; // 意图不明确 + 长内容 = 可能跨领域
+
+  const shouldUseDAG = markerCount >= 3 || clauses.length >= 4 || multiToolNeed || complexAndLong || multiDomain;
   const dagReason = shouldUseDAG
-    ? (markerCount >= 3 ? `并行标记词 ${markerCount} 个` : `子句 ${clauses.length} 个`)
+    ? (markerCount >= 3 ? `并行标记词 ${markerCount} 个`
+      : clauses.length >= 4 ? `子句 ${clauses.length} 个`
+      : multiToolNeed ? `多工具需求 ${suggestedTools.length} 个`
+      : complexAndLong ? `复杂任务+长内容(${content.length}字)`
+      : `跨领域+长内容`)
     : '';
 
   const CATEGORY_TO_TASK: Record<string, 'chat' | 'tools' | 'reasoning' | 'background' | 'domain'> = {

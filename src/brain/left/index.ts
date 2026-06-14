@@ -79,7 +79,17 @@ export class LeftBrain {
       return await this.enrichPlanWithRouter(ruleResult, signal, body);
     }
 
-    // 2. 调度器兜底（Phase 4: async，支持 predictDetailed；Phase 1.1: 传入失败上下文）
+    // 2. 调度器兜底（Phase 2.1: 多候选方案生成）
+    //    无失败上下文时生成候选；有失败上下文时走单方案（换路策略已在 scheduler 内部处理）
+    if (!failureContext) {
+      const { primary, candidates } = await this.scheduler.scheduleMultiple(signal, resources, intuition, body);
+      if (candidates && candidates.length > 0) {
+        primary.candidates = candidates;
+      }
+      return primary;
+    }
+
+    // 有失败上下文 → 单方案（已换路）
     return this.scheduler.schedule(signal, resources, intuition, body, failureContext);
   }
 

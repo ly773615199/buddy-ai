@@ -884,6 +884,14 @@ export interface OrchestrationPlan {
       archiveId?: string;
     };
   };
+  /** Phase 2.1: 备选方案 — 主方案失败时切换，无需重新编排 */
+  candidates?: Array<{
+    mode: CollaborationMode;
+    reason: string;
+    selectedNodes: OrchestrationNode[];
+    confidence: number;
+    source: string;
+  }>;
 }
 
 /** 编排执行结果 */

@@ -20,6 +20,14 @@ export interface ExecutionPlan {
   refineStrategy?: 'ask_user' | 'multi_llm' | 'tool_check' | 'llm_only' | 'local_only';
   /** Step 14: 直接执行工具 — 跳过 LLM，直接调用工具返回结果 */
   directTool?: { name: string; args: Record<string, unknown> };
+  /** Phase 2.1: 备选方案 — 主方案失败时切换 */
+  candidates?: Array<{
+    mode: ExecutionPlan['mode'];
+    reason: string;
+    selectedNodes: OrchestrationNode[];
+    confidence: number;
+    source: string;
+  }>;
 }
 
 /** 右脑输出的直觉信号 */
