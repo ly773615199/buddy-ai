@@ -517,7 +517,8 @@ export class ModelPool {
         try {
           if (node.provider && node.model) {
             const { ProviderFactory } = await import('./provider-registry.js');
-            await ProviderFactory.create({ provider: node.provider, model: node.model });
+            const creds = this.providerCredentials.get(node.provider);
+            await ProviderFactory.create({ provider: node.provider, model: node.model, apiKey: node.apiKey ?? creds?.apiKey, baseUrl: node.baseUrl ?? creds?.baseUrl });
             node.warm = true;
           }
         } catch {

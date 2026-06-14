@@ -540,9 +540,13 @@ export class ModelRouter {
    */
   private async profileToCapabilities(profile: ModelProfile): Promise<ProviderCapabilities> {
     // 从 ProviderFactory 获取基础静态 capabilities
+    // 传递 baseUrl 以支持自定义 OpenAI 兼容端点（如 NVIDIA NIM）
+    const creds = this.pool?.getProviderCredentials(profile.platform);
     const base = (await ProviderFactory.create({
       provider: profile.platform,
       model: profile.id.split('/').slice(1).join('/'),
+      apiKey: creds?.apiKey,
+      baseUrl: creds?.baseUrl,
     })).capabilities;
 
     // 用 ModelProfile 的运行时信息覆盖
