@@ -79,7 +79,7 @@ const PROVIDERS: ProviderPreset[] = [
   defaultBaseUrl: '',
   keyPlaceholder: 'API Key',
   keyUrl: '',
-  needKey: false,
+  needKey: true,
   needUrl: true
 }];
 
@@ -472,6 +472,30 @@ export default function Onboarding({
             fontSize: 13
           }}>
           {"\u4E0A\u4E00\u6B65"}</button>
+        }
+        {step === 'llm' &&
+        <button
+          onClick={() => {
+            if (texture && temperament) {
+              onComplete({
+                primaryColor,
+                texture,
+                temperament,
+                seed: Math.floor(Math.random() * 1000000)
+              });
+            }
+          }}
+          style={{
+            padding: '8px 20px',
+            borderRadius: 8,
+            border: '1px solid #30363d',
+            background: 'transparent',
+            color: '#8b949e',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 13
+          }}>
+          {"\u7A0D\u540E\u914D\u7F6E"}</button>
         }
         <button
           onClick={handleNext}
