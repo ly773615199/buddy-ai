@@ -948,9 +948,9 @@ export class MessageProcessor {
         results.push({ key: '[关联]', value: node.content.slice(0, 150) });
       }
 
-      // Phase 1.3: STMP 结果不足时，用混合检索（FTS5 + 语义）补充
+      // Phase 1.3: STMP 结果不足时，用混合检索（FTS5 + 语义 + Embedding）补充
       if (results.length < 3) {
-        const hybrid = this.sys.memory.searchMemoriesHybrid(query, 3 - results.length);
+        const hybrid = await this.sys.memory.searchMemoriesHybridAsync(query, 3 - results.length);
         results.push(...hybrid.map(r => ({ key: r.key, value: r.value })));
       }
 
@@ -960,7 +960,7 @@ export class MessageProcessor {
     } catch (err) {
       if (this.verbose) console.warn('[STMP] 检索异常，回退到混合检索:', (err as Error).message);
       // Phase 1.3: 异常时用混合检索替代纯 FTS5
-      const fallback = this.sys.memory.searchMemoriesHybrid(query, 3);
+      const fallback = await this.sys.memory.searchMemoriesHybridAsync(query, 3);
       this.memoryCache.set(cacheKey, JSON.stringify(fallback));
       return fallback;
     }

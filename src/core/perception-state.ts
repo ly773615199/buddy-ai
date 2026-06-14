@@ -46,6 +46,11 @@ export function inferDomains(intent: { category: string; suggestedTools: string[
     knowledge_query: ['knowledge'],
     conversation: ['conversation'],
     complex_task: ['complex'],
+    data_analysis: ['data', 'code'],
+    devops: ['system', 'devops'],
+    writing: ['writing', 'knowledge'],
+    debugging: ['code', 'debug'],
+    planning: ['planning', 'knowledge'],
   };
 
   const domains = CATEGORY_TO_DOMAINS[intent.category] ?? ['conversation'];
@@ -113,6 +118,11 @@ export function mapTaskType(category: string): PerceptionState['taskType'] {
     knowledge_query: 'reasoning',
     conversation: 'chat',
     complex_task: 'domain',
+    data_analysis: 'tools',
+    devops: 'tools',
+    writing: 'domain',
+    debugging: 'tools',
+    planning: 'reasoning',
   };
   return CATEGORY_TO_TASK[category] ?? 'chat';
 }

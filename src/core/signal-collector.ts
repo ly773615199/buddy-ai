@@ -139,11 +139,17 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
   if (!intent.hit || intent.confidence < 0.5) {
     const fineResult = _intentClassifier.classify(content);
     // 细粒度命中且置信度更高 → 补充/覆盖
+    // 两个分类器都命中时取加权平均置信度
     if (fineResult.confidence > finalConfidence) {
       finalCategory = fineResult.category;
-      finalConfidence = fineResult.confidence;
       finalTools = fineResult.suggestedTools;
       finalHit = true;
+      // 如果主分类器也有低置信度命中，加权融合
+      if (intent.hit && intent.confidence > 0.2) {
+        finalConfidence = Math.min(0.95, fineResult.confidence * 0.7 + intent.confidence * 0.3);
+      } else {
+        finalConfidence = fineResult.confidence;
+      }
     }
   }
 

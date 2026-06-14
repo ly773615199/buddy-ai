@@ -317,6 +317,16 @@ export class Subsystems {
 
     // --- 记忆 ---
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
+    // 注入 embedding 调用器（用于记忆向量检索）
+    this.memory.setEmbedCaller(async (text: string) => {
+      const result = await this._llm.executeMultimodal('embedding', text);
+      if (result.type !== 'embedding' || !result.embeddings[0]) {
+        throw new Error('Embedding failed');
+      }
+      return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
+    });
+    // 异步补全缺失的 embedding（不阻塞启动）
+    this.memory.embedBatch(50).catch(() => {});
     this.pet = new PetManager(path.join(dbDir, 'pet.db'));
 
     this.stmp = new STMPStore(path.join(dbDir, 'stmp.db'));

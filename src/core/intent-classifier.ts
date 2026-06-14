@@ -19,7 +19,12 @@ export type IntentCategory =
   | 'system_operations'   // 系统命令、状态查询
   | 'knowledge_query'     // 知识问答（不需要工具）
   | 'conversation'        // 闲聊（不需要工具）
-  | 'complex_task';       // 复杂任务（需要多工具）
+  | 'complex_task'        // 复杂任务（需要多工具）
+  | 'data_analysis'       // 数据分析、图表、统计
+  | 'devops'              // Docker、部署、CI/CD
+  | 'writing'             // 写文档、润色、翻译
+  | 'debugging'           // 排查问题、日志分析
+  | 'planning';           // 任务规划、架构设计
 
 export interface IntentResult {
   category: IntentCategory;
@@ -85,6 +90,41 @@ const INTENT_RULES: IntentRule[] = [
                '在吗', '在不在', '聊聊', '聊天', '心情', '怎么样'],
     tools: [],
   },
+  {
+    category: 'data_analysis',
+    keywords: ['数据', 'data', '分析', '统计', '图表', 'chart', '画图', 'plot',
+               'csv', 'excel', '表格', 'table', '指标', 'metric', '趋势', 'trend',
+               '聚合', 'aggregate', '分组', 'group', '排序', 'sort', '可视化', 'visualize'],
+    tools: ['read_file', 'exec', 'code_intel'],
+  },
+  {
+    category: 'devops',
+    keywords: ['docker', '容器', 'container', '部署', 'deploy', 'ci/cd', 'pipeline',
+               'nginx', 'k8s', 'kubernetes', '镜像', 'image', 'compose',
+               '服务器', 'server', '域名', 'domain', 'ssl', '证书', 'cert'],
+    tools: ['exec', 'read_file', 'write_file'],
+  },
+  {
+    category: 'writing',
+    keywords: ['写', 'write', '文档', 'document', '文章', 'article', '润色', 'polish',
+               '翻译', 'translate', '总结', 'summarize', '摘要', 'abstract', '报告', 'report',
+               'readme', '说明', 'description', '文案', 'copywriting'],
+    tools: ['read_file', 'write_file', 'search_web'],
+  },
+  {
+    category: 'debugging',
+    keywords: ['debug', '调试', '排查', 'troubleshoot', '报错', 'error', '异常', 'exception',
+               '日志', 'log', '崩溃', 'crash', '堆栈', 'stack', 'trace', '断点', 'breakpoint',
+               '内存泄漏', 'memory leak', '性能', 'performance', '瓶颈', 'bottleneck'],
+    tools: ['exec', 'read_file', 'search_files', 'code_intel'],
+  },
+  {
+    category: 'planning',
+    keywords: ['规划', 'plan', '架构', 'architecture', '设计', 'design', '方案', 'proposal',
+               '需求', 'requirement', '任务', 'task', '拆解', 'breakdown', '排期', 'schedule',
+               '评审', 'review', '技术选型', 'tech stack'],
+    tools: ['read_file', 'write_file', 'search_web'],
+  },
 ];
 
 // ==================== 主类 ====================
@@ -137,17 +177,19 @@ export class IntentClassifier {
     }
 
     // 检测是否为复杂任务（匹配到多个不同类别的意图）
-    const matchedCategories = Array.from(scores.keys()).filter(c => c !== 'conversation' && c !== 'knowledge_query');
-    if (matchedCategories.length >= 2) {
+    const nonTrivialCategories = Array.from(scores.keys()).filter(c => c !== 'conversation' && c !== 'knowledge_query');
+    if (nonTrivialCategories.length >= 2) {
       // 合并多个类别的工具
       const combinedTools = new Set<string>();
-      for (const cat of matchedCategories) {
+      for (const cat of nonTrivialCategories) {
         const rule = INTENT_RULES.find(r => r.category === cat);
         if (rule) rule.tools.forEach(t => combinedTools.add(t));
       }
+      // 多意图匹配时置信度基于总匹配词数
+      const totalMatched = nonTrivialCategories.reduce((sum, cat) => sum + (scores.get(cat)?.score ?? 0), 0);
       return {
         category: 'complex_task',
-        confidence: 0.7,
+        confidence: Math.min(0.95, 0.5 + totalMatched * 0.1),
         matchedKeywords: bestMatched,
         suggestedTools: Array.from(combinedTools),
       };
@@ -157,8 +199,9 @@ export class IntentClassifier {
     const rule = INTENT_RULES.find(r => r.category === bestCategory);
     const suggestedTools = rule?.tools ?? [];
 
-    // 置信度 = min(1, 匹配词数 / 3)
-    const confidence = Math.min(1, bestScore / 3);
+    // 置信度 = min(0.95, 0.5 + 匹配词数 * 0.15)
+    // 1 词 → 0.65, 2 词 → 0.80, 3 词 → 0.95
+    const confidence = Math.min(0.95, 0.5 + bestScore * 0.15);
 
     return {
       category: bestCategory,

@@ -30,7 +30,7 @@ export interface RightBrainConfig {
 const DEFAULT_CONFIG: RightBrainConfig = {
   nn: {
     vocabSize: 2048, embedDim: 64, hiddenDim: 128,
-    numHeads: 4, numLayers: 2, numIntents: 8, numTools: 32,
+    numHeads: 4, numLayers: 2, numIntents: 13, numTools: 32,
     ffnDim: 256, dropout: 0,
     numSpatialBins: 6, numSceneNodes: 32,
   },
@@ -453,6 +453,11 @@ export class RightBrain {
       { category: 'web_operations', keywords: ['搜', '搜索', 'search', 'google', '百度', 'bing', '网页', 'web', 'url', '链接', '抓取', 'fetch', '爬', '天气', 'weather', '访问', 'visit', 'browse'], tools: ['search_web', 'fetch_url', 'browse'] },
       { category: 'system_operations', keywords: ['运行', 'run', '执行', 'exec', '命令', 'command', '进程', 'process', '端口', 'port', '服务', 'service', '安装', 'install', '配置', 'config', 'docker', 'npm', 'pip', 'yarn', 'ps', 'top'], tools: ['exec', 'get_time'] },
       { category: 'knowledge_query', keywords: ['是什么', '什么是', '为什么', '怎么', '如何', '区别', '原理', 'what is', 'why', 'how to', 'explain', 'difference', '推荐', 'recommend', '建议', 'suggest', '对比', '比较', 'compare'], tools: ['search_web'] },
+      { category: 'data_analysis', keywords: ['数据', 'data', '统计', '图表', 'chart', '画图', 'plot', 'csv', 'excel', '表格', 'table', '指标', 'metric', '趋势', 'trend', '聚合', 'aggregate', '可视化', 'visualize'], tools: ['read_file', 'exec', 'code_intel'] },
+      { category: 'devops', keywords: ['docker', '容器', 'container', '部署', 'deploy', 'ci/cd', 'pipeline', 'nginx', 'k8s', 'kubernetes', '镜像', 'image', 'compose', '服务器', 'server', '域名', 'domain', 'ssl'], tools: ['exec', 'read_file', 'write_file'] },
+      { category: 'writing', keywords: ['写', 'write', '文档', 'document', '文章', 'article', '润色', 'polish', '翻译', 'translate', '总结', 'summarize', '摘要', 'abstract', '报告', 'report', 'readme', '文案'], tools: ['read_file', 'write_file', 'search_web'] },
+      { category: 'debugging', keywords: ['debug', '调试', '排查', 'troubleshoot', '报错', 'error', '异常', 'exception', '日志', 'log', '崩溃', 'crash', '堆栈', 'stack', 'trace', '内存泄漏', 'memory leak', '性能', 'performance'], tools: ['exec', 'read_file', 'search_files', 'code_intel'] },
+      { category: 'planning', keywords: ['规划', 'plan', '架构', 'architecture', '设计', 'design', '方案', 'proposal', '需求', 'requirement', '拆解', 'breakdown', '排期', 'schedule', '评审', 'review', '技术选型'], tools: ['read_file', 'write_file', 'search_web'] },
     ];
 
     let bestCategory = 'conversation';
