@@ -180,6 +180,17 @@ export class WSEventHandlers {
       });
 
       if (this.deps.verbose) console.log(`  [Sensor] 数据已记录: ${content}`);
+
+      // 传感器数据 → 感知事件总线 → PerceptionBridge → 情绪 Buff
+      try {
+        this.deps.sys.perceptionBus?.publish('environment', 'sensor', {
+          type: 'sensor_update',
+          location: sensorData.location,
+          motion: sensorData.motion,
+          environment: sensorData.environment,
+        });
+      } catch { /* 感知桥接失败不影响主流程 */ }
+
     } catch (err) {
       if (this.deps.verbose) console.warn('[Sensor] 数据处理失败:', (err as Error).message);
     }

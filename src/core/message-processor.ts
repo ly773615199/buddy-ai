@@ -10,7 +10,7 @@ import { formatToolResult, SHARED_STOP_WORDS, TOOL_RESULT_LIMITS } from './const
 import type { LRUCache } from '../perf/cache.js';
 import type { STMPStore, MemoryNode as STMPNode } from '../memory/stmp.js';
 import { PromptInjector } from '../intelligence/prompt-injector.js';
-import type { KnowledgeInterviewer, InterviewQuestion } from '../intelligence/knowledge-interviewer.js';
+import type { UnifiedInterviewer, InterviewQuestion } from '../intelligence/unified-interviewer.js';
 import { PromptBudgetManager, PRIORITY } from './prompt-budget.js';
 
 /**
@@ -148,7 +148,7 @@ export class MessageProcessor {
   }
 
   /** 获取主动提问引擎（供外部调用） */
-  get interviewer(): KnowledgeInterviewer {
+  get interviewer(): UnifiedInterviewer {
     return this.sys.interviewer;
   }
 
@@ -435,6 +435,28 @@ export class MessageProcessor {
       } catch (err) {
         if (this.verbose) console.warn('[KnowledgeSource] 查询失败:', (err as Error).message);
       }
+    }
+
+    // 7. 主动信息获取（动态层，优先级 25）— 搜索上下文增强
+    try {
+      const researcher = this.sys.proactiveResearcher;
+      if (researcher && researcher.shouldResearch(content, 'chat')) {
+        const research = await researcher.research({ query: content, context: '', depth: 'quick', maxResults: 3 });
+        if (research.summary || research.sources.length > 0) {
+          const researchPrompt = research.sources.slice(0, 3)
+            .map(s => `[${s.title}] ${s.snippet}`).join('\n');
+          budget.add({
+            id: 'proactive-research',
+            source: 'research',
+            priority: 25,
+            content: `\n## 搜索参考\n${research.summary ? research.summary + '\n' : ''}${researchPrompt}`,
+            required: false,
+          });
+          if (this.verbose) console.log(`  [Research] 注入搜索结果: ${research.sources.length} 条`);
+        }
+      }
+    } catch (err) {
+      if (this.verbose) console.warn('[Research] 主动搜索失败:', (err as Error).message);
     }
 
     // 7. Skill 注入（动态层，优先级 20）— ISSUE-005: 注入防御

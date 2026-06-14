@@ -209,6 +209,19 @@ export class ExperiencePackageManager {
       }),
     };
 
+    // 发布前安全扫描（PII / 敏感词 / 路径泄露）
+    try {
+      const { scanForPII } = require('../shop/publish-sanitizer.js');
+      const allText = [
+        pkg.description,
+        ...pkg.knowledge.map(k => k.summary + ' ' + k.content),
+      ].join('\n');
+      const piiResults = scanForPII({ name: pkg.name, version: pkg.version, domain: pkg.domain, description: pkg.description, author: 'user', knowledge: pkg.knowledge.map(k => ({ title: k.summary, content: k.content, type: k.type })) });
+      if (piiResults.length > 0) {
+        console.warn(`[PublishSanitizer] 能力包 "${pkg.name}" 包含 ${piiResults.length} 项 PII:`, piiResults.map(r => r.type));
+      }
+    } catch { /* 扫描失败不阻塞导出 */ }
+
     return JSON.stringify(sanitized, null, 2);
   }
 

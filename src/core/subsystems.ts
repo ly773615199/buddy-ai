@@ -12,8 +12,6 @@ import { createMultimodalTools } from '../tools/multimodal.js';
 import { createHttpApiTools } from '../tools/http-api.js';
 import { MCPAdapter } from '../tools/mcp-adapter.js';
 import { MemoryStore } from '../memory/store.js';
-// EmotionEngine — 已迁移至小脑 BodyStateManager，保留类型导入以兼容旧引用
-import type { EmotionEngine } from '../emotion/engine.js';
 import { AuditLogger } from '../audit/logger.js';
 import { TTSManager } from '../voice/tts.js';
 import { EdgeTTSBackend } from '../voice/edge-tts.js';
@@ -25,7 +23,6 @@ import { ExperienceEngine, type ToolExecutor } from '../intelligence/index.js';
 import { CrossSessionLearner } from './cross-session-learner.js';
 import { WorkflowManager, DAGPlanner, TaskExecutor } from '../orchestrate/index.js';
 import { ToolRetriever } from '../tools/tool-retriever.js';
-import type { IntentClassifier } from './intent-classifier.js';
 import { PetManager } from '../pet/index.js';
 import { FileWatcher } from '../perception/fs-watcher.js';
 import { globalToolCache, globalSemanticCache } from '../tools/cache.js';
@@ -45,8 +42,6 @@ import { DatabaseManager } from './db-manager.js';
 import { EnvironmentObserver } from '../perception/observer.js';
 import { DecisionExplainer } from './decision-explainer.js';
 import { TaskProgressTracker } from '../orchestrate/progress-tracker.js';
-// FusionBuffer — 已废弃，由 SensorFusion 接管
-import type { FusionBuffer } from './fusion-buffer.js';
 import { FeedbackLearner } from '../feedback/learner.js';
 import { BuddyLearn } from '../knowledge/learn.js';
 import { KnowledgeSourceManager } from '../knowledge/source-manager.js';
@@ -55,14 +50,14 @@ import { WebSource } from '../knowledge/web-source.js';
 import { FeishuSource } from '../knowledge/feishu-source.js';
 import { IdleBehavior } from '../behavior/idle.js';
 import { LoRAService } from '../lora/index.js';
-import { KnowledgeInterviewer } from '../intelligence/knowledge-interviewer.js';
+import { UnifiedInterviewer } from '../intelligence/unified-interviewer.js';
 import { DataAugmentor } from '../intelligence/data-augmentor.js';
 import { TernaryModelManager } from '../ternary/manager.js';
 import { TernaryScheduler } from '../ternary/scheduler.js';
 import { TernaryExpertRouter, createTernaryTools } from '../tools/ternary-expert.js';
 import { ModelInstaller } from '../shop/installer.js';
-// DesireEngine — 已迁移至小脑 BodyStateManager，保留类型导入以兼容旧引用
-import type { DesireEngine } from '../desire/engine.js';
+import { ProactiveResearcher } from './proactive-researcher.js';
+import { ModelHealthProber } from './model-health-prober.js';
 import { BuddyClock } from './buddy-clock.js';
 import { ExecutionSession, decideAutonomyLevel, assessTaskRisk, type ExecutionSessionConfig, type AutonomyLevel } from './execution-session.js';
 import { ToolSynthesizer } from './tool-synthesizer.js';
@@ -108,10 +103,6 @@ export class Subsystems {
   readonly feedback: FeedbackLearner;
   readonly learn: BuddyLearn;
   readonly knowledgeSourceManager: KnowledgeSourceManager;
-  /** 已迁移至小脑 BodyStateManager，保留 null 以兼容旧接口引用 */
-  readonly emotion: EmotionEngine | null;
-  /** 已迁移至小脑 BodyStateManager，保留 null 以兼容旧接口引用 */
-  readonly desire: DesireEngine | null;
   readonly idle: IdleBehavior;
   readonly audit: AuditLogger;
   readonly tts: TTSManager;
@@ -146,17 +137,15 @@ export class Subsystems {
   /** Phase 2: 步骤→工具+参数 的解析器（编排-执行分离桥梁） */
   readonly skillResolver: import('../skills/skill-resolver.js').SkillResolver;
   readonly toolRetriever: ToolRetriever;
-  /** @deprecated 由右脑 classifyFromText 接管，保留类型兼容 */
-  readonly intentClassifier: IntentClassifier | null;
-  readonly interviewer: KnowledgeInterviewer;
+  readonly interviewer: UnifiedInterviewer;
+  readonly proactiveResearcher: ProactiveResearcher;
+  readonly healthProber: ModelHealthProber | null;
   readonly dataAugmentor: DataAugmentor;
   readonly ternaryManager: TernaryModelManager;
   readonly ternaryRouter: TernaryExpertRouter;
   readonly ternaryScheduler: TernaryScheduler;
   readonly modelInstaller: ModelInstaller;
   readonly toolSynthesizer: ToolSynthesizer;
-  /** @deprecated 由 SensorFusion 接管，保留类型兼容 */
-  readonly fusionBuffer: import('./fusion-buffer.js').FusionBuffer | null;
   readonly clock: BuddyClock | null;
   /** Phase 2: 决策可解释器 */
   readonly decisionExplainer: import('./decision-explainer.js').DecisionExplainer;
@@ -312,6 +301,10 @@ export class Subsystems {
       if (verbose) console.log('[UnifiedPool] 已创建（空池），等待 API 端点配置');
     }
 
+    // 模型健康探测器 — 后台定期探测模型可用性
+    this.healthProber = new ModelHealthProber(pool, { enabled: true }, undefined, verbose);
+    this.healthProber.start();
+
     // §2.7: denied 模型自动重试定时器 — 每小时检查一次
     setInterval(() => {
       const retryModels = pool.getModelsForRetry();
@@ -351,15 +344,37 @@ export class Subsystems {
     this.extractor.setLLMCaller((msgs) => llmCallService.callMessages(msgs));
 
     // --- 主动提问引擎 (Phase A) ---
-    this.interviewer = new KnowledgeInterviewer(this.stmp, this.cognitive, verbose);
+    this.interviewer = new UnifiedInterviewer(this.stmp, this.cognitive, verbose);
     this.interviewer.setLLMCaller((msgs) => llmCallService.callMessages(msgs));
+
+    // --- 主动信息获取器 (Phase 1) ---
+    this.proactiveResearcher = new ProactiveResearcher({}, verbose);
+    this.proactiveResearcher.setSearchFn(async (query) => {
+      try {
+        const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const data = await res.json() as any;
+        const sources = (data.RelatedTopics ?? []).slice(0, 3).map((t: any) => ({
+          title: t.Text?.slice(0, 80) ?? '',
+          url: t.FirstURL ?? '',
+          snippet: t.Text ?? '',
+          relevance: 0.7,
+        }));
+        return {
+          query,
+          sources,
+          summary: data.AbstractText?.slice(0, 500) ?? '',
+          fetchedAt: Date.now(),
+          cacheHit: false,
+        };
+      } catch {
+        return { query, sources: [], summary: '', fetchedAt: Date.now(), cacheHit: false };
+      }
+    });
 
     // --- 数据扩增器 (Phase 0) ---
     this.dataAugmentor = new DataAugmentor(undefined, verbose);
     this.dataAugmentor.setLLMCaller((msgs) => llmCallService.callMessages(msgs));
-
-    // --- 多源记忆融合缓冲区 (已废弃，由 SensorFusion 接管) ---
-    this.fusionBuffer = null;
 
     // --- 三进制模型管理 + 推理 + 调度 (Phase 1 & 2) ---
     this.ternaryManager = new TernaryModelManager(path.join(dbDir, 'models'));
@@ -565,8 +580,6 @@ export class Subsystems {
 
     // --- DAG 工作流管理 ---
     this.toolRetriever = new ToolRetriever({ maxTools: 12, minScore: 0.05 });
-    // --- 意图分类器 (已废弃，由右脑 classifyFromText 接管) ---
-    this.intentClassifier = null;
     this.workflowManager = new WorkflowManager(this.tools, dbDir, verbose);
     this.workflowManager.init().catch((err) => {
       if (verbose) console.warn('[Workflow] 初始化失败:', err.message);
@@ -667,12 +680,6 @@ export class Subsystems {
     }
 
     // --- 情绪/审计/空闲 ---
-    // 情绪引擎 (已废弃，由小脑 BodyStateManager 接管)
-    this.emotion = null;
-
-    // 六欲引擎 (已废弃，由小脑 BodyStateManager 接管)
-    this.desire = null;
-
     this.audit = new AuditLogger();
 
     this.tts = new TTSManager();

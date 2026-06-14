@@ -26,6 +26,8 @@ import { OrchestrationHandler } from './orchestration-handler.js';
 import { setupRESTAPI } from './rest-api.js';
 import { reflect } from './reflector.js';
 import { collectSignals, collectResourceState } from './signal-collector.js';
+import { getScriptsByStage, type DiscoveryScript } from '../intelligence/discovery-scripts.js';
+import { getIntimacyStage } from '../types.js';
 
 /** Agent 桥接接口 — 避免循环依赖 */
 interface AgentBridge {
@@ -79,6 +81,7 @@ export class WSHandler {
   private ttsBridge: TTSBridge;
   private eventHandlers: WSEventHandlers;
   private orchHandler: OrchestrationHandler;
+  private shownDiscoveryScripts = new Set<string>();
 
   constructor(
     private sys: Subsystems,
@@ -516,6 +519,7 @@ export class WSHandler {
 
   /** 检查并推送引导消息 */
   emitGuidanceIfAny(): void {
+    // 优先使用 Pet 系统的引导
     const guidance = this.sys.pet.getNextGuidance();
     if (guidance && this.eventBus) {
       this.eventBus.emit({
@@ -523,6 +527,40 @@ export class WSHandler {
         text: `💡 ${guidance.hint}`,
       });
       this.sys.pet.markGuidanceShown(guidance.id);
+      return;
+    }
+
+    // 备选：DiscoveryScripts 能力引导话术
+    try {
+      const intimacy = this.sys.pet.getIntimacy();
+      const stage = getIntimacyStage(intimacy);
+      const scripts = getScriptsByStage(stage.name);
+      if (scripts.length === 0) return;
+
+      // 过滤已展示的 + 前置能力已满足的
+      const available = scripts.filter(s => {
+        if (this.shownDiscoveryScripts.has(s.capabilityId)) return false;
+        if (s.requires && s.requires.length > 0) {
+          // 检查前置能力是否已解锁（简化：检查工具是否存在）
+          return s.requires.every(r => this.sys.tools.get(r) != null);
+        }
+        return true;
+      });
+      if (available.length === 0) return;
+
+      // 随机选一个
+      const pick = available[Math.floor(Math.random() * available.length)];
+      this.shownDiscoveryScripts.add(pick.capabilityId);
+
+      const text = pick.hint || pick.introduction;
+      if (text && this.eventBus) {
+        this.eventBus.emit({
+          type: 'bubble',
+          text: `💡 ${text}`,
+        });
+      }
+    } catch {
+      // 引导失败不影响主流程
     }
   }
 
