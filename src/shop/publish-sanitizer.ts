@@ -386,17 +386,6 @@ export class PublishSanitizer {
 // ==================== 便捷函数 ====================
 
 /**
- * 快速脱敏发布包
- */
-export async function sanitizeForPublish(
-  pkg: PublishPackage,
-  options?: SanitizeOptions,
-): Promise<SanitizeResult> {
-  const sanitizer = new PublishSanitizer(options);
-  return sanitizer.sanitize(pkg);
-}
-
-/**
  * 快速扫描 PII
  */
 export function scanForPII(pkg: PublishPackage): Array<{ field: string; type: string; location: string }> {

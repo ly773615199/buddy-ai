@@ -42,17 +42,6 @@ export const SPECIES_GROWTH_BIAS: Record<string, GrowthBias> = {
 };
 
 /** 兼容：从旧预设迁移到新系统（预设只占 30% 权重） */
-export function migratePresetToPersonality(preset: Attributes, species: string): PersonalityTraits & { growthBias: GrowthBias } {
-  return {
-    snark: preset.snark * 0.3 + 50 * 0.7,
-    wisdom: preset.wisdom * 0.3 + 50 * 0.7,
-    chaos: preset.chaos * 0.3 + 50 * 0.7,
-    patience: preset.patience * 0.3 + 50 * 0.7,
-    debugging: preset.debugging * 0.3 + 50 * 0.7,
-    growthBias: SPECIES_GROWTH_BIAS[species] ?? SPECIES_GROWTH_BIAS['光灵'],
-  };
-}
-
 // ==================== 信任度（保留映射，对齐五阶段） ====================
 
 export type TrustLevel = 'stranger' | 'acquaintance' | 'friend' | 'close_friend' | 'soulmate';

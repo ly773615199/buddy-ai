@@ -54,17 +54,4 @@ export function friendlyError(raw: string): string {
   return raw;
 }
 
-/**
- * 包装工具执行结果：错误时自动翻译
- * 用于在不改变调用方逻辑的情况下注入友好错误
- */
-export function wrapErrorResult(result: string): string {
-  // 仅处理已知错误格式
-  if (result.startsWith('[') && result.includes('错误') || result.includes('Error') || result.includes('error')) {
-    const friendly = friendlyError(result);
-    if (friendly !== result) {
-      return `${result}\n💡 ${friendly}`;
-    }
-  }
-  return result;
-}
+

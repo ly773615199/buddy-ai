@@ -165,24 +165,6 @@ export const PRESET_TOOL_TEMPLATES: Record<string, CustomToolTemplate> = {
   },
 };
 
-/**
- * 根据模板 ID 生成完整 ToolDef（用户只需填 endpoint）
- */
-export function createFromPreset(
-  presetId: string,
-  endpoint: string,
-  overrides?: Partial<CustomToolItem>,
-): CustomToolItem {
-  const template = PRESET_TOOL_TEMPLATES[presetId];
-  if (!template) throw new Error(`未知的预设工具模板: ${presetId}`);
-
-  return {
-    ...template,
-    ...overrides,
-    endpoint,
-  } as CustomToolItem;
-}
-
 // ==================== 内部工具函数 ====================
 
 function buildZodSchema(schema?: Record<string, unknown>): z.ZodType {

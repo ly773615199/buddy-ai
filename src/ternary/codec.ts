@@ -67,34 +67,6 @@ export function pack(ternary: Int8Array): Uint8Array {
  *
  * 优化：用 Uint8Array 直接构建（避免 Int8Array 的负数开销），再转换
  */
-export function unpack(packed: Uint8Array, length: number): Int8Array {
-  const result = new Int8Array(length);
-
-  // 解码表: 0→0, 1→1, 2→-1, 3→0
-  const DECODE_LUT = new Int8Array([0, 1, -1, 0]);
-
-  let i = 0;
-  const end = length - 3;
-
-  for (; i < end; i += 4) {
-    const byte = packed[i >>> 2];
-    result[i]     = DECODE_LUT[(byte >> 6) & 0x03];
-    result[i + 1] = DECODE_LUT[(byte >> 4) & 0x03];
-    result[i + 2] = DECODE_LUT[(byte >> 2) & 0x03];
-    result[i + 3] = DECODE_LUT[byte & 0x03];
-  }
-
-  // 剩余
-  if (i < length) {
-    const byte = packed[i >>> 2];
-    for (let j = 0; i < length; i++, j++) {
-      const bitOffset = (3 - j) * 2;
-      result[i] = DECODE_LUT[(byte >> bitOffset) & 0x03];
-    }
-  }
-
-  return result;
-}
 
 // ────────────────────────────────────────────
 // .ta 文件编码/解码
@@ -297,30 +269,6 @@ export function decode(buffer: ArrayBuffer): TernaryModel {
 // ────────────────────────────────────────────
 // 体积估算
 // ────────────────────────────────────────────
-
-/**
- * 估算单层体积（字节）
- * 2-bit 打包: 1 个三进制值 = 0.25 字节
- */
-export function estimateLayerSize(
-  inFeatures: number, rank: number, outFeatures: number
-): number {
-  const aBits = inFeatures * rank * 2;
-  const bBits = rank * outFeatures * 2;
-  return Math.ceil(aBits / 8) + Math.ceil(bBits / 8) + 8; // +8 for length headers
-}
-
-/**
- * 估算整个模型体积（字节）
- */
-export function estimateModelSize(
-  inFeatures: number, rank: number, outFeatures: number, numLayers: number
-): number {
-  const layerSize = estimateLayerSize(inFeatures, rank, outFeatures);
-  const headerSize = 512; // JSON header 大约
-  const checksumSize = 32;
-  return headerSize + layerSize * numLayers + checksumSize;
-}
 
 /**
  * 从总参数量估算模型体积

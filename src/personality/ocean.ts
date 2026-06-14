@@ -90,30 +90,6 @@ export const SPECIES_OCEAN_BIAS: Record<string, Partial<OceanPersonality>> = {
 
 // ==================== 默认值 ====================
 
-export function defaultOcean(): OceanPersonality {
-  return {
-    openness: 50,
-    conscientiousness: 50,
-    extraversion: 50,
-    agreeableness: 50,
-    neuroticism: 50,
-  };
-}
-
-/** 根据物种设置初始偏移（旧方式：默认值 × bias 乘数） */
-export function speciesInitialOceanLegacy(species: string): OceanPersonality {
-  const base = defaultOcean();
-  const bias = SPECIES_OCEAN_BIAS[species];
-  if (!bias) return base;
-  return {
-    openness:          clamp(base.openness          * (bias.openness ?? 1), 0, 100),
-    conscientiousness: clamp(base.conscientiousness * (bias.conscientiousness ?? 1), 0, 100),
-    extraversion:      clamp(base.extraversion      * (bias.extraversion ?? 1), 0, 100),
-    agreeableness:     clamp(base.agreeableness     * (bias.agreeableness ?? 1), 0, 100),
-    neuroticism:       clamp(base.neuroticism       * (bias.neuroticism ?? 1), 0, 100),
-  };
-}
-
 /** 根据物种基线 + 随机抖动生成初始 OCEAN（成长系统：同物种也有个体差异） */
 export function speciesInitialOcean(species: string): OceanPersonality {
   const base = SPECIES_OCEAN_BASE[species] ?? SPECIES_OCEAN_BASE['光灵'];
@@ -272,22 +248,6 @@ export function oceanDesireBaseline(p: OceanPersonality, personalityStrength: nu
 
 // ==================== 空闲行为权重 ====================
 
-type IdleAction = 'blink' | 'look_around' | 'yawn' | 'stretch' | 'wave' | 'think' | 'sleep' | 'peek';
-
-/** 人格对空闲行为权重的修正 */
-export function oceanIdleWeights(p: OceanPersonality): Record<IdleAction, number> {
-  return {
-    blink:       3,
-    look_around: Math.round(2 + p.openness / 25),
-    yawn:        Math.round(1 + (100 - p.conscientiousness) / 50),
-    stretch:     Math.round(1 + (100 - p.extraversion) / 50),
-    wave:        Math.round(p.extraversion / 25),
-    think:       Math.round(1 + p.openness / 33),
-    sleep:       Math.round((100 - p.conscientiousness) / 33),
-    peek:        Math.round(p.extraversion / 33),
-  };
-}
-
 // ==================== Prompt 注入 ====================
 
 function opennessDesc(v: number): string {
@@ -380,19 +340,6 @@ export function migrateFromLegacy(legacy: {
     extraversion:      clamp(50 + legacy.snark * 0.3 - legacy.patience * 0.2, 0, 100),
     agreeableness:     clamp(100 - legacy.snark * 0.6 + legacy.patience * 0.3, 0, 100),
     neuroticism:       clamp(50 + legacy.chaos * 0.3 - legacy.wisdom * 0.2, 0, 100),
-  };
-}
-
-/** OCEAN → 旧 5 维近似映射（用于过渡期兼容） */
-export function oceanToLegacy(ocean: OceanPersonality): {
-  snark: number; wisdom: number; chaos: number; patience: number; debugging: number;
-} {
-  return {
-    snark:     clamp(100 - ocean.agreeableness * 0.8 + ocean.extraversion * 0.2, 0, 100),
-    wisdom:    clamp(ocean.openness * 0.5 + (100 - ocean.neuroticism) * 0.3 + ocean.conscientiousness * 0.2, 0, 100),
-    chaos:     clamp(100 - ocean.conscientiousness * 0.6 + ocean.openness * 0.2, 0, 100),
-    patience:  clamp(ocean.agreeableness * 0.4 + ocean.conscientiousness * 0.3 + (100 - ocean.neuroticism) * 0.3, 0, 100),
-    debugging: clamp(ocean.conscientiousness * 0.5 + ocean.openness * 0.3, 0, 100),
   };
 }
 

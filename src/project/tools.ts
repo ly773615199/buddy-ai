@@ -32,10 +32,6 @@ export function getProjectStore(dataDir?: string): ProjectStore {
   return _store;
 }
 
-export function setProjectStore(store: ProjectStore): void {
-  _store = store;
-}
-
 // ==================== 全局 PlanManager 实例 ====================
 
 let _planManager: PlanManager | null = null;
@@ -45,10 +41,6 @@ export function getPlanManager(): PlanManager {
     _planManager = new PlanManager(getProjectStore());
   }
   return _planManager;
-}
-
-export function setPlanManager(pm: PlanManager): void {
-  _planManager = pm;
 }
 
 // ==================== 全局 ProgressTracker / ExecutionManager 实例 ====================

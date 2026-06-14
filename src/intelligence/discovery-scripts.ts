@@ -215,11 +215,6 @@ export const DISCOVERY_SCRIPTS: DiscoveryScript[] = [
   },
 ];
 
-/** 获取指定能力的引导话术 */
-export function getDiscoveryScript(capabilityId: string): DiscoveryScript | undefined {
-  return DISCOVERY_SCRIPTS.find(s => s.capabilityId === capabilityId);
-}
-
 /** 获取指定阶段的所有引导话术 */
 export function getScriptsByStage(stage: IntimacyStageName): DiscoveryScript[] {
   return DISCOVERY_SCRIPTS.filter(s => s.stage === stage);

@@ -131,18 +131,4 @@ export function createModelMeta(domain: string, overrides?: Partial<TernaryModel
   };
 }
 
-/**
- * 计算单层参数量
- */
-export function layerParamCount(inFeatures: number, rank: number, outFeatures: number): number {
-  return inFeatures * rank + rank * outFeatures;
-}
 
-/**
- * 计算模型总参数量（LoRA 分解）
- */
-export function modelParamCount(
-  inFeatures: number, rank: number, outFeatures: number, numLayers: number
-): number {
-  return layerParamCount(inFeatures, rank, outFeatures) * numLayers;
-}
