@@ -175,10 +175,18 @@ export class Subsystems {
   // --- 三脑架构 ---
   /** 三脑协作实例 */
   threeBrain: ThreeBrain | null = null;
-  /** Step 6: 统一资源画像系统 */
+  /** Step 6: 统一资源画像系统（向后兼容接口） */
   resourceHub: import('../brain/hub/resource-hub.js').ResourceHub | null = null;
   /** Step 7: ModelPool ↔ ResourceHub 双向同步桥 */
   modelPoolBridge: import('../brain/hub/model-pool-bridge.js').ModelPoolResourceBridge | null = null;
+  /** P7: 统一资源管理系统（新） */
+  resourceSystem: {
+    hub: import('../brain/hub/unified-resource-hub.js').UnifiedResourceHub;
+    adapter: import('../brain/hub/resource-hub-adapter.js').ResourceHubAdapter;
+    scheduler: import('../brain/hub/batch-probe-scheduler.js').BatchProbeScheduler;
+    auditor: import('../brain/hub/marginal-auditor.js').MarginalAuditor;
+    graph: import('../brain/hub/capability-graph.js').CapabilityGraph;
+  } | null = null;
   /** 左脑：理性决策脑（规则+调度+策略蒸馏） */
   leftBrain: LeftBrain | null = null;
   /** 右脑：直觉学习脑（轻量NN+在线学习+蒸馏） */
@@ -867,15 +875,36 @@ export class Subsystems {
     this.threeBrain.left.scheduler.setRouter(llmRouter);
     if (verbose) console.log('[ThreeBrain] ModelRouter 已同步注入 UnifiedScheduler');
 
-    // Step 6+7: ResourceHub + ModelPoolResourceBridge 初始化
-    import('../brain/hub/resource-hub.js').then(({ ResourceHub }) => {
+    // Step 6+7: ResourceHub + ModelPoolResourceBridge 初始化（P7 升级：统一资源系统）
+    import('../brain/hub/index.js').then(({ createResourceSystem }) => {
       return import('../brain/hub/model-pool-bridge.js').then(({ ModelPoolResourceBridge }) => {
-        this.resourceHub = new ResourceHub();
+        const system = createResourceSystem({
+          schedulerAutoRefresh: false, // 手动控制启动时机
+        });
+        this.resourceSystem = system;
+        this.resourceHub = system.adapter as any; // 向后兼容：adapter 实现旧 ResourceHub 接口
+
         const pool = llmRouter?.getPool?.();
         if (pool) {
-          this.modelPoolBridge = new ModelPoolResourceBridge(pool as any, this.resourceHub);
+          this.modelPoolBridge = new ModelPoolResourceBridge(pool as any, system.adapter as any);
           const synced = this.modelPoolBridge.fullSync();
-          if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源`);
+          // 将同步的模型也注册到 UnifiedResourceHub
+          for (const profile of pool.getAllProfiles()) {
+            system.hub.register({
+              id: `model/${profile.id}`,
+              type: 'model',
+              name: profile.displayName ?? profile.id,
+              metadata: {
+                provider: profile.platform,
+                model: profile.id,
+                active: profile.active,
+              },
+            });
+            if (profile.active) {
+              system.hub.markState(`model/${profile.id}`, 'active');
+            }
+          }
+          if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源（统一资源系统）`);
         }
       });
     }).catch(err => {

@@ -12,7 +12,7 @@ import type { CapabilitySnapshot, DriftAlert, DriftSeverity } from './types.js';
 
 interface DriftWindow {
   dimension: string;
-  values: Array<{ value: boolean | number; timestamp: number }>;
+  values: Array<{ value: boolean | number | string; timestamp: number }>;
 }
 
 export class DriftDetector {
@@ -38,7 +38,7 @@ export class DriftDetector {
   detect(
     resourceId: string,
     dimension: string,
-    newValue: boolean | number,
+    newValue: boolean | number | string,
     timestamp: number = Date.now(),
   ): DriftAlert | null {
     const key = `${resourceId}:${dimension}`;
@@ -51,7 +51,8 @@ export class DriftDetector {
     // 计算漂移分数（在添加新值之前）
     const driftScore = this.computeDriftScore(window.values.map(v => v.value), newValue);
 
-    // 添加新值到窗口
+    // 添加新值到窗口（字符串值不做漂移检测，直接返回 null）
+    if (typeof newValue === 'string') return null;
     window.values.push({ value: newValue, timestamp });
     if (window.values.length > this.windowSize) {
       window.values.shift();
@@ -101,7 +102,7 @@ export class DriftDetector {
   /**
    * 获取某维度的历史值
    */
-  getHistory(resourceId: string, dimension: string): Array<{ value: boolean | number; timestamp: number }> {
+  getHistory(resourceId: string, dimension: string): Array<{ value: boolean | number | string; timestamp: number }> {
     return this.windows.get(`${resourceId}:${dimension}`)?.values ?? [];
   }
 
@@ -119,7 +120,7 @@ export class DriftDetector {
   /**
    * 获取当前漂移分数（不记录新值）
    */
-  getDriftScore(resourceId: string, dimension: string, newValue: boolean | number): number {
+  getDriftScore(resourceId: string, dimension: string, newValue: boolean | number | string): number {
     const window = this.windows.get(`${resourceId}:${dimension}`);
     if (!window || window.values.length < 3) return 0;
     return this.computeDriftScore(window.values.map(v => v.value), newValue);
@@ -127,8 +128,11 @@ export class DriftDetector {
 
   // ==================== 内部 ====================
 
-  private computeDriftScore(historical: Array<boolean | number>, newValue: boolean | number): number {
+  private computeDriftScore(historical: Array<boolean | number | string>, newValue: boolean | number | string): number {
     if (historical.length < 2) return 0;
+
+    // 字符串值不做漂移检测
+    if (typeof newValue === 'string') return 0;
 
     // 布尔值：翻转率
     if (typeof newValue === 'boolean') {

@@ -677,6 +677,16 @@ export function setupRESTAPI(ctx: RESTContext): void {
           if (sys.modelPoolBridge && result.models.length > 0) {
             for (const profile of result.models) {
               sys.modelPoolBridge.onModelDiscovered(profile.id, profile.displayName);
+              // P7: 同步到统一资源系统
+              if (sys.resourceSystem) {
+                sys.resourceSystem.hub.register({
+                  id: `model/${profile.id}`,
+                  type: 'model',
+                  name: profile.displayName ?? profile.id,
+                  metadata: { provider: id, model: profile.id },
+                });
+                sys.resourceSystem.hub.markState(`model/${profile.id}`, 'active');
+              }
             }
             if (verbose) console.log(`[ResourceHub] 同步 ${result.models.length} 个新模型 (${id})`);
           }
@@ -719,6 +729,8 @@ export function setupRESTAPI(ctx: RESTContext): void {
           if (sys.modelPoolBridge) {
             sys.resourceHub?.unregister(`model/${p.id}`);
           }
+          // P7: 从统一资源系统移除
+          sys.resourceSystem?.hub.unregister(`model/${p.id}`);
         }
       }
       // 清理模型知识缓存中该平台的数据
