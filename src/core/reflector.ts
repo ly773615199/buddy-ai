@@ -6,7 +6,7 @@
  */
 
 import type { OrchestrationPlan, ExecutionResult } from '../types.js';
-import type { TaskSignal } from './agent-types.js';
+import type { TaskSignal, FailureAnalysis, FailureCategory, RetryStrategy } from './agent-types.js';
 import type { Subsystems } from './subsystems.js';
 import { logger } from '../audit/structured-logger.js';
 
@@ -30,6 +30,8 @@ export interface ReflectResult {
   reason: string;
   failedTools: string[];
   hallucinations: string[];
+  /** Phase 1.1: 结构化失败分析，供重决策时注入上下文 */
+  failureAnalysis?: FailureAnalysis;
 }
 
 export async function reflect(
@@ -135,11 +137,17 @@ export async function reflect(
       ? `quality=${quality.toFixed(2)}${failedTools.length ? ` failed=[${failedTools}]` : ''}${retryHallucinations.length ? ` hallucination=[${retryHallucinations}]` : ''}`
       : `quality=${quality.toFixed(2)} OK`;
 
-    if (verbose && shouldRetry) {
-      console.log(`  [Reflect] 质量不足，建议重试: ${reason}`);
+    // Phase 1.1: 生成结构化失败分析
+    let failureAnalysis: FailureAnalysis | undefined;
+    if (shouldRetry) {
+      failureAnalysis = analyzeFailure(quality, failedTools, retryHallucinations, result, signal, plan);
     }
 
-    return { quality, shouldRetry, reason, failedTools, hallucinations };
+    if (verbose && shouldRetry) {
+      console.log(`  [Reflect] 质量不足，建议重试: ${reason} → 策略: ${failureAnalysis?.suggestedStrategy ?? 'unknown'}`);
+    }
+
+    return { quality, shouldRetry, reason, failedTools, hallucinations, failureAnalysis };
 
   } catch (err) {
     if (verbose) console.warn('[Reflect] 反思失败:', (err as Error).message);
@@ -239,4 +247,91 @@ function getAllowedToolNames(domains: string[]): Set<string> {
   }
   for (const name of ['read_file', 'exec', 'project_index_stats']) result.add(name);
   return result;
+}
+
+// ==================== 失败分析（Phase 1.1） ====================
+
+/**
+ * 结构化失败分析 — 从执行结果中推断失败原因和建议策略
+ *
+ * 供重决策时注入上下文，让 scheduler 换路走而非重跑同样流程
+ */
+function analyzeFailure(
+  quality: number,
+  failedTools: string[],
+  hallucinations: string[],
+  result: { text: string; toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }> },
+  signal: TaskSignal,
+  plan: OrchestrationPlan,
+): FailureAnalysis {
+  const allFailedResults = result.toolCalls
+    .filter(tc => tc.result.startsWith('['))
+    .map(tc => tc.result);
+
+  // 分类 1: 工具执行失败
+  if (failedTools.length > 0) {
+    // 检查是否是模型生成了错误的工具调用（模型弱点）
+    const hasCommandNotFound = allFailedResults.some(r => r.includes('command not found'));
+    const hasPermissionDenied = allFailedResults.some(r => r.includes('permission') || r.includes('EACCES'));
+    const hasTimeout = allFailedResults.some(r => r.includes('timeout') || r.includes('ETIMEDOUT'));
+
+    if (hasCommandNotFound) {
+      return {
+        category: 'model_weakness',
+        detail: `模型生成了不存在的命令: ${failedTools.join(', ')}`,
+        suggestedStrategy: 'switch_model',
+        failedTools,
+        qualityScore: quality,
+      };
+    }
+
+    if (hasTimeout) {
+      return {
+        category: 'resource_mismatch',
+        detail: `工具执行超时: ${failedTools.join(', ')}`,
+        suggestedStrategy: 'switch_tools',
+        failedTools,
+        qualityScore: quality,
+      };
+    }
+
+    return {
+      category: 'tool_failure',
+      detail: `工具执行失败: ${failedTools.join(', ')}`,
+      suggestedStrategy: 'switch_tools',
+      failedTools,
+      qualityScore: quality,
+    };
+  }
+
+  // 分类 2: 幻觉（工具成功但结果无关）
+  if (hallucinations.length > 0) {
+    return {
+      category: 'model_weakness',
+      detail: `幻觉检测: ${hallucinations.join(', ')}`,
+      suggestedStrategy: 'inject_knowledge',
+      failedTools: hallucinations,
+      qualityScore: quality,
+    };
+  }
+
+  // 分类 3: 质量不足（输出太短或不相关）
+  if (quality < 0.3) {
+    return {
+      category: 'prompt_issue',
+      detail: `输出质量极低 (${quality.toFixed(2)})`,
+      suggestedStrategy: 'simplify',
+      qualityScore: quality,
+    };
+  }
+
+  // 分类 4: 中等质量 — 可能是模型能力边界
+  const selectedModel = plan.selectedNodes[0]?.id;
+  return {
+    category: 'model_weakness',
+    detail: `质量不足 (${quality.toFixed(2)})，当前模型可能不适合此任务`,
+    suggestedStrategy: 'switch_model',
+    failedModelId: selectedModel,
+    qualityScore: quality,
+  };
 }

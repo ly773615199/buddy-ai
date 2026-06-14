@@ -8,7 +8,7 @@
 import type {
   TaskSignal, ResourceState, ExecutionPlan, IntuitionSignal,
   BodyState, BodyEvent, HomeostasisAction, DecisionRecord, DecisionOutcome,
-  Rule, NNConfig, FeedbackResult, DiagnosticReport,
+  Rule, NNConfig, FeedbackResult, DiagnosticReport, FailureAnalysis,
 } from './types.js';
 import { LeftBrain } from './left/index.js';
 import { LawClassifier, type LawResult } from './left/law-classifier.js';
@@ -213,6 +213,7 @@ export class ThreeBrain {
     input: string,
     signal: TaskSignal,
     resources: ResourceState,
+    failureContext?: FailureAnalysis,
   ): Promise<DecisionResult> {
     const t0 = performance.now();
 
@@ -280,7 +281,7 @@ export class ThreeBrain {
       };
     } else {
       // 法则 1/2/3/5/6 — 走正常决策（规则引擎 → 调度器）
-      plan = await this.left.decide(signal, resources, intuition, bodyState);
+      plan = await this.left.decide(signal, resources, intuition, bodyState, failureContext);
       // 将法则信息附加到 plan（供日志/调试）
       (plan as any).law = lawResult.law;
       (plan as any).lawName = LawClassifier.lawName(lawResult.law);

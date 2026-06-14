@@ -45,3 +45,32 @@ export interface ResourceState {
   /** 工具健康度摘要（来自 SkillGrowth） */
   toolHealth?: import('../brain/types.js').ToolHealthSummary;
 }
+
+// ==================== 失败分析（Phase 1.1: 失败感知重试） ====================
+
+/** 失败分类 */
+export type FailureCategory =
+  | 'prompt_issue'       // prompt 不当导致输出质量差
+  | 'tool_failure'       // 工具执行失败
+  | 'model_weakness'     // 模型能力不足
+  | 'resource_mismatch'  // 资源选择不匹配
+  | 'unknown';           // 未知原因
+
+/** 建议的重试策略 */
+export type RetryStrategy =
+  | 'switch_model'       // 换模型
+  | 'switch_tools'       // 换工具
+  | 'decompose_task'     // 分解任务
+  | 'inject_knowledge'   // 注入额外知识
+  | 'simplify'           // 简化任务
+  | 'same_path';         // 走同样路径（无更好选择）
+
+/** 结构化失败分析 */
+export interface FailureAnalysis {
+  category: FailureCategory;
+  detail: string;
+  suggestedStrategy: RetryStrategy;
+  failedModelId?: string;
+  failedTools?: string[];
+  qualityScore: number;
+}

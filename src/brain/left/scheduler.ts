@@ -14,7 +14,7 @@
 
 import type {
   TaskSignal, ResourceState, ExecutionPlan, IntuitionSignal, BodyState,
-  OrchestrationNode,
+  OrchestrationNode, FailureAnalysis,
 } from '../types.js';
 import type { ModelRouter, TaskType } from '../../core/model-router.js';
 
@@ -137,6 +137,9 @@ export class UnifiedScheduler {
   // Phase 4: 右脑 predictDetailed 注入（可选）
   private _rightBrainPredictDetailed: ((signal: TaskSignal, resources: ResourceState, body?: BodyState) => Promise<{ tools: Array<{ name: string; probability: number }> }>) | null = null;
 
+  // Phase 1.1: 当前调度的资源状态（供 selectViaRouter 读取排除列表）
+  private _currentResources: ResourceState | null = null;
+
   constructor(config?: Partial<SchedulerConfig>, verbose = false) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.verbose = verbose;
@@ -164,10 +167,13 @@ export class UnifiedScheduler {
   /**
    * 调度决策 — 四层路由 + 元认知 + Thompson Sampling + 小脑稳态
    *
+   * Phase 1.1: 新增 failureContext 参数，失败时换路走而非重跑同样流程
+   *
    * Fix C: router 作为模型来源嵌入各策略层，不再替代策略。
    * 每一层决定"走什么路由"，selectViaRouter() 负责"用什么模型"。
    *
    * 信号流：
+   * 0. 失败上下文注入（Phase 1.1）
    * 1. 预算检查（硬约束）
    * 2. 元认知检查（quality_head 控制信号）
    * 3. 新颖度分层路由
@@ -180,8 +186,62 @@ export class UnifiedScheduler {
     resources: ResourceState,
     intuition?: IntuitionSignal,
     body?: BodyState,
+    failureContext?: FailureAnalysis,
   ): Promise<ExecutionPlan> {
-    // ── Layer 0: 预算硬约束 ──
+    // Phase 1.1: 存储当前资源状态供 selectViaRouter 读取排除列表
+    this._currentResources = resources;
+
+    // ── Layer 0: 失败上下文注入（Phase 1.1）──
+    // 上次执行失败时，根据失败分析调整本次调度策略
+    if (failureContext) {
+      if (this.verbose) {
+        console.log(`[Scheduler] 失败感知: category=${failureContext.category}, strategy=${failureContext.suggestedStrategy}`);
+      }
+
+      // 策略 1: 换模型 — 排除失败模型，让 Thompson Sampling 选别的
+      if (failureContext.suggestedStrategy === 'switch_model' && failureContext.failedModelId) {
+        // 在 selectViaRouter 时注入排除列表（通过 resources 传递）
+        (resources as any)._excludeModelIds = [failureContext.failedModelId];
+      }
+
+      // 策略 2: 换工具 — 降级失败工具，让规则引擎换路径
+      if (failureContext.suggestedStrategy === 'switch_tools' && failureContext.failedTools) {
+        (resources as any)._failedTools = failureContext.failedTools;
+        (resources as any)._retryStrategy = 'switch_tools';
+      }
+
+      // 策略 3: 简化 — 降低复杂度，走轻量路径
+      if (failureContext.suggestedStrategy === 'simplify') {
+        return this.makePlan('budget_fallback', 'local_only',
+          `失败降级: ${failureContext.detail} → 简化重试`,
+          Math.max(0.3, failureContext.qualityScore * 0.8), [
+            { id: 'local', type: 'local_expert' },
+          ]);
+      }
+
+      // 策略 4: 注入知识 — 走经验 + LLM 验证路径
+      if (failureContext.suggestedStrategy === 'inject_knowledge') {
+        if (resources.experienceHit) {
+          return this.makePlan('exp_verified', 'cascade',
+            `失败降级: ${failureContext.detail} → 经验+LLM验证`,
+            Math.max(0.4, resources.localConfidence * 0.8), [
+              { id: 'experience', type: 'experience' },
+              { id: 'local', type: 'local_expert' },
+            ]);
+        }
+        // 无经验可用，走纯 LLM
+        return await this.selectViaRouter('llm_only', signal, body,
+          `失败降级: ${failureContext.detail} → 纯LLM`);
+      }
+
+      // 策略 5: 分解任务 — 标记 useDAG
+      if (failureContext.suggestedStrategy === 'decompose_task') {
+        (signal as any).shouldUseDAG = true;
+        (signal as any).dagReason = `失败驱动分解: ${failureContext.detail}`;
+      }
+    }
+
+    // ── Layer 1: 预算硬约束 ──
     if (resources.budgetRemaining <= 0) {
       return this.makePlan('budget_fallback', 'local_only', '预算耗尽，使用本地模型', 0.6, [
         { id: 'local', type: 'local_expert' },
@@ -479,10 +539,22 @@ export class UnifiedScheduler {
     if (this.router) {
       try {
         const taskType = signal.taskType as TaskType;
-        const selection = await this.router.select(taskType, {
-          content: signal.content ?? '',
-          bodyState: body,
-        });
+        const context = { content: signal.content ?? '', bodyState: body };
+
+        // Phase 1.1: 检查是否有排除列表（失败感知重试注入）
+        const excludeIds = (this._currentResources as any)?._excludeModelIds as string[] | undefined;
+
+        let selection;
+        if (excludeIds && excludeIds.length > 0) {
+          // 排除失败模型后选择
+          selection = await this.router.selectExcluding(taskType, context, excludeIds);
+          if (this.verbose && selection) {
+            console.log(`[Scheduler] 排除模型 [${excludeIds.join(',')}] 后选择: ${selection.id}`);
+          }
+        } else {
+          selection = await this.router.select(taskType, context);
+        }
+
         if (selection) {
           const creds = this.router.getPool()?.getProviderCredentials(selection.provider);
           const node: OrchestrationNode = {

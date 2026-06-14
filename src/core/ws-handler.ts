@@ -30,7 +30,7 @@ import { collectSignals, collectResourceState } from './signal-collector.js';
 interface AgentBridge {
   preprocessMessage(content: string): { type: string; content: string } | null;
   postprocessResult(content: string, result: { text: string; toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string }> }): void;
-  orchestrate(content: string): Promise<import('../types.js').OrchestrationPlan>;
+  orchestrate(content: string, failureContext?: import('./agent-types.js').FailureAnalysis): Promise<import('../types.js').OrchestrationPlan>;
   executeByPlan(plan: import('../types.js').OrchestrationPlan): Promise<import('../types.js').ExecutionResult>;
   /** 记录决策结果（更新 success/executionMs） */
   recordOutcome(success: boolean, error?: string, executionMs?: number): void;
@@ -812,7 +812,7 @@ export class WSHandler {
             // ── 重决策：质量不足，重新编排 + 执行 ──
             reflectAttempt++;
             if (this.verbose) {
-              console.log(`  [Reflect] 第${reflectAttempt}次重决策: ${reflectResult.reason}`);
+              console.log(`  [Reflect] 第${reflectAttempt}次重决策: ${reflectResult.reason} → 策略: ${reflectResult.failureAnalysis?.suggestedStrategy ?? 'unknown'}`);
             }
 
             // 推送重决策 trace
@@ -821,12 +821,18 @@ export class WSHandler {
               phase: 'signal',
               traceId: `retry-${Date.now()}-${reflectAttempt}`,
               timestamp: Date.now(),
-              data: { retry: reflectAttempt, reason: reflectResult.reason, quality: reflectResult.quality },
+              data: {
+                retry: reflectAttempt,
+                reason: reflectResult.reason,
+                quality: reflectResult.quality,
+                failureCategory: reflectResult.failureAnalysis?.category,
+                retryStrategy: reflectResult.failureAnalysis?.suggestedStrategy,
+              },
             });
 
-            // 重新编排（三脑已从 feedback 中学习，参数已更新）
+            // Phase 1.1: 重新编排 — 带着失败上下文换路走
             if (!this.agentRef) break;
-            const newPlan = await this.agentRef.orchestrate(content);
+            const newPlan = await this.agentRef.orchestrate(content, reflectResult.failureAnalysis);
             planRef = newPlan;
 
             // 推送 execution trace

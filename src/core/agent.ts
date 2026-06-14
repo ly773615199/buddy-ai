@@ -23,8 +23,8 @@ import { RuntimeCollector, KnowledgeBridge, toNNSample } from '../brain/right/sc
 import type { PendingSnapshot } from '../brain/right/scene/runtime-collector.js';
 
 // Phase 2: 类型定义提取到 agent-types.ts
-export type { SignalObserverEvent, SignalObserver, TaskSignal, ResourceState } from './agent-types.js';
-import type { TaskSignal, ResourceState, SignalObserver } from './agent-types.js';
+export type { SignalObserverEvent, SignalObserver, TaskSignal, ResourceState, FailureAnalysis } from './agent-types.js';
+import type { TaskSignal, ResourceState, SignalObserver, FailureAnalysis } from './agent-types.js';
 
 // Phase 2: 信号采集提取到 signal-collector.ts
 import * as signalCollector from './signal-collector.js';
@@ -606,7 +606,7 @@ export class BuddyAgent {
    *
    * 纯逻辑，无 LLM 调用，< 5ms。
    */
-  async orchestrate(content: string): Promise<OrchestrationPlan> {
+  async orchestrate(content: string, failureContext?: FailureAnalysis): Promise<OrchestrationPlan> {
     // Stage 1: 信号采集
     const signal = this.collectSignals(content);
 
@@ -703,18 +703,18 @@ export class BuddyAgent {
     if (threeBrain && this.abTestEnabled) {
       const useThreeBrain = Math.random() < this.abTestRatio;
       if (useThreeBrain) {
-        return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain');
+        return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext);
       }
-      return this.orchestrateLegacy(content, signal, resources, 'legacy');
+      return this.orchestrateLegacy(content, signal, resources, 'legacy', failureContext);
     }
 
     // ── 三脑决策路径（优先） ──
     if (threeBrain) {
-      return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain');
+      return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext);
     }
 
     // ── 旧决策路径（兜底） ──
-    return this.orchestrateLegacy(content, signal, resources, 'legacy');
+    return this.orchestrateLegacy(content, signal, resources, 'legacy', failureContext);
   }
 
   /**
@@ -728,14 +728,15 @@ export class BuddyAgent {
     resources: ResourceState,
     threeBrain: import('../brain/brain.js').ThreeBrain,
     path: 'threeBrain' | 'legacy' = 'threeBrain',
+    failureContext?: FailureAnalysis,
   ): Promise<OrchestrationPlan> {
     const t0 = performance.now();
 
     // 注入用户消息到感知融合
     threeBrain.cerebellum.ingestPerception('user', content, signal.domains);
 
-    // 三脑协作决策
-    const decision = await threeBrain.decide(content, signal, resources);
+    // 三脑协作决策（Phase 1.1: 传入失败上下文）
+    const decision = await threeBrain.decide(content, signal, resources, failureContext);
 
     const latencyMs = performance.now() - t0;
 
@@ -967,8 +968,42 @@ export class BuddyAgent {
     signal: TaskSignal,
     resources: ResourceState,
     path: 'threeBrain' | 'legacy' = 'legacy',
+    failureContext?: FailureAnalysis,
   ): Promise<OrchestrationPlan> {
     const t0 = performance.now();
+
+    // Phase 1.1: 失败感知 — legacy 路径的简单降级策略
+    if (failureContext) {
+      // 将失败信息注入 resources，供后续决策参考
+      (resources as any)._failureContext = failureContext;
+
+      // 简化策略：直接降级到本地
+      if (failureContext.suggestedStrategy === 'simplify') {
+        const decision = {
+          mode: 'local_only' as const,
+          reason: `失败降级(legacy): ${failureContext.detail}`,
+          selectedNodes: [{ id: 'local', type: 'local_expert' as const }],
+        };
+        const latencyMs = performance.now() - t0;
+        // 快速返回降级 plan
+        return {
+          content,
+          mode: decision.mode,
+          reason: decision.reason,
+          domains: signal.domains,
+          complexity: signal.complexity,
+          selectedNodes: decision.selectedNodes,
+          useDAG: false,
+          meta: {
+            localCoverageRatio: resources.localCoverageRatio,
+            localConfidence: resources.localConfidence,
+            budgetRemaining: resources.budgetRemaining,
+            availableNodeCount: resources.availableNodeCount,
+            userCorrectionCount: resources.userCorrectionCount,
+          },
+        };
+      }
+    }
 
     // Stage 2: 策略决策
     const decision = this.decideCollaboration(signal, resources);

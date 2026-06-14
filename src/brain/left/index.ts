@@ -71,6 +71,7 @@ export class LeftBrain {
     resources: ResourceState,
     intuition?: IntuitionSignal,
     body?: BodyState,
+    failureContext?: import('../types.js').FailureAnalysis,
   ): Promise<ExecutionPlan> {
     // 1. 规则引擎优先
     const ruleResult = this.ruleEngine.evaluate(signal, resources, intuition, body);
@@ -78,8 +79,8 @@ export class LeftBrain {
       return await this.enrichPlanWithRouter(ruleResult, signal, body);
     }
 
-    // 2. 调度器兜底（Phase 4: async，支持 predictDetailed）
-    return this.scheduler.schedule(signal, resources, intuition, body);
+    // 2. 调度器兜底（Phase 4: async，支持 predictDetailed；Phase 1.1: 传入失败上下文）
+    return this.scheduler.schedule(signal, resources, intuition, body, failureContext);
   }
 
   /**

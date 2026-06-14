@@ -170,6 +170,35 @@ export interface ResourceState {
   toolHealth?: ToolHealthSummary;
 }
 
+// ==================== 失败分析（Phase 1.1） ====================
+
+/** 失败分类 */
+export type FailureCategory =
+  | 'prompt_issue'
+  | 'tool_failure'
+  | 'model_weakness'
+  | 'resource_mismatch'
+  | 'unknown';
+
+/** 建议的重试策略 */
+export type RetryStrategy =
+  | 'switch_model'
+  | 'switch_tools'
+  | 'decompose_task'
+  | 'inject_knowledge'
+  | 'simplify'
+  | 'same_path';
+
+/** 结构化失败分析 */
+export interface FailureAnalysis {
+  category: FailureCategory;
+  detail: string;
+  suggestedStrategy: RetryStrategy;
+  failedModelId?: string;
+  failedTools?: string[];
+  qualityScore: number;
+}
+
 /** 工具健康度摘要 — 注入调度器辅助决策 */
 export interface ToolHealthSummary {
   /** 正在考虑的工具名 → 健康评分 (0-100) */
