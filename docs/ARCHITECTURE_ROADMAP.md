@@ -97,135 +97,29 @@
 
 ---
 
-### Phase 2: 智能资源决策（2-4 周）
+### Phase 2: 智能资源决策（2-4 周）✅ 已完成
 
 **目标**: 从「选一个模型」升级到「组合最优资源」
 
-#### 2.1 多候选方案生成
-
-**核心思想**: orchestrate 不只生成一个 plan，而是 2-3 个候选
+#### 2.1 多候选方案生成 ✅ `fabdd49`
 
 **改动文件**:
-- `brain/brain.ts` — decide() 返回候选列表
-- `brain/left/scheduler.ts` — schedule() 生成多个候选
-- `core/agent.ts` — orchestrate() 评估候选选最优
+- `brain/left/scheduler.ts` — scheduleMultiple() 生成 2-3 个备选方案
+- `brain/left/index.ts` — decide() 无失败上下文时生成候选
+- `brain/types.ts` + `types.ts` — ExecutionPlan 新增 candidates 字段
+- `core/ws-handler.ts` — 重试时优先切换备选方案
 
-**实现**:
-
-```typescript
-// scheduler.ts — 生成多个候选
-async scheduleMultiple(signal, resources, intuition, body, count = 3): Promise<ExecutionPlan[]> {
-  const plans: ExecutionPlan[] = [];
-
-  // 候选 1: 规则引擎命中
-  const rulePlan = this.ruleEngine.evaluate(signal, resources, intuition, body);
-  if (rulePlan) plans.push(rulePlan);
-
-  // 候选 2: Thompson Sampling 选不同模型
-  const tsPlan = await this.thompsonSelect(signal, resources, intuition, body);
-  if (tsPlan) plans.push(tsPlan);
-
-  // 候选 3: 经验路由
-  if (resources.experienceHit) {
-    plans.push(this.makePlan('exp_direct', 'local_only', '经验路由', 0.8, [...]));
-  }
-
-  return plans;
-}
-
-// agent.ts — 评估候选
-const candidates = await scheduler.scheduleMultiple(signal, resources, intuition, body, 3);
-const scored = candidates.map(p => ({
-  plan: p,
-  score: p.confidence * (1 - calcNovelty(signal, resources)) * toolHealthFactor,
-}));
-scored.sort((a, b) => b.score - a.score);
-const bestPlan = scored[0].plan;
-
-// 失败时切换到下一个候选
-if (failed && scored.length > 1) {
-  const fallbackPlan = scored[1].plan;
-  return executeByPlan(fallbackPlan);
-}
-```
-
-**预期效果**: 第一个方案失败时，立即切换到备选方案，而非重新 orchestrate
-
-#### 2.2 任务分解与 DAG 编排
-
-**核心思想**: 复杂任务自动分解为子任务图
+#### 2.2 任务分解与 DAG 触发优化 ✅ `fabdd49`
 
 **改动文件**:
-- `orchestrate/planner.ts` — 降低 DAG 触发阈值
-- `core/plan-executor.ts` — 支持并行子任务执行
-- `brain/left/rule-engine.ts` — 新增分解规则
+- `core/signal-collector.ts` — 新增 3 个 DAG 触发条件（多工具/复杂长内容/跨领域）
 
-**关键改动**:
+#### 2.3 资源能力感知调度 ✅ (已内置于 ModelRouter)
 
-```typescript
-// 当前: 需要 3+ 并行标记词或 4+ 子句才触发 DAG
-// 改后: 复杂任务 + 多工具需求 → 自动分解
-
-function shouldDecompose(signal: TaskSignal, content: string): boolean {
-  // 已有: 并行标记词检测
-  if (parallelMarkers >= 3) return true;
-  if (clauses >= 4) return true;
-
-  // 新增: 多工具需求检测
-  const intent = classifyFromText(content);
-  if (intent.suggestedTools.length >= 3) return true;
-
-  // 新增: 复杂度 + 长度联合判断
-  if (signal.complexity === 'complex' && content.length > 300) return true;
-
-  // 新增: 多领域任务
-  if (signal.domains.length >= 2) return true;
-
-  return false;
-}
-```
-
-**预期效果**: "分析这个项目的代码质量，找出安全漏洞，生成报告" 自动分解为 3 个子任务并行执行
-
-#### 2.3 资源能力感知调度
-
-**核心思想**: 调度时查询「谁能做好这件事」，而非随机选
-
-**改动文件**:
-- `brain/left/scheduler.ts` — 调度前查询 pool 能力
-- `core/model-router.ts` — buildModelRequirement 注入历史表现
-- `brain/hub/resource-hub.ts` — 提供能力查询接口
-
-**实现**:
-
-```typescript
-// scheduler.ts — 能力感知调度
-async schedule(signal, resources, intuition, body) {
-  // 查询 pool 中该任务类型的可用模型
-  const capable = pool.queryCapableModels(signal.taskType);
-
-  // 按历史表现排序
-  const ranked = capable.sort((a, b) => {
-    const scoreA = a.taskSuccessRate * 0.6 + (1 - a.avgLatencyMs / 10000) * 0.2 + (1 - a.costPer1kInput) * 0.2;
-    const scoreB = b.taskSuccessRate * 0.6 + (1 - b.avgLatencyMs / 10000) * 0.2 + (1 - b.costPer1kInput) * 0.2;
-    return scoreB - scoreA;
-  });
-
-  // 结合 BodyState 调整
-  if (body.load > 80) {
-    // 高负载 → 选最快而非最好的
-    ranked.sort((a, b) => a.avgLatencyMs - b.avgLatencyMs);
-  }
-  if (body.energy < 30) {
-    // 低精力 → 选最便宜的
-    ranked.sort((a, b) => a.costPer1kInput - b.costPer1kInput);
-  }
-
-  return ranked[0];
-}
-```
-
-**预期效果**: 不再随机选模型，而是根据任务特征 + 系统状态选最优
+ModelRouter.select() 已实现：
+- queryCapableModels 查询可用模型
+- BodyState 调节（高负载→限成本，低精力→放宽约束）
+- Thompson Sampling 多维反馈加权
 
 ---
 
