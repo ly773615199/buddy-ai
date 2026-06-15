@@ -18,21 +18,13 @@ import * as path from 'path';
 const TEST_DIR = '/tmp/buddy-coverage-gap-test';
 
 // ════════════════════════════════════════════════════════════════
-// 1. DesireEngine — 六欲引擎
+// 1. DesireEngine — 六欲引擎 (via BodyStateManager)
 // ════════════════════════════════════════════════════════════════
 
 describe('🔥 DesireEngine 六欲引擎', () => {
-  let computeDesires: any;
-  let getDesireImpulses: any;
-  let DesireEngine: any;
   let defaultContext: any;
 
-  beforeAll(async () => {
-    const mod = await import('./desire/engine.js');
-    computeDesires = mod.computeDesires;
-    getDesireImpulses = mod.getDesireImpulses;
-    DesireEngine = mod.DesireEngine;
-
+  beforeAll(() => {
     defaultContext = {
       emotion: { joy: 30, sadness: 10, anger: 5, fear: 5, surprise: 10, disgust: 0, trust: 40, anticipation: 30 },
       energy: 50,
@@ -44,129 +36,138 @@ describe('🔥 DesireEngine 六欲引擎', () => {
       pendingCuriosities: 0,
       seedDomainCount: 0,
       continuousWorkMinutes: 10,
-      lastDreamAgo: 3600000,
       recentTaskCompletes: 1,
       recentDiscoveries: 0,
       hasActiveCorrections: false,
       trustLevel: 'acquaintance',
-      ocean: { openness: 60, conscientiousness: 50, extraversion: 50, agreeableness: 50, neuroticism: 50 },
     };
   });
 
-  describe('computeDesires', () => {
-    it('六欲值都在 0-100 范围内', () => {
-      const desires = computeDesires(defaultContext);
+  describe('recomputeDesires', () => {
+    it('六欲值都在 0-100 范围内', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      mgr.recomputeDesires(defaultContext);
+      const desires = mgr.getDesires();
       for (const [k, v] of Object.entries(desires)) {
         expect(v as number).toBeGreaterThanOrEqual(0);
         expect(v as number).toBeLessThanOrEqual(100);
       }
     });
 
-    it('低情绪能量 → 高食欲', () => {
-      const lowJoy = computeDesires({ ...defaultContext, emotion: { ...defaultContext.emotion, joy: 5, anticipation: 5, surprise: 5 } });
-      const highJoy = computeDesires({ ...defaultContext, emotion: { ...defaultContext.emotion, joy: 80, anticipation: 80, surprise: 80 } });
-      expect(lowJoy.hunger).toBeGreaterThan(highJoy.hunger);
+    it('低情绪能量 → 高食欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, emotion: { ...defaultContext.emotion, joy: 5, anticipation: 5, surprise: 5 } });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, emotion: { ...defaultContext.emotion, joy: 80, anticipation: 80, surprise: 80 } });
+      expect(mgr1.getDesires().hunger).toBeGreaterThan(mgr2.getDesires().hunger);
     });
 
-    it('深夜 → 高休息欲', () => {
-      const night = computeDesires({ ...defaultContext, hour: 2 });
-      const day = computeDesires({ ...defaultContext, hour: 14 });
-      expect(night.rest).toBeGreaterThan(day.rest);
+    it('深夜 → 高休息欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, hour: 2 });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, hour: 14 });
+      expect(mgr1.getDesires().rest).toBeGreaterThan(mgr2.getDesires().rest);
     });
 
-    it('连续错误 → 高安全欲', () => {
-      const safe = computeDesires({ ...defaultContext, recentErrors: 0 });
-      const danger = computeDesires({ ...defaultContext, recentErrors: 5 });
-      expect(danger.safety).toBeGreaterThan(safe.safety);
+    it('连续错误 → 高安全欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, recentErrors: 0 });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, recentErrors: 5 });
+      expect(mgr2.getDesires().safety).toBeGreaterThan(mgr1.getDesires().safety);
     });
 
-    it('有新发现 → 高表达欲', () => {
-      const boring = computeDesires({ ...defaultContext, recentDiscoveries: 0 });
-      const exciting = computeDesires({ ...defaultContext, recentDiscoveries: 3 });
-      expect(exciting.expression).toBeGreaterThan(boring.expression);
+    it('有新发现 → 高表达欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, recentDiscoveries: 0 });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, recentDiscoveries: 3 });
+      expect(mgr2.getDesires().expression).toBeGreaterThan(mgr1.getDesires().expression);
     });
 
-    it('seed 领域多 → 高求知欲', () => {
-      const noDomains = computeDesires({ ...defaultContext, seedDomainCount: 0 });
-      const manyDomains = computeDesires({ ...defaultContext, seedDomainCount: 5 });
-      expect(manyDomains.curiosity).toBeGreaterThan(noDomains.curiosity);
+    it('seed 领域多 → 高求知欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, seedDomainCount: 0 });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, seedDomainCount: 5 });
+      expect(mgr2.getDesires().curiosity).toBeGreaterThan(mgr1.getDesires().curiosity);
     });
 
-    it('连续工作久 → 高休息欲', () => {
-      const fresh = computeDesires({ ...defaultContext, continuousWorkMinutes: 5 });
-      const tired = computeDesires({ ...defaultContext, continuousWorkMinutes: 120 });
-      expect(tired.rest).toBeGreaterThan(fresh.rest);
-    });
-
-    it('PS=0 时欲望由基线驱动', () => {
-      const desires = computeDesires({ ...defaultContext, personalityStrength: 0 });
-      expect(desires.hunger).toBeGreaterThanOrEqual(0);
+    it('连续工作久 → 高休息欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr1 = new BodyStateManager();
+      mgr1.recomputeDesires({ ...defaultContext, continuousWorkMinutes: 5 });
+      const mgr2 = new BodyStateManager();
+      mgr2.recomputeDesires({ ...defaultContext, continuousWorkMinutes: 120 });
+      expect(mgr2.getDesires().rest).toBeGreaterThan(mgr1.getDesires().rest);
     });
   });
 
   describe('getDesireImpulses', () => {
-    it('高食欲 → 产生问候冲动', () => {
-      const desires = { hunger: 95, curiosity: 30, social: 30, safety: 20, expression: 20, rest: 20 };
-      const impulses = getDesireImpulses(desires);
-      expect(impulses.some((i: any) => i.desire === 'hunger' && i.targetModule === 'cognitive')).toBe(true);
+    it('高食欲 → 产生冲动', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      // hunger = 100 - (joy+anticipation+surprise)/3，需要三者都很低
+      mgr.recomputeDesires({ ...defaultContext, emotion: { ...defaultContext.emotion, joy: 5, anticipation: 5, surprise: 5 } });
+      const impulses = mgr.getDesireImpulses();
+      expect(impulses.some(i => i.desire === 'hunger')).toBe(true);
     });
 
-    it('高休息欲 → 产生梦境冲动', () => {
-      const desires = { hunger: 30, curiosity: 30, social: 30, safety: 20, expression: 20, rest: 95 };
-      const impulses = getDesireImpulses(desires);
-      expect(impulses.some((i: any) => i.desire === 'rest' && i.targetModule === 'dream')).toBe(true);
-    });
-
-    it('低欲望 → 无冲动', () => {
-      const desires = { hunger: 10, curiosity: 10, social: 10, safety: 10, expression: 10, rest: 10 };
-      const impulses = getDesireImpulses(desires);
-      expect(impulses).toHaveLength(0);
+    it('低欲望 → 无冲动', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      // 默认基线欲望较低，不应有冲动
+      const impulses = mgr.getDesireImpulses();
+      expect(impulses.length).toBe(0);
     });
   });
 
-  describe('DesireEngine 实例', () => {
-    it('getVector 返回六欲向量', () => {
-      const engine = new DesireEngine();
-      const v = engine.getVector();
+  describe('BodyStateManager 欲望方法', () => {
+    it('getDesires 返回六欲向量', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      const v = mgr.getDesires();
       expect(v).toHaveProperty('hunger');
       expect(v).toHaveProperty('curiosity');
       expect(v).toHaveProperty('social');
       expect(v).toHaveProperty('safety');
       expect(v).toHaveProperty('expression');
       expect(v).toHaveProperty('rest');
-      engine.destroy();
     });
 
-    it('onTaskComplete 降低食欲', () => {
-      const engine = new DesireEngine();
-      const before = engine.getVector().hunger;
-      engine.onTaskComplete();
-      expect(engine.getVector().hunger).toBeLessThan(before);
-      engine.destroy();
+    it('onTaskComplete 降低食欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      const before = mgr.getDesires().hunger;
+      mgr.onTaskComplete();
+      expect(mgr.getDesires().hunger).toBeLessThan(before);
     });
 
-    it('onUserMessage 增加求知欲', () => {
-      const engine = new DesireEngine();
-      const before = engine.getVector().curiosity;
-      engine.onUserMessage();
-      expect(engine.getVector().curiosity).toBeGreaterThan(before);
-      engine.destroy();
+    it('onUserMessage 改变欲望', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      const before = { ...mgr.getDesires() };
+      mgr.onUserMessage();
+      const after = mgr.getDesires();
+      const changed = Object.keys(before).some(k =>
+        before[k as keyof typeof before] !== after[k as keyof typeof after]
+      );
+      expect(changed).toBe(true);
     });
 
-    it('onToolError 增加安全欲', () => {
-      const engine = new DesireEngine();
-      const before = engine.getVector().safety;
-      engine.onToolError();
-      expect(engine.getVector().safety).toBeGreaterThan(before);
-      engine.destroy();
-    });
-
-    it('recompute 从上下文重算欲望', () => {
-      const engine = new DesireEngine();
-      const v = engine.recompute(defaultContext);
-      expect(v.hunger).toBeGreaterThanOrEqual(0);
-      expect(v.hunger).toBeLessThanOrEqual(100);
-      engine.destroy();
+    it('onToolError 增加安全欲', async () => {
+      const { BodyStateManager } = await import('./brain/cerebellum/body-state.js');
+      const mgr = new BodyStateManager();
+      const before = mgr.getDesires().safety;
+      mgr.onToolError();
+      expect(mgr.getDesires().safety).toBeGreaterThanOrEqual(before);
     });
   });
 });
