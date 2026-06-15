@@ -249,8 +249,8 @@ describe('assessTaskComplexity', () => {
     });
 
     it('单一 code_operations → tools', () => {
-      // 中文很难避免短关键词子串匹配（如 "执行"、"读"），用英文测试纯 code_operations
-      const input = 'refactor this function code and optimize the performance';
+      // 避免命中 debugging（performance）等其他 category，确保纯 code_operations
+      const input = 'refactor this function code and clean up the syntax';
       expect(input.length).toBeGreaterThanOrEqual(30);
       const r = assessTaskComplexity(input);
       expect(r.taskType).toBe('tools');
