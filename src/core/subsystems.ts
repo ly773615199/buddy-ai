@@ -194,6 +194,8 @@ export class Subsystems {
   capabilityScheduler: CapabilityScheduler | null = null;
   /** Phase 4: 多路执行器 */
   multiPathExecutor: MultiPathExecutor | null = null;
+  /** 全资源类型桥接器（非模型资源同步到 UnifiedResourceHub） */
+  _resourceBridge: import('../brain/hub/unified-resource-bridge.js').UnifiedResourceBridge | null = null;
   /** World Model 训练缓冲区 */
   private _worldModelBuffer: Array<{
     scene_before: any; action: any; scene_after: any;
@@ -967,6 +969,26 @@ export class Subsystems {
             if (verbose) console.warn('[ResourceHub] 审计异常:', e.message);
           }
         }, 6 * 60 * 60 * 1000);
+
+        // Step: UnifiedResourceBridge — 全资源类型桥接
+        import('../brain/hub/unified-resource-bridge.js').then(({ UnifiedResourceBridge }) => {
+          const bridge = new UnifiedResourceBridge(system.hub);
+          bridge
+            .setToolRegistry(this.tools, this.skillManager.growth)
+            .setKnowledgeSourceManager(this.knowledgeSourceManager)
+            .setPlatformManager(this.platformManager)
+            .setTTSManager(this.tts)
+            .setTernaryExpertRouter(this.ternaryRouter)
+            .setSkillManager(this.skillManager);
+
+          const totalSynced = bridge.fullSync();
+          if (verbose) console.log(`[UnifiedResourceBridge] 全量同步完成: ${totalSynced} 个非模型资源`);
+
+          // 挂载到 subsystems 供外部调用
+          (this as any)._resourceBridge = bridge;
+        }).catch(err => {
+          if (verbose) console.warn('[UnifiedResourceBridge] 初始化失败:', err.message);
+        });
       });
     }).catch(err => {
       if (verbose) console.warn('[ResourceHub] 初始化失败:', err.message);

@@ -15,6 +15,7 @@ export { ResourceHubAdapter, type LegacyResourceProfile } from './resource-hub-a
 export { BatchProbeScheduler, type SchedulerConfig } from './batch-probe-scheduler.js';
 export { MarginalAuditor } from './marginal-auditor.js';
 export { CapabilityGraph } from './capability-graph.js';
+export { UnifiedResourceBridge } from './unified-resource-bridge.js';
 
 // 探测器
 export {

@@ -44,6 +44,25 @@ export interface ResourceState {
   experienceHit: import('../intelligence/types.js').RouteDecision | null;
   /** 工具健康度摘要（来自 SkillGrowth） */
   toolHealth?: import('../brain/types.js').ToolHealthSummary;
+  /** 非模型资源画像（来自 UnifiedResourceBridge） */
+  resourceSnapshot?: {
+    /** 可用工具数 */
+    toolCount: number;
+    /** 可用知识源数 */
+    knowledgeSourceCount: number;
+    /** 已注册平台数 */
+    platformCount: number;
+    /** 可用 TTS 后端数 */
+    ttsCount: number;
+    /** 可用本地专家数 */
+    expertCount: number;
+    /** 已安装技能数 */
+    skillCount: number;
+    /** 总资源数 */
+    totalResources: number;
+    /** 健康度分布 */
+    healthDistribution: { healthy: number; degraded: number; unhealthy: number };
+  };
 }
 
 // ==================== 失败分析（Phase 1.1: 失败感知重试） ====================

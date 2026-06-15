@@ -335,6 +335,24 @@ export function collectResourceState(
     } catch { /* 路由失败走原有逻辑 */ }
   }
 
+  // 非模型资源画像（来自 UnifiedResourceBridge 同步后的 UnifiedResourceHub）
+  let resourceSnapshot: ResourceState['resourceSnapshot'];
+  const resourceSystem = (sys as any).resourceSystem;
+  if (resourceSystem?.hub) {
+    const unifiedHub = resourceSystem.hub as import('../brain/hub/unified-resource-hub.js').UnifiedResourceHub;
+    const summary = unifiedHub.getHealthSummary();
+    resourceSnapshot = {
+      toolCount: summary.byType.tool,
+      knowledgeSourceCount: summary.byType.knowledge_source,
+      platformCount: summary.byType.platform,
+      ttsCount: summary.byType.tts,
+      expertCount: summary.byType.local_expert,
+      skillCount: summary.byType.skill,
+      totalResources: summary.total,
+      healthDistribution: summary.healthDistribution,
+    };
+  }
+
   return {
     budgetRemaining,
     availableNodeCount: availableModelCount,
@@ -343,6 +361,7 @@ export function collectResourceState(
     userCorrectionCount: wsUserCorrectionCount(),
     experienceHit,
     toolHealth: collectToolHealth(sys),
+    resourceSnapshot,
   };
 }
 
