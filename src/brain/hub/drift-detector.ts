@@ -8,27 +8,54 @@
  * 数值：计算变异系数（标准差 / 均值）
  */
 
-import type { CapabilitySnapshot, DriftAlert, DriftSeverity } from './types.js';
+import type { CapabilitySnapshot, DriftAlert, DriftSeverity, ResourceType } from './types.js';
 
 interface DriftWindow {
   dimension: string;
   values: Array<{ value: boolean | number | string; timestamp: number }>;
 }
 
+interface DriftTypeConfig {
+  windowSize: number;
+  warningThreshold: number;
+  criticalThreshold: number;
+}
+
+interface DriftDetectorConfig {
+  model: DriftTypeConfig;
+  tool: DriftTypeConfig;
+  knowledge_source: DriftTypeConfig;
+  default: DriftTypeConfig;
+  [key: string]: DriftTypeConfig;
+}
+
+const DEFAULT_CONFIG: DriftDetectorConfig = {
+  model:            { windowSize: 10, warningThreshold: 0.4, criticalThreshold: 0.7 },  // 模型: 大窗口低敏感
+  tool:             { windowSize: 30, warningThreshold: 0.2, criticalThreshold: 0.5 },  // 工具: 小窗口高敏感
+  knowledge_source: { windowSize: 15, warningThreshold: 0.3, criticalThreshold: 0.6 },
+  default:          { windowSize: 20, warningThreshold: 0.3, criticalThreshold: 0.6 },
+};
+
 export class DriftDetector {
   private windows: Map<string, DriftWindow> = new Map();
-  private readonly windowSize: number;
-  private readonly warningThreshold: number;
-  private readonly criticalThreshold: number;
+  private readonly config: DriftDetectorConfig;
 
-  constructor(options?: {
-    windowSize?: number;
-    warningThreshold?: number;
-    criticalThreshold?: number;
-  }) {
-    this.windowSize = options?.windowSize ?? 20;
-    this.warningThreshold = options?.warningThreshold ?? 0.3;
-    this.criticalThreshold = options?.criticalThreshold ?? 0.6;
+  constructor(config?: Partial<DriftDetectorConfig>) {
+    this.config = {
+      model: config?.model ?? DEFAULT_CONFIG.model,
+      tool: config?.tool ?? DEFAULT_CONFIG.tool,
+      knowledge_source: config?.knowledge_source ?? DEFAULT_CONFIG.knowledge_source,
+      default: config?.default ?? DEFAULT_CONFIG.default,
+    };
+  }
+
+  /**
+   * 从 resourceId 推断资源类型（model/siliconflow/... → model, tool/... → tool）
+   */
+  private resolveType(resourceId: string): ResourceType | 'default' {
+    const prefix = resourceId.split('/')[0];
+    if (prefix === 'model' || prefix === 'tool' || prefix === 'knowledge_source') return prefix;
+    return 'default';
   }
 
   /**
@@ -42,6 +69,9 @@ export class DriftDetector {
     timestamp: number = Date.now(),
   ): DriftAlert | null {
     const key = `${resourceId}:${dimension}`;
+    const resType = this.resolveType(resourceId);
+    const cfg = this.config[resType];
+
     let window = this.windows.get(key);
     if (!window) {
       window = { dimension, values: [] };
@@ -54,30 +84,30 @@ export class DriftDetector {
     // 添加新值到窗口（字符串值不做漂移检测，直接返回 null）
     if (typeof newValue === 'string') return null;
     window.values.push({ value: newValue, timestamp });
-    if (window.values.length > this.windowSize) {
+    if (window.values.length > cfg.windowSize) {
       window.values.shift();
     }
 
     // 数据不足时不做判断
     if (window.values.length < 3) return null;
 
-    // 判断是否漂移
-    if (driftScore > this.criticalThreshold) {
+    // 判断是否漂移（使用类型对应的阈值）
+    if (driftScore > cfg.criticalThreshold) {
       return {
         dimension,
         driftScore,
         timestamp,
         severity: 'critical',
-        message: `${dimension} 严重漂移 (score=${driftScore.toFixed(2)})`,
+        message: `${dimension} 严重漂移 (score=${driftScore.toFixed(2)}, type=${resType})`,
       };
     }
-    if (driftScore > this.warningThreshold) {
+    if (driftScore > cfg.warningThreshold) {
       return {
         dimension,
         driftScore,
         timestamp,
         severity: 'warning',
-        message: `${dimension} 轻度漂移 (score=${driftScore.toFixed(2)})`,
+        message: `${dimension} 轻度漂移 (score=${driftScore.toFixed(2)}, type=${resType})`,
       };
     }
 

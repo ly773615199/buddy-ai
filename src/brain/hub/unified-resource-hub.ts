@@ -48,10 +48,13 @@ export class UnifiedResourceHub {
     driftCriticalThreshold?: number;
   }) {
     this.lifecycle = new LifecycleManager();
+    // DriftDetector 现在按资源类型区分参数，旧的统一参数映射到 default
     this.driftDetector = new DriftDetector({
-      windowSize: options?.driftWindowSize,
-      warningThreshold: options?.driftWarningThreshold,
-      criticalThreshold: options?.driftCriticalThreshold,
+      default: {
+        windowSize: options?.driftWindowSize ?? 20,
+        warningThreshold: options?.driftWarningThreshold ?? 0.3,
+        criticalThreshold: options?.driftCriticalThreshold ?? 0.6,
+      },
     });
   }
 

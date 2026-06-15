@@ -17,18 +17,60 @@ export class MarginalAuditor {
   private readonly retainThreshold: number;
   private readonly retireThreshold: number;
   private readonly minSamples: number;
+  private auditTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly auditIntervalMs: number;
+  private readonly taskTypes: string[];
 
   constructor(hub: UnifiedResourceHub, options?: {
     alpha?: number;
     retainThreshold?: number;
     retireThreshold?: number;
     minSamples?: number;
+    auditIntervalMs?: number;
+    taskTypes?: string[];
   }) {
     this.hub = hub;
     this.alpha = options?.alpha ?? 0.3;
     this.retainThreshold = options?.retainThreshold ?? 0.05;
     this.retireThreshold = options?.retireThreshold ?? -0.05;
     this.minSamples = options?.minSamples ?? 10;
+    this.auditIntervalMs = options?.auditIntervalMs ?? 60 * 60 * 1000; // 默认 1 小时
+    this.taskTypes = options?.taskTypes ?? ['chat', 'tools', 'embedding'];
+  }
+
+  /**
+   * 启动自动定时审计
+   */
+  startAutoAudit(): void {
+    if (this.auditTimer) return; // 已启动
+    this.auditTimer = setInterval(() => {
+      try {
+        for (const taskType of this.taskTypes) {
+          this.runAndApply(taskType);
+        }
+      } catch (err) {
+        console.warn('[MarginalAuditor] 自动审计异常:', (err as Error).message);
+      }
+    }, this.auditIntervalMs);
+    console.log(`[MarginalAuditor] 自动审计已启动，间隔 ${this.auditIntervalMs / 1000}s，任务类型: ${this.taskTypes.join(', ')}`);
+  }
+
+  /**
+   * 停止自动审计
+   */
+  stopAutoAudit(): void {
+    if (this.auditTimer) {
+      clearInterval(this.auditTimer);
+      this.auditTimer = null;
+      console.log('[MarginalAuditor] 自动审计已停止');
+    }
+  }
+
+  /**
+   * 自动审计是否运行中
+   */
+  isAutoAuditRunning(): boolean {
+    return this.auditTimer !== null;
   }
 
   /**

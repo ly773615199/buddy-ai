@@ -67,6 +67,7 @@ export function createResourceSystem(options?: {
     autoRefresh: options?.schedulerAutoRefresh,
   });
   const auditor = new MarginalAuditor(hub);
+  auditor.startAutoAudit(); // O3: 启动自动定时审计
   const graph = new CapabilityGraph(hub);
 
   return { hub, adapter, scheduler, auditor, graph, probers };
