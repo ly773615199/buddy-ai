@@ -32,6 +32,7 @@ function makeMockSubsystems(overrides: Record<string, unknown> = {}): Subsystems
     memory: {
       getRecentMessages: () => [],
       searchMemories: () => [],
+      searchMemoriesHybridAsync: vi.fn(async () => []),
       addDiaryEntry: vi.fn(),
       getRelation: vi.fn(() => 0),
       setRelation: vi.fn(),
@@ -797,6 +798,7 @@ describe('P2: buildContext 分层缓存', () => {
       memory: {
         getRecentMessages: () => [],
         searchMemories: () => [],
+        searchMemoriesHybridAsync: vi.fn(async () => []),
         addDiaryEntry: vi.fn(),
         getRelation: vi.fn(() => 0),
         setRelation: vi.fn(),
@@ -845,6 +847,7 @@ describe('P2: buildContext 分层缓存', () => {
       },
       memory: {
         getRecentMessages: () => [], searchMemories: () => [],
+        searchMemoriesHybridAsync: vi.fn(async () => []),
         addDiaryEntry: vi.fn(), getRelation: vi.fn(() => 0), setRelation: vi.fn(),
       },
       emotion: { getMood: () => 'neutral', getPromptInjection: () => '', getState: () => ({ satisfaction: 50 }) },
