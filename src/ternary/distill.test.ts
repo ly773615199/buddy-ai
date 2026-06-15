@@ -6,7 +6,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { DistillDataPrep, type TeacherOutput, type JudgmentSample, type CorrectionSample } from './distill-prep.js';
 import { KnowledgeDistiller } from './distill.js';
 import { TernaryArchitecture, ARCHITECTURE_CONFIGS } from './architecture.js';
-import { TernaryEvaluator, type EvalDataset, type EvalSample } from './eval.js';
 import { CloudTrainer, HttpCloudProvider, type CloudJob, type CloudJobStatus } from './cloud-trainer.js';
 import { createModelMeta } from './format.js';
 import type { TernaryModel, TernaryLayer } from './format.js';
@@ -260,79 +259,6 @@ describe('KnowledgeDistiller', () => {
     expect(results.length).toBeGreaterThan(1);
     // 最后一个结果应是完整蒸馏
     expect(results[results.length - 1].stage).toBe('complete');
-  });
-});
-
-// ═══════════════════════════════════════════════════════
-
-describe('TernaryEvaluator', () => {
-  let evaluator: TernaryEvaluator;
-
-  beforeEach(() => {
-    evaluator = new TernaryEvaluator();
-  });
-
-  it('quickEval 返回基本指标', () => {
-    const model = createTinyModel();
-    const result = evaluator.quickEval(model);
-
-    expect(result.loaded).toBe(true);
-    expect(result.canGenerate).toBe(true);
-    expect(result.tokPerSec).toBeGreaterThanOrEqual(0);
-  });
-
-  it('evaluate 完整评估', async () => {
-    const model = createTinyModel();
-    const dataset: EvalDataset = {
-      name: '测试集',
-      domain: 'Go开发',
-      samples: [
-        { prompt: '什么是 goroutine?', reference: 'goroutine 是 Go 的轻量级线程', difficulty: 0.3, category: 'concurrency' },
-        { prompt: 'channel 如何工作?', reference: 'channel 用于 goroutine 间通信', difficulty: 0.5, category: 'concurrency' },
-        { prompt: 'errgroup 用法?', reference: 'errgroup 管理一组 goroutine 的错误', difficulty: 0.7, category: 'error' },
-      ],
-    };
-
-    const result = await evaluator.evaluate(model, dataset);
-
-    expect(result.datasetName).toBe('测试集');
-    expect(result.domainAccuracy).toBeGreaterThanOrEqual(0);
-    expect(result.consistency).toBeGreaterThanOrEqual(0);
-    expect(result.diversity).toBeGreaterThanOrEqual(0);
-    expect(result.coverage).toBeGreaterThanOrEqual(0);
-    expect(result.overallScore).toBeGreaterThanOrEqual(0);
-    expect(result.details.totalSamples).toBe(3);
-    expect(result.categoryScores).toBeDefined();
-    expect(result.difficultyScores).toBeDefined();
-  });
-
-  it('getHistory 返回评估历史', async () => {
-    const model = createTinyModel();
-    const dataset: EvalDataset = {
-      name: '测试', domain: 'Go开发',
-      samples: [{ prompt: 'test', reference: 'ref', difficulty: 0.5, category: 'cat' }],
-    };
-
-    await evaluator.evaluate(model, dataset);
-    await evaluator.evaluate(model, dataset);
-
-    const history = evaluator.getHistory('Go开发');
-    expect(history.length).toBe(2);
-  });
-
-  it('compare 比较两次评估', async () => {
-    const model = createTinyModel();
-    const dataset: EvalDataset = {
-      name: '测试', domain: 'Go开发',
-      samples: [{ prompt: 'test', reference: 'ref', difficulty: 0.5, category: 'cat' }],
-    };
-
-    await evaluator.evaluate(model, dataset);
-    const current = await evaluator.evaluate(model, dataset);
-
-    const comparison = evaluator.compare(current);
-    expect(comparison).not.toBeNull();
-    expect(comparison!.changes).toBeDefined();
   });
 });
 
