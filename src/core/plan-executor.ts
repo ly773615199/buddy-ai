@@ -36,6 +36,58 @@ function recordResourceOutcome(
 }
 
 /**
+ * P1-2: 从执行错误中更新能力画像
+ * 根据错误类型推断模型能力，写入 UnifiedResourceHub
+ */
+function updateCapabilityFromError(
+  sys: Subsystems,
+  resourceId: string,
+  error: Error,
+  taskType: string,
+): void {
+  const rs = sys.resourceSystem;
+  if (!rs) return;
+  try {
+    const msg = error.message;
+    const hub = rs.hub;
+
+    // 400 + tools → toolCalling 不支持
+    if (msg.includes('400') && taskType === 'tools') {
+      hub.updateCapability(resourceId, 'toolCalling', {
+        value: false,
+        verified: true,
+        lastVerifiedAt: Date.now(),
+        sourcePriority: 4, // runtime > static
+      });
+    }
+
+    // 401/403 → 认证失败，标记不可达
+    if (msg.includes('401') || msg.includes('403')) {
+      hub.updateCapability(resourceId, 'reachable', {
+        value: false,
+        verified: true,
+        lastVerifiedAt: Date.now(),
+        sourcePriority: 4,
+      });
+    }
+
+    // token limit → 触发漂移检测
+    if (msg.includes('too long') || msg.includes('maximum context length') || msg.includes('token')) {
+      hub.onProbeResult(resourceId, {
+        timestamp: Date.now(),
+        source: 'runtime',
+        capabilities: {
+          maxContextTokens: { value: 0, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 4 },
+        },
+        confidence: 0.8,
+        latencyMs: 0,
+        error: msg,
+      });
+    }
+  } catch { /* 静默失败 */ }
+}
+
+/**
  * 从 OrchestrationNode 构造资源 ID
  */
 function nodeId(node: OrchestrationNode): string | null {
@@ -279,12 +331,16 @@ export async function executeExperience(
 
     if (result.success) {
       ctx.sys.intelligence.evolver.onSuccess(skillId, durationMs);
+      // P1-1: 回写成功到资源画像
+      recordResourceOutcome(ctx.sys, `skill/${skillId}`, true, durationMs);
 
       const text = result.reply || `经验 ${skill.name} 执行完成`;
 
       if (!verifyExperienceOutput(text, content)) {
         if (ctx.verbose) console.log(`  [Experience] sanity check 失败，降级到 LLM`);
         ctx.sys.intelligence.evolver.onFailure(skillId, 'sanity_check_failed');
+        // P1-1: 回写 sanity check 失败
+        recordResourceOutcome(ctx.sys, `skill/${skillId}`, false, durationMs);
         return executeSingle(ctx, fallbackPlan(content));
       }
 
@@ -297,10 +353,15 @@ export async function executeExperience(
       };
     } else {
       ctx.sys.intelligence.evolver.onFailure(skillId, result.error ?? '执行失败');
+      // P1-1: 回写经验执行失败
+      recordResourceOutcome(ctx.sys, `skill/${skillId}`, false, durationMs);
       return executeSingle(ctx, fallbackPlan(content));
     }
   } catch (err) {
+    const durationMs = Date.now() - startTime;
     ctx.sys.intelligence.evolver.onFailure(skillId, (err as Error).message);
+    // P1-1: 回写经验执行异常
+    recordResourceOutcome(ctx.sys, `skill/${skillId}`, false, durationMs);
     return executeSingle(ctx, fallbackPlan(content));
   }
 }
@@ -473,39 +534,54 @@ async function executeLocal(ctx: ExecutionContext, plan: OrchestrationPlan): Pro
 /** single — 单 LLM 调用 */
 async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const startTime = Date.now();
-  const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true, taskType: plan.taskType });
-  const elapsed = Date.now() - startTime;
+  try {
+    const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true, taskType: plan.taskType });
+    const elapsed = Date.now() - startTime;
 
-  const selection = ctx.sys.llm.consumeLastUnifiedSelection();
-  if (selection && ctx.ws.getEventBus()) {
-    ctx.ws.getEventBus()!.emit({
-      type: 'model_decision',
-      modelId: selection.profile.id,
-      displayName: selection.profile.displayName,
-      tier: selection.profile.tier,
-      reason: selection.reason,
-      layer: selection.layer,
-      candidateCount: selection.candidateCount,
-      tsSample: selection.tsSample,
-      taskType: 'chat',
-      timestamp: Date.now(),
-    });
+    const selection = ctx.sys.llm.consumeLastUnifiedSelection();
+    if (selection && ctx.ws.getEventBus()) {
+      ctx.ws.getEventBus()!.emit({
+        type: 'model_decision',
+        modelId: selection.profile.id,
+        displayName: selection.profile.displayName,
+        tier: selection.profile.tier,
+        reason: selection.reason,
+        layer: selection.layer,
+        candidateCount: selection.candidateCount,
+        tsSample: selection.tsSample,
+        taskType: 'chat',
+        timestamp: Date.now(),
+      });
 
-    const pool = ctx.sys.router.getPool();
-    if (pool) {
-      pool.recordFeedback(
-        selection.profile.id,
-        'chat',
-        true,
-        elapsed,
-        selection.profile.costPer1kInput * (result.text?.length ?? 0) / 1000,
-      );
+      const pool = ctx.sys.router.getPool();
+      if (pool) {
+        pool.recordFeedback(
+          selection.profile.id,
+          'chat',
+          true,
+          elapsed,
+          selection.profile.costPer1kInput * (result.text?.length ?? 0) / 1000,
+        );
+      }
+      // 反馈到统一资源系统
+      recordResourceOutcome(ctx.sys, `model/${selection.profile.id}`, true, elapsed, undefined, 'chat');
     }
-    // 反馈到统一资源系统
-    recordResourceOutcome(ctx.sys, `model/${selection.profile.id}`, true, elapsed, undefined, 'chat');
-  }
 
-  return { text: result.text, source: 'single', toolCalls: result.toolCalls ?? [] };
+    return { text: result.text, source: 'single', toolCalls: result.toolCalls ?? [] };
+  } catch (err) {
+    const elapsed = Date.now() - startTime;
+    // 尝试从 consumeLastUnifiedSelection 获取模型 ID 用于回写
+    const selection = ctx.sys.llm.consumeLastUnifiedSelection();
+    const modelId = selection ? `model/${selection.profile.id}` : undefined;
+    if (modelId) {
+      recordResourceOutcome(ctx.sys, modelId, false, elapsed, undefined, 'chat');
+    }
+    // P1-2: 从执行错误中更新能力画像
+    if (modelId) {
+      updateCapabilityFromError(ctx.sys, modelId, err as Error, plan.taskType ?? 'chat');
+    }
+    throw err; // 向上抛出，由调用方处理 fallback
+  }
 }
 
 /** parallel — 多专家并行调用 + 质量加权融合 */
@@ -563,36 +639,75 @@ async function executeParallel(ctx: ExecutionContext, plan: OrchestrationPlan): 
 /** cascade — 统一池按任务类型选择，质量不够升级（Phase 4.1: 质量感知） */
 async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   // 第一层：chat 模型
+  const chatStart = Date.now();
   try {
     const chatResult = await ctx.sys.llm.chat(
       [{ role: 'user', content: plan.content, timestamp: Date.now() }],
       [], 1, { taskType: 'chat' }
     );
+    const chatElapsed = Date.now() - chatStart;
     const quality = evaluateQuality(chatResult.text ?? '', plan.content);
+
+    // P1-1: 记录 chat 层结果
+    const chatSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+    if (chatSelection) {
+      recordResourceOutcome(ctx.sys, `model/${chatSelection.profile.id}`, true, chatElapsed, undefined, 'chat');
+    }
+
     if (quality >= 0.6) {
       return { text: chatResult.text ?? '', source: 'cascade/chat', toolCalls: [], cascadeQuality: quality };
     }
     // 中等质量：尝试 reasoning 模型改进
     if (quality >= 0.3) {
+      const reasoningStart = Date.now();
       try {
         const reasoningResult = await ctx.sys.llm.chat(
           [{ role: 'user', content: plan.content, timestamp: Date.now() }],
           [], 1, { taskType: 'reasoning' }
         );
+        const reasoningElapsed = Date.now() - reasoningStart;
         const reasonQuality = evaluateQuality(reasoningResult.text ?? '', plan.content);
+
+        const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+        if (reasoningSelection) {
+          recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, true, reasoningElapsed, undefined, 'reasoning');
+        }
+
         if (reasonQuality > quality) {
           return { text: reasoningResult.text ?? '', source: 'cascade/reasoning', toolCalls: [], cascadeQuality: reasonQuality };
         }
       } catch { /* reasoning 失败 */ }
     }
-  } catch { /* 继续到 reasoning */ }
+  } catch {
+    // P1-1: chat 层失败回写
+    const chatElapsed = Date.now() - chatStart;
+    const chatSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+    if (chatSelection) {
+      recordResourceOutcome(ctx.sys, `model/${chatSelection.profile.id}`, false, chatElapsed, undefined, 'chat');
+    }
+  }
 
   // 第二层：reasoning 模型
-  const reasoningResult = await ctx.sys.llm.chat(
-    [{ role: 'user', content: plan.content, timestamp: Date.now() }],
-    [], 1, { taskType: 'reasoning' }
-  );
-  return { text: reasoningResult.text ?? '', source: 'cascade/reasoning', toolCalls: [] };
+  const reasoningStart = Date.now();
+  try {
+    const reasoningResult = await ctx.sys.llm.chat(
+      [{ role: 'user', content: plan.content, timestamp: Date.now() }],
+      [], 1, { taskType: 'reasoning' }
+    );
+    const reasoningElapsed = Date.now() - reasoningStart;
+    const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+    if (reasoningSelection) {
+      recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, true, reasoningElapsed, undefined, 'reasoning');
+    }
+    return { text: reasoningResult.text ?? '', source: 'cascade/reasoning', toolCalls: [] };
+  } catch (err) {
+    const reasoningElapsed = Date.now() - reasoningStart;
+    const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+    if (reasoningSelection) {
+      recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, false, reasoningElapsed, undefined, 'reasoning');
+    }
+    throw err;
+  }
 }
 
 /** sequential — 接力传递上下文（Phase 4.1: 增加审核步骤） */
@@ -602,12 +717,15 @@ async function executeSequential(ctx: ExecutionContext, plan: OrchestrationPlan)
 
   for (let i = 0; i < plan.selectedNodes.length; i++) {
     const node = plan.selectedNodes[i];
+    const nodeStart = Date.now();
     try {
       let result: string;
 
       if (node.type === 'local_expert' && node.domain) {
         const r = await ctx.sys.ternaryRouter.query(node.domain, context);
         result = r.answer;
+        // P1-1: 回写本地专家结果
+        recordResourceOutcome(ctx.sys, `expert/${node.domain}`, true, Date.now() - nodeStart, undefined, 'chat', node.domain);
       } else if (node.type === 'cloud_node' && node.provider && node.model) {
         const providerConfig = node.apiKey
           ? { apiKey: node.apiKey, baseUrl: node.baseUrl }
@@ -619,6 +737,8 @@ async function executeSequential(ctx: ExecutionContext, plan: OrchestrationPlan)
           1,
         );
         result = r.text ?? '';
+        // P1-1: 回写模型结果
+        recordResourceOutcome(ctx.sys, `model/${node.provider}/${node.model}`, true, Date.now() - nodeStart, undefined, 'chat');
       } else {
         const r = await ctx.sys.llm.chat(
           [{ role: 'user', content: context, timestamp: Date.now() }],
@@ -639,7 +759,12 @@ async function executeSequential(ctx: ExecutionContext, plan: OrchestrationPlan)
 
       steps.push(result);
       context = result;
-    } catch { /* 跳过失败的节点 */ }
+    } catch (err) {
+      // P1-1: 回写失败
+      const rid = nodeId(node);
+      if (rid) recordResourceOutcome(ctx.sys, rid, false, Date.now() - nodeStart);
+      /* 跳过失败的节点 */
+    }
   }
 
   return { text: steps[steps.length - 1] ?? '', source: 'sequential', toolCalls: [] };
@@ -741,6 +866,17 @@ async function executeDAG(ctx: ExecutionContext, plan: OrchestrationPlan): Promi
       .filter(r => r.success)
       .map(r => r.result)
       .join('\n\n');
+
+    // P1-1: 回写 DAG 中每个任务的结果
+    if (dag.tasks) {
+      for (const tr of result.taskResults) {
+        const task = dag.tasks.get(tr.id);
+        if (task) {
+          // DAG 任务使用工具，资源 ID 为 tool/{toolName}
+          recordResourceOutcome(ctx.sys, `tool/${task.tool}`, tr.success, tr.durationMs);
+        }
+      }
+    }
 
     return {
       text: summary,

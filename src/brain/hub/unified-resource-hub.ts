@@ -351,6 +351,26 @@ export class UnifiedResourceHub {
     return r.driftAlerts;
   }
 
+  /**
+   * P1-2: 运行时更新资源能力
+   * 高优先级来源覆盖低优先级（probe > runtime > static）
+   */
+  updateCapability(resourceId: string, dimension: string, value: CapabilityValue): void {
+    const r = this.resources.get(resourceId);
+    if (!r) return;
+    const existing = r.capabilities[dimension];
+    // 高优先级来源覆盖低优先级
+    if (!existing || value.sourcePriority >= existing.sourcePriority) {
+      r.capabilities[dimension] = value;
+      // 触发漂移检测
+      const alert = this.driftDetector.detect(resourceId, dimension, value.value);
+      if (alert) {
+        r.driftAlerts.push(alert);
+        if (r.driftAlerts.length > 50) r.driftAlerts.splice(0, r.driftAlerts.length - 50);
+      }
+    }
+  }
+
   // ==================== 边际价值审计 ====================
 
   /**
