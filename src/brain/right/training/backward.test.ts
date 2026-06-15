@@ -55,7 +55,7 @@ describe('backwardPass', () => {
     const output2 = model.forward([2, 10, 3]);
     const loss2 = backwardPass(model, output2, 3, [0, 0, 0, 1, 0, 0, 0, 0], 0.2, LOSS_WEIGHTS);
 
-    expect(loss1.intent).not.toBeCloseTo(loss2.intent, 1);
+    expect(loss1.intent).not.toBeCloseTo(loss2.intent, 0);
   });
 
   it('loss 权重影响总 loss', () => {
