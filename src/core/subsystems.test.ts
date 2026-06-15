@@ -103,7 +103,12 @@ vi.mock('../tools/mcp-registry.js', () => ({
 }));
 
 // ─── Memory ───
-const mockMemory = mockInstance({ close: vi.fn(), add: vi.fn().mockResolvedValue(undefined) });
+const mockMemory = mockInstance({
+  close: vi.fn(),
+  add: vi.fn().mockResolvedValue(undefined),
+  setEmbedCaller: vi.fn(),
+  embedBatch: vi.fn().mockResolvedValue(undefined),
+});
 vi.mock('../memory/store.js', () => ({
   MemoryStore: function MockMemoryStore() {
     Object.assign(this, mockMemory);
@@ -488,7 +493,7 @@ describe('Subsystems', () => {
     it('实例化后拥有所有预期的属性', () => {
       const expectedProperties = [
         'tools', 'memory', 'pet', 'observer', 'feedback', 'learn',
-        'emotion', 'desire', 'idle', 'audit', 'tts', 'stmp', 'dream',
+        'idle', 'audit', 'tts', 'stmp', 'dream',
         'cognitive', 'extractor', 'intelligence',
         'experiencePackageManager', 'experienceScheduler', 'experienceEvaluator',
         'skillExporter', 'skillVersionManager', 'qualityRadar', 'skillFeedback',
@@ -496,10 +501,10 @@ describe('Subsystems', () => {
         'shopCatalog', 'friendSystem', 'platformManager', 'buddyInteraction',
         'memoryCache', 'launchReadiness', 'dbManager', 'mcpAdapter',
         'skillManager', 'loraService', 'workflowManager', 'dagPlanner',
-        'taskExecutor', 'toolRetriever', 'intentClassifier',
+        'taskExecutor', 'toolRetriever',
         'interviewer', 'dataAugmentor',
         'ternaryManager', 'ternaryRouter', 'ternaryScheduler',
-        'modelInstaller', 'toolSynthesizer', 'fusionBuffer',
+        'modelInstaller', 'toolSynthesizer',
         'beliefStore', 'entityStore', 'privacyManager', 'perceptionBus',
         'cloudTrainer', 'ternaryGrowth', 'knowledgeExporter', 'mcpRegistry',
       ];
@@ -557,14 +562,6 @@ describe('Subsystems', () => {
 
     it('pet 存在', () => {
       expect(sys.pet).toBeDefined();
-    });
-
-    it('emotion 已废弃（由三脑小脑接管），应为 null', () => {
-      expect(sys.emotion).toBeNull();
-    });
-
-    it('desire 已废弃（由三脑小脑接管），应为 null', () => {
-      expect(sys.desire).toBeNull();
     });
 
     it('threeBrain 存在并有 destroy 方法', () => {
