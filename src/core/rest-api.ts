@@ -915,5 +915,85 @@ export function setupRESTAPI(ctx: RESTContext): void {
     } catch (err) { json(res, 500, { error: (err as Error).message }); }
   });
 
+  // ── O6: 资源画像 API ──
+
+  // GET /api/resource-profiles — 资源画像概览
+  eb.addRoute('GET', '/api/resource-profiles', (_req: IncomingMessage, res: ServerResponse) => {
+    const hub = sys.resourceSystem?.hub;
+    if (!hub) { json(res, 200, { resources: [], total: 0, byState: {}, byType: {} }); return; }
+
+    const all = hub.getAll();
+    const profiles = all.map(r => ({
+      id: r.id,
+      type: r.type,
+      name: r.name,
+      state: r.state,
+      healthScore: r.healthScore,
+      stats: {
+        totalCalls: r.stats.totalCalls,
+        successRate: r.stats.totalCalls > 0
+          ? (r.stats.successes / r.stats.totalCalls * 100).toFixed(1) + '%'
+          : 'N/A',
+        avgLatencyMs: Math.round(r.stats.avgLatencyMs),
+      },
+      capabilities: Object.fromEntries(
+        Object.entries(r.capabilities).map(([k, v]) => [k, {
+          value: (v as any).value,
+          verified: (v as any).verified,
+        }])
+      ),
+      driftAlerts: r.driftAlerts.filter(a => a.timestamp > Date.now() - 3600_000).length,
+      marginalDelta: r.marginalContribution?.smoothedDelta?.toFixed(3) ?? 'N/A',
+    }));
+
+    const summary = hub.getHealthSummary();
+    json(res, 200, {
+      total: profiles.length,
+      byState: summary.byState,
+      byType: summary.byType,
+      resources: profiles,
+    });
+  });
+
+  // GET /api/resource-profiles/:id/timeline — 资源能力时间线
+  eb.addRoute('GET', '/api/resource-profiles/:id/timeline', (req: IncomingMessage, res: ServerResponse) => {
+    try {
+      const url = req.url ?? '';
+      // 解析 /api/resource-profiles/{id}/timeline
+      const match = url.match(/^\/api\/resource-profiles\/(.+)\/timeline/);
+      if (!match) { json(res, 400, { error: 'invalid path' }); return; }
+      const id = decodeURIComponent(match[1]);
+
+      const hub = sys.resourceSystem?.hub;
+      if (!hub) { json(res, 200, { id, timeline: [], profile: null }); return; }
+
+      const resource = hub.get(id);
+      if (!resource) { json(res, 404, { error: 'resource not found' }); return; }
+
+      // 构建能力时间线（从漂移告警中提取）
+      const timeline = resource.driftAlerts.map(a => ({
+        timestamp: a.timestamp,
+        dimension: a.dimension,
+        severity: a.severity,
+        driftScore: a.driftScore,
+        message: a.message,
+      }));
+
+      json(res, 200, {
+        id,
+        timeline,
+        profile: {
+          id: resource.id,
+          type: resource.type,
+          name: resource.name,
+          state: resource.state,
+          healthScore: resource.healthScore,
+          capabilities: resource.capabilities,
+          marginalContribution: resource.marginalContribution,
+        },
+      });
+    } catch (err) { json(res, 500, { error: (err as Error).message }); }
+  });
+
   if (verbose) console.log('  [REST] API 路由已注册');
 }

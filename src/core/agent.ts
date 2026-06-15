@@ -88,6 +88,21 @@ export class BuddyAgent {
     error?: string;
     /** 决策结果：执行耗时（从决策到结果返回） */
     executionMs?: number;
+    /** P3: 三脑内部信号（仅 threeBrain 路径） */
+    brain?: {
+      law: number | null;
+      lawName: string | null;
+      bodyState: { energy: number; temperature: number; focusLevel: number };
+      intuition: {
+        hit: boolean;
+        intentCategory: string;
+        intentConfidence: number;
+        qualityEstimate: number;
+        protoMatch: string | null;
+      } | null;
+      deliberation: { action: string; confidence: number } | null;
+      homeostasisActions: string[];
+    };
   }> = [];
   private readonly MAX_TRACE = BuddyAgent.MAX_DECISION_TRACE;
 
@@ -751,7 +766,7 @@ export class BuddyAgent {
 
     const traceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // 决策追踪（含 A/B 路径标记）
+    // 决策追踪（含 A/B 路径标记 + P3 三脑内部信号）
     this.decisionTrace.push({
       traceId,
       timestamp: Date.now(),
@@ -766,6 +781,28 @@ export class BuddyAgent {
       path,
       latencyMs,
       success: null,
+      // P3: 三脑内部信号
+      brain: {
+        law: (decision.plan as any).law ?? null,
+        lawName: (decision.plan as any).lawName ?? null,
+        bodyState: {
+          energy: decision.bodyState.energy,
+          temperature: decision.bodyState.temperature,
+          focusLevel: decision.bodyState.focusLevel,
+        },
+        intuition: decision.intuition ? {
+          hit: decision.intuition.hit,
+          intentCategory: decision.intuition.intent.category,
+          intentConfidence: decision.intuition.intent.confidence,
+          qualityEstimate: decision.intuition.qualityEstimate,
+          protoMatch: decision.intuition.protoMatch?.prototype.label ?? null,
+        } : null,
+        deliberation: decision.deliberationResult ? {
+          action: decision.deliberationResult.action,
+          confidence: decision.deliberationResult.confidence,
+        } : null,
+        homeostasisActions: decision.homeostasisActions.map(a => a.type),
+      },
     });
     if (this.decisionTrace.length > this.MAX_TRACE) {
       this.decisionTrace.shift();

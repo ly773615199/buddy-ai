@@ -18,6 +18,7 @@ import MemoryPanel from './components/MemoryPanel';
 import KnowledgePanel from './components/KnowledgePanel';
 import AgentTrace from './components/AgentTrace';
 import { CognitiveDashboard } from './components/CognitiveDashboard';
+import { ResourceProfilePanel } from './components/ResourceProfilePanel';
 import SensorPanel from './components/SensorPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useVoiceEmotion } from './hooks/useVoiceEmotion';
@@ -28,7 +29,7 @@ const WS_BASE = import.meta.env.VITE_WS_URL ||
 `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 const STORAGE_KEY = 'buddy_visual_seed';
 
-type Tab = 'chat' | 'tools' | 'memory' | 'knowledge' | 'activity' | 'stats' | 'vision' | 'sensors' | 'experts' | 'cognitive' | 'settings';
+type Tab = 'chat' | 'tools' | 'memory' | 'knowledge' | 'activity' | 'stats' | 'vision' | 'sensors' | 'experts' | 'cognitive' | 'resources' | 'settings';
 
 function App() {
   const { t, i18n } = useTranslation();
@@ -223,6 +224,7 @@ function App() {
   { key: 'sensors', label: "\u4F20\u611F", icon: '📡' },
   { key: 'experts', label: "\u4E13\u5BB6", icon: '🎓' },
   { key: 'cognitive', label: "\u8BA4\u77E5", icon: '🧩' },
+  { key: 'resources', label: "资源", icon: '📊' },
   { key: 'settings', label: "\u8BBE\u7F6E", icon: '⚙️' }];
 
 
@@ -508,6 +510,12 @@ function App() {
             <div style={{ display: activeTab === 'cognitive' ? 'block' : 'none' }}>
               <ErrorBoundary name="认知">
                 <CognitiveDashboard ws={ws} connected={connected} skills={registeredSkills} />
+              </ErrorBoundary>
+            </div>
+
+            <div style={{ display: activeTab === 'resources' ? 'block' : 'none' }}>
+              <ErrorBoundary name="资源画像">
+                <ResourceProfilePanel />
               </ErrorBoundary>
             </div>
 
