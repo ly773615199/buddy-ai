@@ -43,10 +43,10 @@ export class ResourceHubAdapter {
       expert: 'local_expert',
       knowledge_source: 'knowledge_source',
     };
-    const stateMap: Record<string, 'active' | 'degraded' | 'deprecated' | 'discovered'> = {
+    const stateMap: Record<string, 'active' | 'degraded' | 'rejected' | 'discovered'> = {
       active: 'active',
       degraded: 'degraded',
-      unavailable: 'deprecated',
+      unavailable: 'rejected',   // 先 rejected，由审计决定是否 deprecated
       unknown: 'discovered',
     };
 
@@ -157,10 +157,10 @@ export class ResourceHubAdapter {
   }
 
   updateStatus(id: string, status: LegacyResourceProfile['status']): void {
-    const stateMap: Record<string, 'active' | 'degraded' | 'deprecated'> = {
+    const stateMap: Record<string, 'active' | 'degraded' | 'rejected'> = {
       active: 'active',
       degraded: 'degraded',
-      unavailable: 'deprecated',
+      unavailable: 'rejected',
     };
     const target = stateMap[status];
     if (target) this.hub.markState(id, target);
@@ -172,7 +172,7 @@ export class ResourceHubAdapter {
       total: summary.total,
       active: summary.byState.active,
       degraded: summary.byState.degraded,
-      unavailable: summary.byState.deprecated + summary.byState.deceased,
+      unavailable: summary.byState.rejected + summary.byState.deprecated + summary.byState.deceased,
     };
   }
 

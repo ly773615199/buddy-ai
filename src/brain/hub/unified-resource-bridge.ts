@@ -194,14 +194,12 @@ export class UnifiedResourceBridge {
               : 0;
             resource.stats.lastUsedAt = metric.lastUsed;
           }
-          // 根据健康度设置状态
+          // 根据健康度设置状态（通过状态机）
           if (resource.state === 'discovered') {
             if (resource.healthScore >= 50) {
-              resource.state = 'active';
-              resource.lastStateChange = Date.now();
+              this.hub.markState(resource.id, 'active', '工具同步');
             } else if (resource.healthScore >= 20) {
-              resource.state = 'degraded';
-              resource.lastStateChange = Date.now();
+              this.hub.markState(resource.id, 'degraded', '工具同步');
             }
           }
         }
@@ -238,8 +236,7 @@ export class UnifiedResourceBridge {
 
       const resource = this.hub.get(id);
       if (resource && resource.state === 'discovered') {
-        resource.state = source.isAvailable() ? 'active' : 'degraded';
-        resource.lastStateChange = Date.now();
+        this.hub.markState(resource.id, source.isAvailable() ? 'active' : 'degraded', '知识源同步');
         resource.healthScore = source.isAvailable() ? 80 : 30;
       }
 
@@ -274,8 +271,7 @@ export class UnifiedResourceBridge {
 
       const resource = this.hub.get(id);
       if (resource && resource.state === 'discovered') {
-        resource.state = activePlatform?.platform === platform ? 'active' : 'discovered';
-        resource.lastStateChange = Date.now();
+        this.hub.markState(resource.id, activePlatform?.platform === platform ? 'active' : 'discovered', '平台同步');
         resource.healthScore = activePlatform?.platform === platform ? 90 : 50;
       }
 
@@ -310,8 +306,7 @@ export class UnifiedResourceBridge {
 
       const resource = this.hub.get(id);
       if (resource && resource.state === 'discovered') {
-        resource.state = activeBackend?.name === backend ? 'active' : 'discovered';
-        resource.lastStateChange = Date.now();
+        this.hub.markState(resource.id, activeBackend?.name === backend ? 'active' : 'discovered', 'TTS同步');
         resource.healthScore = activeBackend?.name === backend ? 90 : 50;
       }
 
@@ -351,22 +346,20 @@ export class UnifiedResourceBridge {
         // 根据成长阶段设置状态
         switch (expert.growthStage) {
           case 'mature':
-            resource.state = 'active';
+            this.hub.markState(resource.id, 'active', '专家同步: mature');
             resource.healthScore = 85;
             break;
           case 'trainable':
-            resource.state = 'active';
+            this.hub.markState(resource.id, 'active', '专家同步: trainable');
             resource.healthScore = 65;
             break;
           case 'seed':
-            resource.state = 'discovered';
+            // 保持 discovered
             resource.healthScore = 40;
             break;
           default:
-            resource.state = 'discovered';
             resource.healthScore = 50;
         }
-        resource.lastStateChange = Date.now();
       }
 
       synced++;
@@ -422,8 +415,7 @@ export class UnifiedResourceBridge {
             resource.stats.lastUsedAt = metric.lastUsed;
           }
           if (resource.state === 'discovered') {
-            resource.state = resource.healthScore >= 50 ? 'active' : 'degraded';
-            resource.lastStateChange = Date.now();
+            this.hub.markState(resource.id, resource.healthScore >= 50 ? 'active' : 'degraded', '技能同步');
           }
         }
       }
@@ -488,11 +480,10 @@ export class UnifiedResourceBridge {
     const id = `tool/${name}`;
     if (!this.hub.get(id)) {
       this.hub.register({ id, type: 'tool', name, metadata: { description } });
+      this.hub.markState(id, 'active', '新工具注册');
       const r = this.hub.get(id);
       if (r) {
-        r.state = 'active';
         r.healthScore = 70;
-        r.lastStateChange = Date.now();
       }
     }
   }
@@ -504,11 +495,10 @@ export class UnifiedResourceBridge {
     const id = `knowledge/${source.id}`;
     if (!this.hub.get(id)) {
       this.hub.register({ id, type: 'knowledge_source', name: source.name, metadata: { sourceType: source.type } });
+      this.hub.markState(id, source.available ? 'active' : 'degraded', '新知识源注册');
       const r = this.hub.get(id);
       if (r) {
-        r.state = source.available ? 'active' : 'degraded';
         r.healthScore = source.available ? 80 : 30;
-        r.lastStateChange = Date.now();
       }
     }
   }
@@ -520,11 +510,10 @@ export class UnifiedResourceBridge {
     const id = `platform/${platform}`;
     if (!this.hub.get(id)) {
       this.hub.register({ id, type: 'platform', name: platform });
+      this.hub.markState(id, isActive ? 'active' : 'discovered', '新平台注册');
       const r = this.hub.get(id);
       if (r) {
-        r.state = isActive ? 'active' : 'discovered';
         r.healthScore = isActive ? 90 : 50;
-        r.lastStateChange = Date.now();
       }
     }
   }
@@ -536,11 +525,10 @@ export class UnifiedResourceBridge {
     const id = `tts/${backend}`;
     if (!this.hub.get(id)) {
       this.hub.register({ id, type: 'tts', name: backend });
+      this.hub.markState(id, isActive ? 'active' : 'discovered', '新TTS注册');
       const r = this.hub.get(id);
       if (r) {
-        r.state = isActive ? 'active' : 'discovered';
         r.healthScore = isActive ? 90 : 50;
-        r.lastStateChange = Date.now();
       }
     }
   }
@@ -556,9 +544,8 @@ export class UnifiedResourceBridge {
       existing.metadata.growthStage = growthStage;
       // 根据成长阶段调整状态
       if (growthStage === 'mature' && existing.state === 'discovered') {
-        existing.state = 'active';
+        this.hub.markState(existing.id, 'active', '专家成熟');
         existing.healthScore = 85;
-        existing.lastStateChange = Date.now();
       }
     } else {
       this.syncLocalExperts();
