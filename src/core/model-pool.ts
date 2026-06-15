@@ -282,6 +282,15 @@ export class ModelPool {
   private updater: ModelKnowledgeUpdater | null = null;
   /** P2-7: 反馈回调（CrossSessionLearner 接入点） */
   private _feedbackCallback: ((taskType: string, modelId: string, success: boolean, latencyMs: number) => void) | null = null;
+  /** O4: 探索参数配置 */
+  private explorationConfig = {
+    coldStartThreshold: 20,           // 冷启动阈值（决策次数低于此值时使用冷启动探索）
+    coldStartExplorationFactor: 2.0,  // 冷启动探索系数
+    correctionExplorationBoost: 0.5,  // 每次用户纠正增加的探索系数
+    maxExplorationFactor: 3.0,        // 探索系数上限
+  };
+  /** 用户纠正计数（由外部通过 recordUserCorrection 更新） */
+  private userCorrectionCount = 0;
 
   constructor(
     private config: ModelPoolConfig | null,
@@ -973,9 +982,12 @@ export class ModelPool {
         sample *= 1.5;
       }
 
+      // O4: 动态探索系数 — 冷启动 + 用户纠正
+      const explorationFactor = this.getExplorationFactor(params.totalCalls);
+
       // 冷启动保护：per-task-type 调用次数越少，探索奖励越大
-      if (params.totalCalls < 5) {
-        sample *= 1.5 + (5 - params.totalCalls) * 0.1;  // 0次→2.0, 1次→1.9, ..., 4次→1.6
+      if (params.totalCalls < this.explorationConfig.coldStartThreshold) {
+        sample *= explorationFactor + (this.explorationConfig.coldStartThreshold - params.totalCalls) * 0.05;
       }
 
       // 任务亲和度加权（基于 avgQuality 滑动平均）
@@ -1039,6 +1051,56 @@ export class ModelPool {
     const u2 = Math.random();
     const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
     return Math.max(0, Math.min(1, mean + z * stdDev));
+  }
+
+  // ── O4: 探索系数计算 ──
+
+  /**
+   * 获取动态探索系数
+   * 冷启动阶段更激进探索，用户纠正后增加探索
+   */
+  private getExplorationFactor(taskTypeCallCount: number): number {
+    let factor = 1.0;
+
+    // 冷启动阶段: 更激进探索
+    if (taskTypeCallCount < this.explorationConfig.coldStartThreshold) {
+      factor = this.explorationConfig.coldStartExplorationFactor;
+    }
+
+    // 用户纠正后: 增加探索
+    factor += this.userCorrectionCount * this.explorationConfig.correctionExplorationBoost;
+
+    return Math.min(factor, this.explorationConfig.maxExplorationFactor);
+  }
+
+  /**
+   * 记录用户纠正（由 Agent 的 feedback 系统调用）
+   * 纠正后自动增加探索系数，促使系统尝试其他模型
+   */
+  recordUserCorrection(): void {
+    this.userCorrectionCount++;
+  }
+
+  /**
+   * 获取当前探索状态（用于调试/仪表盘）
+   */
+  getExplorationState(): {
+    userCorrectionCount: number;
+    coldStartThreshold: number;
+    explorationFactor: number;
+  } {
+    return {
+      userCorrectionCount: this.userCorrectionCount,
+      coldStartThreshold: this.explorationConfig.coldStartThreshold,
+      explorationFactor: 1 + this.userCorrectionCount * this.explorationConfig.correctionExplorationBoost,
+    };
+  }
+
+  /**
+   * 更新探索配置（运行时调优）
+   */
+  setExplorationConfig(config: Partial<typeof this.explorationConfig>): void {
+    Object.assign(this.explorationConfig, config);
   }
 
   // ── 质量评分 ──

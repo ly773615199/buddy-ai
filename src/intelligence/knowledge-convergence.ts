@@ -18,10 +18,24 @@ export interface ConvergenceOptions {
   toolResults?: Array<{ name: string; result: string }>;
   contextTags?: string[];
   maxNodes?: number;       // 默认 20
-  timeoutMs?: number;      // 单源超时，默认 500ms
+  timeoutMs?: number;      // 单源超时，默认 500ms（向后兼容）
+  localTimeoutMs?: number; // 本地源超时，默认 100ms
+  networkTimeoutMs?: number; // 网络源超时，默认 2000ms
+  ternaryTimeoutMs?: number; // 三进制超时，默认 200ms
+  cacheTtlMs?: number;     // 缓存有效期，默认 5 分钟
+  maxCacheSize?: number;   // 最大缓存条目，默认 100
+}
+
+interface CacheEntry {
+  nodes: CollisionNode[];
+  timestamp: number;
 }
 
 export class KnowledgeConvergence {
+  private cache = new Map<string, CacheEntry>();
+  private readonly defaultCacheTtlMs: number;
+  private readonly defaultMaxCacheSize: number;
+
   constructor(
     private stmp: STMPStore,
     private experienceGraph: ExperienceGraph,
@@ -29,21 +43,40 @@ export class KnowledgeConvergence {
     private ternaryRouter: TernaryExpertRouter | null,
     private textEncoder: TextEncoder | null,
     private verbose: boolean,
-  ) {}
+    options?: { cacheTtlMs?: number; maxCacheSize?: number },
+  ) {
+    this.defaultCacheTtlMs = options?.cacheTtlMs ?? 5 * 60 * 1000; // 5 分钟
+    this.defaultMaxCacheSize = options?.maxCacheSize ?? 100;
+  }
 
   /**
-   * 汇聚所有来源的知识
+   * 汇聚所有来源的知识（带缓存 + 分源超时）
    */
   async converge(input: string, options?: ConvergenceOptions): Promise<CollisionNode[]> {
     const maxNodes = options?.maxNodes ?? 20;
-    const timeoutMs = options?.timeoutMs ?? 500;
+    const cacheTtlMs = options?.cacheTtlMs ?? this.defaultCacheTtlMs;
+    const maxCacheSize = options?.maxCacheSize ?? this.defaultMaxCacheSize;
 
-    // 并行采集，单源超时保护
+    // O5: 检查缓存
+    const cacheKey = this.buildCacheKey(input, options);
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < cacheTtlMs) {
+      if (this.verbose) console.log(`[KnowledgeConvergence] 缓存命中 (${cached.nodes.length} 节点)`);
+      return cached.nodes.slice(0, maxNodes);
+    }
+
+    // O5: 分源超时 — 本地源快、网络源慢、三进制快速失败
+    const localTimeout = options?.localTimeoutMs ?? 100;
+    const networkTimeout = options?.networkTimeoutMs ?? 2000;
+    const ternaryTimeout = options?.ternaryTimeoutMs ?? 200;
+    const fallbackTimeout = options?.timeoutMs ?? 500; // 向后兼容
+
+    // 并行采集，分源超时保护
     const sources = await Promise.allSettled([
-      this.withTimeout(this.fromSTMP(input, options), timeoutMs, 'stmp'),
-      this.withTimeout(this.fromExperience(input, options), timeoutMs, 'experience'),
-      this.withTimeout(this.fromKnowledgeSources(input, options), timeoutMs, 'knowledge'),
-      this.withTimeout(this.fromTernary(input, options), timeoutMs, 'ternary'),
+      this.withTimeout(this.fromSTMP(input, options), localTimeout, 'stmp'),
+      this.withTimeout(this.fromExperience(input, options), localTimeout, 'experience'),
+      this.withTimeout(this.fromKnowledgeSources(input, options), networkTimeout, 'knowledge'),
+      this.withTimeout(this.fromTernary(input, options), ternaryTimeout, 'ternary'),
       this.fromToolResults(options),  // 工具结果不需要超时（已有的）
       this.fromConversation(input),
     ]);
@@ -66,6 +99,10 @@ export class KnowledgeConvergence {
     deduped.sort((a, b) => b.score - a.score);
     const sliced = deduped.slice(0, maxNodes);
 
+    // O5: 写入缓存
+    this.cache.set(cacheKey, { nodes: sliced, timestamp: Date.now() });
+    this.evictCache(maxCacheSize);
+
     if (this.verbose) {
       const sourceCounts = new Map<string, number>();
       for (const n of sliced) sourceCounts.set(n.source, (sourceCounts.get(n.source) ?? 0) + 1);
@@ -74,6 +111,44 @@ export class KnowledgeConvergence {
     }
 
     return sliced;
+  }
+
+  /**
+   * 构建缓存键（基于输入内容 + 相关选项）
+   */
+  private buildCacheKey(input: string, options?: ConvergenceOptions): string {
+    const tags = options?.contextTags?.sort().join(',') ?? '';
+    return `${input.slice(0, 200)}|${tags}`;
+  }
+
+  /**
+   * 缓存淘汰：超过上限时删除最老条目
+   */
+  private evictCache(maxSize: number): void {
+    if (this.cache.size <= maxSize) return;
+    const entries = [...this.cache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = this.cache.size - maxSize;
+    for (let i = 0; i < toRemove; i++) {
+      this.cache.delete(entries[i][0]);
+    }
+  }
+
+  /**
+   * 清空缓存
+   */
+  clearCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * 获取缓存状态
+   */
+  getCacheStats(): { size: number; ttlMs: number; maxSize: number } {
+    return {
+      size: this.cache.size,
+      ttlMs: this.defaultCacheTtlMs,
+      maxSize: this.defaultMaxCacheSize,
+    };
   }
 
   /**
