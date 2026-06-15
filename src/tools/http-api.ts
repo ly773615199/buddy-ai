@@ -19,6 +19,19 @@ type CustomToolItem = NonNullable<BuddyConfig['customTools']>[number];
 /** 模板用，endpoint 可选 */
 type CustomToolTemplate = Omit<CustomToolItem, 'endpoint'> & { endpoint?: string };
 
+/** 从预置模板创建工具配置 */
+export function createFromPreset(
+  presetId: string,
+  endpoint: string,
+  overrides?: Partial<CustomToolItem>,
+): CustomToolItem {
+  const template = PRESET_TOOL_TEMPLATES[presetId];
+  if (!template) {
+    throw new Error(`未知预设: ${presetId}`);
+  }
+  return { ...template, endpoint, ...overrides } as CustomToolItem;
+}
+
 /** 从 config.customTools 生成 ToolDef 列表 */
 export function createHttpApiTools(customTools: BuddyConfig['customTools']): ToolDef[] {
   if (!customTools?.length) return [];
