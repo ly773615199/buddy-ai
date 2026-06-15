@@ -79,6 +79,8 @@ const MEMORY_MIGRATIONS: Migration[] = [
 export class MemoryStore {
   private db: Database.Database;
   private embedCaller: ((text: string) => Promise<{ vector: number[]; dimensions: number; model: string }>) | null = null;
+  /** P2-2: embedding 可用性标记，余额不足时自动降级 */
+  private embeddingAvailable = true;
 
   constructor(dbPath: string) {
     const dir = path.dirname(dbPath);
@@ -122,7 +124,7 @@ export class MemoryStore {
     stmt.run(category, key, value, importance, now, now);
 
     // 异步生成 embedding（不阻塞调用方）
-    if (this.embedCaller) {
+    if (this.embedCaller && this.embeddingAvailable) {
       const row = this.db.prepare('SELECT id FROM memories WHERE category = ? AND key = ?').get(category, key) as { id: number } | undefined;
       if (row) {
         this.embedMemory(row.id, key, value).catch(() => {});
@@ -257,7 +259,7 @@ export class MemoryStore {
    * 为单条记忆生成 embedding 并存储
    */
   async embedMemory(id: number, key: string, value: string): Promise<void> {
-    if (!this.embedCaller) return;
+    if (!this.embedCaller || !this.embeddingAvailable) return;
     try {
       const text = `${key} ${value}`.slice(0, 2000); // 截断避免过长
       const result = await this.embedCaller(text);
@@ -272,7 +274,14 @@ export class MemoryStore {
           created_at = excluded.created_at
       `).run(id, vector, result.dimensions, result.model, Date.now());
     } catch (err) {
-      console.warn('[MemoryStore] embedMemory failed:', (err as Error).message);
+      const msg = (err as Error).message;
+      // P2-2: 检测余额不足/认证失败，自动降级到 FTS5
+      if (msg.includes('403') || msg.includes('balance') || msg.includes('401') || msg.includes('insufficient')) {
+        this.embeddingAvailable = false;
+        console.warn('[MemoryStore] Embedding 不可用（余额不足或认证失败），降级到 FTS5 全文搜索');
+      } else {
+        console.warn('[MemoryStore] embedMemory failed:', msg);
+      }
     }
   }
 
@@ -280,7 +289,7 @@ export class MemoryStore {
    * 批量补全缺失的 embedding
    */
   async embedBatch(batchSize = 50): Promise<number> {
-    if (!this.embedCaller) return 0;
+    if (!this.embedCaller || !this.embeddingAvailable) return 0;
     const rows = this.db.prepare(`
       SELECT m.id, m.key, m.value FROM memories m
       LEFT JOIN memory_embeddings e ON e.memory_id = m.id
@@ -319,7 +328,7 @@ export class MemoryStore {
 
     // Embedding 检索
     let embedResults: Array<{ key: string; value: string; similarity: number }> = [];
-    if (this.embedCaller) {
+    if (this.embedCaller && this.embeddingAvailable) {
       try {
         const queryResult = await this.embedCaller(query.slice(0, 2000));
         const queryVec = new Float32Array(queryResult.vector);

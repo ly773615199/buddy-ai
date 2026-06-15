@@ -965,6 +965,12 @@ export class WSHandler {
         // feedback 可能未完全初始化，忽略
       }
 
+      // P2-1: 决策追踪 success 回写（WS 路径）
+      try {
+        const wsSuccess = result.toolCalls.every(tc => !tc.result?.startsWith('['));
+        this.agentRef?.recordOutcome(wsSuccess, undefined, Date.now() - taskStartTime);
+      } catch { /* 静默 */ }
+
       // WS 特有：广播 + TTS
       const responseText = result.text ?? '';
 
@@ -1015,6 +1021,8 @@ export class WSHandler {
       taskSuccess = false;
       this.sys.cerebellum?.onLLMError();
       this.broadcastEmotion();
+      // P2-1: 执行异常时回写决策追踪
+      try { this.agentRef?.recordOutcome(false, msg, Date.now() - taskStartTime); } catch { /* 静默 */ }
       const fallback = getFallbackReply(this.config.personality);
       this.eventBus?.emit({ type: 'error', message: fallback });
       this.eventBus?.emit({ type: 'response_end', content: fallback, toolCalls: 0 });
