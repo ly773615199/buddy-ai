@@ -1,7 +1,7 @@
 # 资源画像 & 三脑决策 修复计划
 
 > 基于 2026-06-15 运行轨迹分析报告生成
-> 优先级: P0(立即修复) → P1(本周) → P2(迭代优化) → P3(体验优化)
+> 优先级: P0(立即修复) → P1(本周) → P2(迭代优化) → P3(体验优化) → O1~O6(系统级优化)
 
 ---
 
@@ -540,28 +540,518 @@ this.decisionTrace.push({
 
 ---
 
-## 实施计划
+## O1: 资源推荐算法优化（综合评分）
+
+### 现状
+
+`UnifiedResourceHub.recommend()` 仅按 taskType + domain 匹配 + 健康度排序，评分公式简单：
+
+```typescript
+score = taskTypeMatch * 50 + domainMatch * 30 + healthScore * 0.2
+```
+
+### 问题
+
+- 未考虑模型能力（toolCalling/vision/streaming）是否匹配任务需求
+- 未考虑成本约束（用户可能设置了 maxCostPer1k）
+- 未考虑延迟偏好（实时对话 vs 后台任务）
+- 未引入三脑的 BodyState（高负载时应选轻量模型）
+
+### 优化方案
+
+```typescript
+// src/brain/hub/unified-resource-hub.ts
+recommend(taskType: string, domain?: string, type?: ResourceType, context?: {
+  requiresToolCalling?: boolean;
+  requiresVision?: boolean;
+  maxCostPer1k?: number;
+  latencyTolerance?: 'low' | 'medium' | 'high';
+  bodyState?: { load: number; energy: number };
+}): UnifiedResource[] {
+  const candidates = this.getActive(type);
+
+  const scored = candidates.map(r => {
+    let score = 0;
+
+    // 1. 任务类型匹配 (0-40分)
+    const typeStats = r.stats.byTaskType[taskType];
+    if (typeStats && typeStats.attempts > 0) {
+      score += (typeStats.successes / typeStats.attempts) * 40;
+    }
+
+    // 2. 领域匹配 (0-20分)
+    if (domain) {
+      const domainStats = r.stats.byDomain[domain];
+      if (domainStats && domainStats.attempts > 0) {
+        score += (domainStats.successes / domainStats.attempts) * 20;
+      }
+    }
+
+    // 3. 能力匹配 (0-20分) — 新增
+    if (context?.requiresToolCalling && r.capabilities.toolCalling?.value) score += 10;
+    if (context?.requiresVision && r.capabilities.vision?.value) score += 10;
+    if (!context?.requiresToolCalling && !context?.requiresVision) score += 10; // 无特殊需求
+
+    // 4. 成本约束 (0-10分) — 新增
+    if (context?.maxCostPer1k) {
+      const cost = (r.metadata.costPer1kInput as number) ?? 0;
+      if (cost <= context.maxCostPer1k) score += 10;
+      else score += Math.max(0, 10 - (cost - context.maxCostPer1k) * 2);
+    } else {
+      score += 5; // 无成本约束时给中等分
+    }
+
+    // 5. 延迟适配 (0-5分) — 新增
+    if (context?.latencyTolerance === 'low' && r.stats.avgLatencyMs < 2000) score += 5;
+    else if (context?.latencyTolerance === 'high') score += 5;
+    else if (r.stats.avgLatencyMs < 5000) score += 3;
+
+    // 6. 系统负载适配 (0-5分) — 新增
+    if (context?.bodyState) {
+      const { load, energy } = context.bodyState;
+      // 高负载时偏好轻量模型（avgLatencyMs 低的）
+      if (load > 70 && r.stats.avgLatencyMs < 3000) score += 5;
+      // 低能量时偏好可靠模型（成功率高的）
+      if (energy < 30 && typeStats && typeStats.attempts > 5) {
+        const sr = typeStats.successes / typeStats.attempts;
+        if (sr > 0.9) score += 5;
+      }
+    }
+
+    // 7. 健康度 (0-10分)
+    score += r.healthScore * 0.1;
+
+    return { resource: r, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.resource);
+}
+```
+
+### 涉及文件
+
+- `src/brain/hub/unified-resource-hub.ts` — `recommend()` 方法
+- `src/brain/left/scheduler.ts` — 调用 recommend 时传入 context
+
+### 验收标准
+
+- 需要 toolCalling 的任务优先选中 toolCalling=true 的模型
+- 高负载时自动选择轻量模型
+- 推荐结果可追溯（日志输出评分 breakdown）
+
+---
+
+## O2: DriftDetector 参数调优
+
+### 现状
+
+滑动窗口 20、warning 阈值 0.3、critical 阈值 0.6。这些参数对所有资源类型统一使用。
+
+### 问题
+
+- 模型能力变化慢（7天探测一次），窗口 20 需要 140 天才能填满 → 漂移检测几乎不触发
+- 工具变化快（每次调用都更新），窗口 20 太小 → 频繁告警
+- 布尔值和数值用同一阈值不合理
+
+### 优化方案
+
+```typescript
+// src/brain/hub/drift-detector.ts
+interface DriftDetectorConfig {
+  // 按资源类型配置不同参数
+  model: { windowSize: number; warningThreshold: number; criticalThreshold: number };
+  tool: { windowSize: number; warningThreshold: number; criticalThreshold: number };
+  default: { windowSize: number; warningThreshold: number; criticalThreshold: number };
+}
+
+const DEFAULT_CONFIG: DriftDetectorConfig = {
+  model:  { windowSize: 10, warningThreshold: 0.4, criticalThreshold: 0.7 },  // 模型: 大窗口低敏感
+  tool:   { windowSize: 30, warningThreshold: 0.2, criticalThreshold: 0.5 },  // 工具: 小窗口高敏感
+  default:{ windowSize: 20, warningThreshold: 0.3, criticalThreshold: 0.6 },
+};
+
+// detect() 方法增加 resourceType 参数
+detect(resourceId: string, dimension: string, newValue: boolean | number | string,
+       timestamp: number, resourceType?: ResourceType): DriftAlert | null {
+  const config = this.config[resourceType ?? 'default'];
+  // 使用对应配置...
+}
+```
+
+### 涉及文件
+
+- `src/brain/hub/drift-detector.ts` — 配置参数化
+- `src/brain/hub/unified-resource-hub.ts` — 传递 resourceType
+
+### 验收标准
+
+- 模型能力漂移在合理时间内触发告警
+- 工具漂移不会因短期波动频繁告警
+
+---
+
+## O3: MarginalAuditor 审计频率优化
+
+### 现状
+
+`MarginalAuditor` 需要外部手动调用 `runAndApply()`，没有自动调度。
+`UnifiedResourceHub.runAudit()` 也是手动触发。
+
+### 问题
+
+- 审计不执行 → deprecated 资源永远不会被淘汰或复活
+- 没有按资源类型区分审计频率（模型变化慢，工具变化快）
+
+### 优化方案
+
+```typescript
+// src/brain/hub/marginal-auditor.ts
+export class MarginalAuditor {
+  private auditTimer: ReturnType<typeof setInterval> | null = null;
+
+  // 新增: 启动自动审计
+  startAutoAudit(): void {
+    // 每小时审计一次模型，每 30 分钟审计一次工具
+    this.auditTimer = setInterval(() => {
+      this.runAndApply('chat');     // 按 chat 任务类型审计
+      this.runAndApply('tools');    // 按 tools 任务类型审计
+    }, 60 * 60 * 1000); // 1 小时
+  }
+
+  stopAutoAudit(): void {
+    if (this.auditTimer) {
+      clearInterval(this.auditTimer);
+      this.auditTimer = null;
+    }
+  }
+}
+
+// src/core/subsystems.ts — 在初始化时启动
+if (sys.marginalAuditor) {
+  sys.marginalAuditor.startAutoAudit();
+}
+```
+
+### 涉及文件
+
+- `src/brain/hub/marginal-auditor.ts` — 自动审计调度
+- `src/core/subsystems.ts` — 启动自动审计
+
+### 验收标准
+
+- deprecated 资源在边际贡献恢复时自动复活
+- 低贡献资源被自动淘汰
+
+---
+
+## O4: Thompson Sampling 探索参数优化
+
+### 现状
+
+`Scheduler` 使用 Thompson Sampling 做模型选择，但 `explorationFactor = 1.0`（无额外探索）。
+
+### 问题
+
+- 冷启动时所有模型的 α=β=1（均匀分布），选模近乎随机
+- 没有区分"探索新模型"和"利用已知好模型"的阶段
+- 用户纠正次数（userCorrectionCount）未反馈到探索系数
+
+### 优化方案
+
+```typescript
+// src/brain/left/scheduler.ts
+interface SchedulerConfig {
+  // ... 现有字段
+  /** 冷启动探索系数（前 N 次决策时使用） */
+  coldStartExplorationFactor: number;
+  /** 冷启动阈值（决策次数低于此值时使用冷启动探索） */
+  coldStartThreshold: number;
+  /** 用户纠正后增加探索 */
+  correctionExplorationBoost: number;
+}
+
+const DEFAULT_CONFIG: SchedulerConfig = {
+  // ... 现有默认值
+  coldStartExplorationFactor: 2.0,  // 冷启动时探索更激进
+  coldStartThreshold: 20,
+  correctionExplorationBoost: 0.5,  // 每次纠正增加 0.5 探索系数
+};
+
+// 在 selectModel 中:
+getExplorationFactor(decisionCount: number, userCorrectionCount: number): number {
+  let factor = this.config.explorationFactor;
+
+  // 冷启动阶段: 更激进探索
+  if (decisionCount < this.config.coldStartThreshold) {
+    factor = this.config.coldStartExplorationFactor;
+  }
+
+  // 用户纠正后: 增加探索
+  factor += userCorrectionCount * this.config.correctionExplorationBoost;
+
+  return Math.min(factor, 3.0); // 上限 3.0
+}
+```
+
+### 涉及文件
+
+- `src/brain/left/scheduler.ts` — 探索系数动态调整
+
+### 验收标准
+
+- 冷启动阶段模型选择更均匀（探索）
+- 稳定后逐步收敛到最优模型（利用）
+- 用户纠正后自动增加探索
+
+---
+
+## O5: 知识管线采集层优化
+
+### 现状
+
+`KnowledgeConvergence.converge()` 并行从所有源采集，超时 500ms。
+三进制专家模型缺失时直接失败，无降级。
+
+### 问题
+
+- 500ms 超时对网络源太短，对本地源太长
+- 三进制模型缺失时日志刷警告但无实际降级路径
+- 采集结果未缓存，每次交互都重新采集
+
+### 优化方案
+
+```typescript
+// src/intelligence/knowledge-convergence.ts
+interface ConvergenceConfig {
+  // 按源类型配置不同超时
+  localTimeoutMs: number;    // 本地源: 100ms
+  networkTimeoutMs: number;  // 网络源: 2000ms
+  ternaryTimeoutMs: number;  // 三进制: 200ms（快速失败）
+  // 结果缓存
+  cacheTtlMs: number;        // 缓存有效期: 5 分钟
+  maxCacheSize: number;      // 最大缓存条目: 100
+}
+
+// 新增: 采集结果缓存
+private cache = new Map<string, { nodes: KnowledgeNode[]; timestamp: number }>();
+
+async converge(input: string, options?: ConvergeOptions): Promise<KnowledgeNode[]> {
+  // 1. 检查缓存
+  const cacheKey = this.buildCacheKey(input);
+  const cached = this.cache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < this.config.cacheTtlMs) {
+    return cached.nodes;
+  }
+
+  // 2. 按源类型分组并行，不同超时
+  const [localNodes, networkNodes] = await Promise.all([
+    this.collectLocal(input, this.config.localTimeoutMs),
+    this.collectNetwork(input, this.config.networkTimeoutMs),
+  ]);
+
+  // 3. 三进制快速失败（不阻塞）
+  let ternaryNodes: KnowledgeNode[] = [];
+  try {
+    ternaryNodes = await this.collectTernary(input, this.config.ternaryTimeoutMs);
+  } catch { /* 静默 */ }
+
+  const nodes = [...localNodes, ...networkNodes, ...ternaryNodes];
+
+  // 4. 写入缓存
+  this.cache.set(cacheKey, { nodes, timestamp: Date.now() });
+  if (this.cache.size > this.config.maxCacheSize) {
+    const oldest = [...this.cache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+    this.cache.delete(oldest[0]);
+  }
+
+  return nodes;
+}
+```
+
+### 涉及文件
+
+- `src/intelligence/knowledge-convergence.ts` — 采集层优化
+
+### 验收标准
+
+- 本地采集 < 100ms，网络采集 < 2s
+- 三进制缺失时不刷警告
+- 相同输入 5 分钟内命中缓存
+
+---
+
+## O6: 资源画像可视化仪表盘（前端）
+
+### 现状
+
+前端有 `CognitiveDashboard.tsx` 和 `PetStats.tsx`，但没有资源画像的专门可视化。
+
+### 优化方案
+
+新增 REST API + 前端组件，展示资源画像实时状态：
+
+#### 后端 API
+
+```typescript
+// src/core/rest-api.ts
+// GET /api/resource-profiles — 资源画像概览
+eb.addRoute('GET', '/api/resource-profiles', (_req, res) => {
+  const hub = sys.resourceSystem?.hub;
+  if (!hub) { json(res, 200, { resources: [] }); return; }
+
+  const all = hub.getAll();
+  const profiles = all.map(r => ({
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    state: r.state,
+    healthScore: r.healthScore,
+    stats: {
+      totalCalls: r.stats.totalCalls,
+      successRate: r.stats.totalCalls > 0
+        ? (r.stats.successes / r.stats.totalCalls * 100).toFixed(1) + '%'
+        : 'N/A',
+      avgLatencyMs: Math.round(r.stats.avgLatencyMs),
+    },
+    capabilities: Object.fromEntries(
+      Object.entries(r.capabilities).map(([k, v]) => [k, {
+        value: v.value,
+        verified: v.verified,
+      }])
+    ),
+    driftAlerts: r.driftAlerts.filter(a => a.timestamp > Date.now() - 3600_000).length,
+    marginalDelta: r.marginalContribution?.smoothedDelta?.toFixed(3) ?? 'N/A',
+  }));
+
+  json(res, 200, {
+    total: profiles.length,
+    byState: hub.getHealthSummary().byState,
+    byType: hub.getHealthSummary().byType,
+    resources: profiles,
+  });
+});
+
+// GET /api/resource-profiles/:id/timeline — 资源能力时间线
+eb.addRoute('GET', '/api/resource-profiles/:id/timeline', (req, res) => {
+  const id = decodeURIComponent(req.url!.split('/timeline')[0].split('/').pop()!);
+  const graph = new CapabilityGraph(sys.resourceSystem!.hub);
+  const timeline = graph.getTimeline(id);
+  const profile = graph.getCapabilityProfile(id);
+  json(res, 200, { id, timeline, profile });
+});
+```
+
+#### 前端组件
+
+```tsx
+// frontend/src/components/ResourceProfilePanel.tsx
+export function ResourceProfilePanel() {
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [filter, setFilter] = useState<'all' | ResourceType>('all');
+
+  useEffect(() => {
+    fetch('/api/resource-profiles')
+      .then(r => r.json())
+      .then(data => setProfiles(data.resources));
+  }, []);
+
+  const filtered = filter === 'all' ? profiles : profiles.filter(p => p.type === filter);
+
+  return (
+    <div className="resource-profile-panel">
+      <h3>📊 资源画像</h3>
+      <div className="filters">
+        {['all', 'model', 'tool', 'knowledge_source', 'platform', 'tts', 'skill'].map(t => (
+          <button key={t} onClick={() => setFilter(t as any)}
+                  className={filter === t ? 'active' : ''}>
+            {t === 'all' ? '全部' : t} ({profiles.filter(p => t === 'all' || p.type === t).length})
+          </button>
+        ))}
+      </div>
+      <div className="resource-grid">
+        {filtered.map(r => (
+          <ResourceCard key={r.id} resource={r} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResourceCard({ resource }: { resource: any }) {
+  const stateColor = {
+    active: '#4caf50', degraded: '#ff9800', deprecated: '#f44336',
+    discovered: '#2196f3', rejected: '#9e9e9e', deceased: '#616161',
+  }[resource.state] ?? '#9e9e9e';
+
+  return (
+    <div className="resource-card" style={{ borderLeft: `4px solid ${stateColor}` }}>
+      <div className="resource-header">
+        <span className="resource-type">{resource.type}</span>
+        <span className="resource-state" style={{ color: stateColor }}>{resource.state}</span>
+      </div>
+      <div className="resource-name">{resource.name}</div>
+      <div className="resource-stats">
+        <span>调用: {resource.stats.totalCalls}</span>
+        <span>成功率: {resource.stats.successRate}</span>
+        <span>延迟: {resource.stats.avgLatencyMs}ms</span>
+      </div>
+      <div className="health-bar">
+        <div className="health-fill" style={{
+          width: `${resource.healthScore}%`,
+          backgroundColor: resource.healthScore >= 70 ? '#4caf50' :
+                           resource.healthScore >= 30 ? '#ff9800' : '#f44336',
+        }} />
+      </div>
+      {resource.driftAlerts > 0 && (
+        <span className="drift-badge">⚠️ {resource.driftAlerts} 漂移</span>
+      )}
+    </div>
+  );
+}
+```
+
+### 涉及文件
+
+- `src/core/rest-api.ts` — 新增 2 个 API
+- `frontend/src/components/ResourceProfilePanel.tsx` — 新增组件
+- `frontend/src/App.tsx` — 集成到主界面
+
+### 验收标准
+
+- 前端可实时查看所有资源的画像状态
+- 支持按类型筛选、按状态排序
+- 健康度进度条颜色变化直观
+
+---
+
+## 实施计划（更新）
 
 | 阶段 | 任务 | 预计工时 | 验收标准 |
 |------|------|----------|----------|
 | Phase 1 | P0-1 + P0-2 | 2h | 启动日志 0 条非法转换警告 |
 | Phase 2 | P1-1 + P1-2 | 4h | 执行失败后画像 success/failures 更新 |
 | Phase 3 | P2-1 + P2-2 | 3h | decision-trace.success 非 null；余额不足优雅降级 |
-| Phase 4 | P2-3 | 4h | 经验路由匹配准确率提升 20% |
-| Phase 5 | P3 | 2h | 决策追踪包含三脑内部信号 |
+| Phase 4 | P2-3 + O1 | 6h | 经验路由匹配准确率 +20%；推荐结果可追溯 |
+| Phase 5 | O2 + O3 | 3h | 漂移检测按资源类型区分；审计自动执行 |
+| Phase 6 | O4 + O5 | 4h | 冷启动探索优化；知识管线缓存 |
+| Phase 7 | P3 + O6 | 5h | 决策追踪增强 + 资源画像仪表盘 |
 
-**总预计工时: 15h**
+**总预计工时: 27h**（原 15h + 优化 12h）
 
 ---
 
 ## 依赖关系
 
 ```
-P0-1 ──→ P0-2 ──→ P1-1 ──→ P1-2
-                                  ──→ P2-1
-                                  ──→ P2-2
-                                  ──→ P2-3 ──→ P3
+P0-1 ──→ P0-2 ──→ P1-1 ──→ P1-2 ──→ O1(推荐算法)
+                    │                  ──→ O2(漂移调优)
+                    │                  ──→ O3(审计频率)
+                    └──→ P2-1 ──→ O4(Thompson调优)
+                         P2-2 ──→ O5(知识管线缓存)
+                         P2-3 ──→ P3(追踪增强) ──→ O6(仪表盘)
 ```
 
-P0-1 和 P0-2 可并行开发。P1 依赖 P0 完成（状态机修正后才能正确回写画像）。
-P2 各项可并行。P3 依赖 P2-3（经验路由优化后追踪才有意义）。
+- **Phase 1-3**: 修复基础问题（必须先完成）
+- **Phase 4-6**: 系统级优化（可并行）
+- **Phase 7**: 体验优化（依赖基础修复完成）
