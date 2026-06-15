@@ -388,6 +388,12 @@ export class PublishSanitizer {
 /**
  * 快速扫描 PII
  */
+/** 便捷函数：对发布包进行脱敏处理 */
+export async function sanitizeForPublish(pkg: PublishPackage): Promise<SanitizeResult> {
+  const sanitizer = new PublishSanitizer();
+  return sanitizer.sanitize(pkg);
+}
+
 export function scanForPII(pkg: PublishPackage): Array<{ field: string; type: string; location: string }> {
   const sanitizer = new PublishSanitizer();
   return sanitizer.scan(pkg);
