@@ -222,30 +222,76 @@ export class UnifiedResourceHub {
   }
 
   /**
-   * 推荐资源 — 按任务类型和领域匹配，综合评分排序
+   * 推荐资源 — 综合评分排序（O1 增强版）
+   *
+   * 评分维度（满分 100）：
+   *   1. 任务类型匹配 (0-40) — 历史成功率
+   *   2. 领域匹配 (0-20) — 历史领域成功率
+   *   3. 能力匹配 (0-20) — toolCalling/vision/streaming 是否满足需求
+   *   4. 成本约束 (0-10) — costPer1k 是否在预算内
+   *   5. 延迟适配 (0-5) — avgLatencyMs 是否满足延迟容忍度
+   *   6. 系统负载 (0-5) — 高负载时偏好轻量模型
+   *   7. 健康度 (0-10) — 基础健康分
    */
-  recommend(taskType: string, domain?: string, type?: ResourceType): UnifiedResource[] {
+  recommend(taskType: string, domain?: string, type?: ResourceType, context?: {
+    requiresToolCalling?: boolean;
+    requiresVision?: boolean;
+    requiresStreaming?: boolean;
+    maxCostPer1k?: number;
+    latencyTolerance?: 'low' | 'medium' | 'high';
+    bodyState?: { load: number; energy: number };
+  }): UnifiedResource[] {
     const candidates = this.getActive(type);
 
     const scored = candidates.map(r => {
       let score = 0;
 
-      // 任务类型匹配
+      // 1. 任务类型匹配 (0-40)
       const typeStats = r.stats.byTaskType[taskType];
       if (typeStats && typeStats.attempts > 0) {
-        score += (typeStats.successes / typeStats.attempts) * 50;
+        score += (typeStats.successes / typeStats.attempts) * 40;
       }
 
-      // 领域匹配
+      // 2. 领域匹配 (0-20)
       if (domain) {
         const domainStats = r.stats.byDomain[domain];
         if (domainStats && domainStats.attempts > 0) {
-          score += (domainStats.successes / domainStats.attempts) * 30;
+          score += (domainStats.successes / domainStats.attempts) * 20;
         }
       }
 
-      // 健康度
-      score += r.healthScore * 0.2;
+      // 3. 能力匹配 (0-20)
+      if (context?.requiresToolCalling && r.capabilities.toolCalling?.value) score += 7;
+      if (context?.requiresVision && r.capabilities.vision?.value) score += 7;
+      if (context?.requiresStreaming && r.capabilities.streaming?.value) score += 6;
+      if (!context?.requiresToolCalling && !context?.requiresVision && !context?.requiresStreaming) score += 10;
+
+      // 4. 成本约束 (0-10)
+      if (context?.maxCostPer1k) {
+        const cost = (r.metadata.costPer1k as number) ?? 0;
+        if (cost <= context.maxCostPer1k) score += 10;
+        else score += Math.max(0, 10 - (cost - context.maxCostPer1k) * 2);
+      } else {
+        score += 5;
+      }
+
+      // 5. 延迟适配 (0-5)
+      if (context?.latencyTolerance === 'low' && r.stats.avgLatencyMs < 2000) score += 5;
+      else if (context?.latencyTolerance === 'high') score += 5;
+      else if (r.stats.avgLatencyMs < 5000) score += 3;
+
+      // 6. 系统负载适配 (0-5)
+      if (context?.bodyState) {
+        const { load, energy } = context.bodyState;
+        if (load > 70 && r.stats.avgLatencyMs < 3000) score += 5;
+        if (energy < 30 && typeStats && typeStats.attempts > 5) {
+          const sr = typeStats.successes / typeStats.attempts;
+          if (sr > 0.9) score += 5;
+        }
+      }
+
+      // 7. 健康度 (0-10)
+      score += r.healthScore * 0.1;
 
       return { resource: r, score };
     });

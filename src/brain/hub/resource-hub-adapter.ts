@@ -129,8 +129,8 @@ export class ResourceHubAdapter {
     };
   }
 
-  recommend(taskType: string, domain?: string): LegacyResourceProfile[] {
-    return this.hub.recommend(taskType, domain).map(r => ({
+  recommend(taskType: string, domain?: string, context?: Parameters<UnifiedResourceHub['recommend']>[3]): LegacyResourceProfile[] {
+    return this.hub.recommend(taskType, domain, undefined, context).map(r => ({
       id: r.id,
       type: this.mapTypeBack(r.type),
       name: r.name,
