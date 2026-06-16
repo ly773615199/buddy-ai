@@ -516,7 +516,7 @@ const probeTTS: ProbeFn = async (ctx) => {
     if (resp.ok) return { reachable: true, inferenceOk: true };
   } catch { /* fallthrough */ }
 
-  // 方式2: MiMo 格式 — chat/completions + assistant role（raw fetch）
+  // 方式2: MiMo 格式 — chat/completions + assistant role
   try {
     const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
     const resp = await withTimeout(
@@ -539,14 +539,12 @@ const probeTTS: ProbeFn = async (ctx) => {
       const hasText = !!data?.choices?.[0]?.message?.content;
       return { reachable: true, inferenceOk: hasAudio || hasText };
     }
-    // 非 200 响应，抛出以便外层分类
     const body = await resp.text().catch(() => '');
-    throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
+    throw new Error(`HTTP ${resp.status}: ${body.slice(0, 120)}`);
   } catch (err) {
-    console.error(`[ProbeTTS] ${ctx.rawModelId} 失败:`, (err as Error).message.slice(0, 120));
+    console.error(`[ProbeTTS] MiMo格式失败:`, (err as Error).message.slice(0, 120));
+    throw err;
   }
-
-  return { reachable: false, inferenceOk: false };
 };
 
 /** ASR 探测 — chat/completions + input_audio（MiMo 格式）或 /v1/audio/transcriptions */
@@ -598,7 +596,7 @@ const probeASR: ProbeFn = async (ctx) => {
     const body = await resp.text().catch(() => '');
     throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
   } catch (err) {
-    console.error(`[ProbeASR] ${ctx.rawModelId} 失败:`, (err as Error).message.slice(0, 120));
+    console.error(`[ProbeASR] 标准端点失败:`, (err as Error).message.slice(0, 80));
   }
 
   return { reachable: false, inferenceOk: false };
