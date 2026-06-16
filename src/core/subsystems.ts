@@ -311,7 +311,38 @@ export class Subsystems {
     }
 
     // 模型健康探测器 — 后台定期探测模型可用性
-    this.healthProber = new ModelHealthProber(pool, { enabled: true }, undefined, verbose);
+    // 注入真实 prober：通过 GET /v1/models 端点级探活 + 实际调用测试
+    const realProber = async (modelId: string): Promise<{ reachable: boolean; latencyMs: number; error?: string }> => {
+      const profile = pool.getProfile(modelId);
+      if (!profile) return { reachable: false, latencyMs: 0, error: '模型不在池中' };
+
+      const creds = (pool as any).providerCredentials?.get(profile.platform) as { apiKey?: string; baseUrl?: string } | undefined;
+      if (!creds?.apiKey) return { reachable: false, latencyMs: 0, error: '无 API Key' };
+
+      const baseUrl = (creds.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+      const startMs = Date.now();
+
+      try {
+        // 轻量探测：GET /v1/models/{model_id} 确认模型存在
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const resp = await fetch(`${baseUrl}/v1/models/${encodeURIComponent(modelId.replace(profile.platform + '/', ''))}`, {
+          headers: { 'Authorization': `Bearer ${creds.apiKey}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const latencyMs = Date.now() - startMs;
+
+        if (resp.ok) return { reachable: true, latencyMs };
+        if (resp.status === 401 || resp.status === 403) return { reachable: false, latencyMs, error: 'auth' };
+        if (resp.status === 404) return { reachable: false, latencyMs, error: 'not_found' };
+        if (resp.status === 429) return { reachable: true, latencyMs, error: 'rate_limited' };
+        return { reachable: true, latencyMs, error: `HTTP ${resp.status}` };
+      } catch (err) {
+        return { reachable: false, latencyMs: Date.now() - startMs, error: (err as Error).message };
+      }
+    };
+    this.healthProber = new ModelHealthProber(pool, { enabled: true, intervalMs: 10 * 60 * 1000 }, { prober: realProber }, verbose);
     this.healthProber.start();
 
     // §2.7: denied 模型自动重试定时器 — 每小时检查一次

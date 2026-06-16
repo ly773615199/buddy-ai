@@ -698,6 +698,10 @@ export function setupRESTAPI(ctx: RESTContext): void {
               if (sys.modelPoolBridge) sys.modelPoolBridge.fullSync();
             }
           }).catch(() => {});
+          // 异步探活新发现的模型（5s 后，不阻塞响应）
+          if (sys.healthProber) {
+            setTimeout(() => { sys.healthProber!.probeAll().catch(() => {}); }, 5000);
+          }
         }
         catch (err) { discoveryError = (err as Error).message; if (verbose) console.warn(`[ModelPool] 刷新新端点 ${id} 失败:`, discoveryError); }
       }
