@@ -1617,7 +1617,28 @@ export class ModelPool {
 
   removeProfile(id: string): void {
     this.profiles.delete(id);
+    // 同步清理 Thompson Sampling 参数
+    for (const key of this.tsParams.keys()) {
+      if (key.endsWith(`:${id}`) || key === id) {
+        this.tsParams.delete(key);
+      }
+    }
     this.saveUnifiedState();
+  }
+
+  /** 清理指定平台的 Thompson Sampling 参数 */
+  removeThompsonByPlatform(platform: string): number {
+    let removed = 0;
+    for (const key of [...this.tsParams.keys()]) {
+      // key 格式: taskType:modelId 或 modelId
+      const modelId = key.includes(':') ? key.split(':').slice(1).join(':') : key;
+      if (modelId.startsWith(platform + '/')) {
+        this.tsParams.delete(key);
+        removed++;
+      }
+    }
+    if (removed > 0) this.saveUnifiedState();
+    return removed;
   }
 
   /** 切换模型激活状态，返回新状态 */

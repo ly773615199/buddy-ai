@@ -839,6 +839,10 @@ export function setupRESTAPI(ctx: RESTContext): void {
       config.models = { ...config.models, providers: updatedProviders } as any;
       const unifiedPool = sys.llm.getUnifiedPool();
       if (unifiedPool) {
+        // 清理 Thompson Sampling 参数
+        const tsRemoved = unifiedPool.removeThompsonByPlatform(id);
+        if (tsRemoved > 0 && verbose) console.log(`[ModelPool] 清理 ${id} 的 Thompson 参数: ${tsRemoved} 个`);
+
         const profilesToRemove = unifiedPool.getProfilesByPlatform(id);
         for (const p of profilesToRemove) {
           unifiedPool.removeProfile(p.id);
