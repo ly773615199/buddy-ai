@@ -400,6 +400,7 @@ function getProbeByCategory(category?: string): ProbeFn {
     case 'image-gen':
     case 'image-edit': return probeImageGen;
     case 'tts':       return probeTTS;
+    case 'asr':       return probeASR;
     default:          return probeChat; // chat, vl-chat, omni-chat, unknown, other
   }
 }
@@ -499,21 +500,136 @@ const probeImageGen: ProbeFn = async (ctx) => {
   return { reachable: true, inferenceOk: hasImage };
 };
 
-/** TTS 探测 — /v1/audio/speech */
+/** TTS 探测 — 先试 /v1/audio/speech，失败则走 chat/completions（MiMo 格式） */
 const probeTTS: ProbeFn = async (ctx) => {
-  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
-  const resp = await withTimeout(
-    fetch(`${base}/audio/speech`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: ctx.rawModelId, input: 'hi', voice: 'default' }),
-    }),
-    ctx.timeoutMs,
-  );
-  // TTS 成功返回音频流 (200 + audio/*)
-  const isAudio = resp.ok && (resp.headers.get('content-type')?.includes('audio') || resp.status === 200);
-  return { reachable: resp.ok, inferenceOk: isAudio };
+  // 方式1: 标准 OpenAI TTS 端点
+  try {
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const resp = await withTimeout(
+      fetch(`${base}/audio/speech`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: ctx.rawModelId, input: 'hi', voice: 'default' }),
+      }),
+      ctx.timeoutMs,
+    );
+    if (resp.ok) return { reachable: true, inferenceOk: true };
+  } catch { /* fallthrough */ }
+
+  // 方式2: MiMo 格式 — chat/completions + assistant role（raw fetch）
+  try {
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const resp = await withTimeout(
+      fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: ctx.rawModelId,
+          messages: [
+            { role: 'user', content: '请用语音说：测试' },
+            { role: 'assistant', content: '' },
+          ],
+        }),
+      }),
+      ctx.timeoutMs,
+    );
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      const hasAudio = !!data?.choices?.[0]?.message?.audio;
+      const hasText = !!data?.choices?.[0]?.message?.content;
+      return { reachable: true, inferenceOk: hasAudio || hasText };
+    }
+    // 非 200 响应，抛出以便外层分类
+    const body = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
+  } catch (err) {
+    console.error(`[ProbeTTS] ${ctx.rawModelId} 失败:`, (err as Error).message);
+    throw err;
+  }
 };
+
+/** ASR 探测 — chat/completions + input_audio（MiMo 格式）或 /v1/audio/transcriptions */
+const probeASR: ProbeFn = async (ctx) => {
+  // 方式1: 标准 OpenAI ASR 端点
+  try {
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    // 生成最小 WAV 文件（16kHz, 16bit, mono, 静音 0.1s）
+    const wavBase64 = generateSilentWav();
+    const formData = new FormData();
+    formData.append('model', ctx.rawModelId);
+    const blob = new Blob([Uint8Array.from(atob(wavBase64), c => c.charCodeAt(0))], { type: 'audio/wav' });
+    formData.append('file', blob, 'test.wav');
+    const resp = await withTimeout(
+      fetch(`${base}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ctx.apiKey}` },
+        body: formData,
+      }),
+      ctx.timeoutMs,
+    );
+    if (resp.ok) return { reachable: true, inferenceOk: true };
+  } catch { /* fallthrough */ }
+
+  // 方式2: MiMo 格式 — chat/completions + input_audio data URL（raw fetch）
+  try {
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const wavBase64 = generateSilentWav();
+    const resp = await withTimeout(
+      fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: ctx.rawModelId,
+          messages: [{
+            role: 'user',
+            content: [{ type: 'input_audio', input_audio: { data: `data:audio/wav;base64,${wavBase64}`, format: 'wav' } }],
+          }],
+          max_tokens: 50,
+        }),
+      }),
+      ctx.timeoutMs,
+    );
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      const hasText = !!(data?.choices?.[0]?.message?.content);
+      return { reachable: true, inferenceOk: hasText };
+    }
+    const body = await resp.text().catch(() => '');
+    throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
+  } catch (err) {
+    console.error(`[ProbeASR] ${ctx.rawModelId} 失败:`, (err as Error).message);
+    throw err;
+  }
+};
+
+/** 生成最小静音 WAV (16kHz, 16bit, mono, 0.1s) */
+function generateSilentWav(): string {
+  const sampleRate = 16000;
+  const numSamples = 1600; // 0.1s
+  const dataSize = numSamples * 2; // 16bit = 2 bytes
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  // RIFF header
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+  // silent samples (all zeros)
+  return Buffer.from(buffer).toString('base64');
+}
+
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
 
 // ==================== 工具函数 ====================
 

@@ -277,14 +277,6 @@ export class ModelHealthProber {
           profile.failureType = errorType as any;
           profile.failureStreak = consecutiveFailures;
           profile.lastFailureAt = Date.now();
-
-          // 端点永久不可用 + 非文本模型 → 直接停用，不浪费探测周期
-          if (errorType === 'not_found' && profile.category &&
-              !['chat', 'vl-chat', 'omni-chat', 'reasoning', 'unknown'].includes(profile.category)) {
-            profile.active = false;
-            if (this.verbose) console.warn(`[HealthProber] ${modelId} 非文本模型端点不支持 → active=false`);
-          }
-
           if (this.verbose) console.warn(`[HealthProber] ${modelId} → ${newStatus} (${errorType})`);
         }
       }
