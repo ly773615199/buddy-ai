@@ -128,8 +128,13 @@ export function classifyProbeError(err: unknown): {
     return { scope: 'endpoint', type: 'auth', message: 'API Key 无效' };
   }
 
-  // 权限
+  // 权限（但 403 + 余额关键词 = 余额不足）
   if (lower.includes('403') || lower.includes('forbidden') || lower.includes('permission')) {
+    if (lower.includes('balance') || lower.includes('insufficient') || lower.includes('quota') ||
+        lower.includes('credit') || lower.includes('payment') || lower.includes('billing') ||
+        lower.includes('余额') || lower.includes('不足') || lower.includes('欠费')) {
+      return { scope: 'model', type: 'payment', message: '余额不足' };
+    }
     return { scope: 'model', type: 'permission', message: '无权访问该模型' };
   }
 
@@ -148,6 +153,18 @@ export function classifyProbeError(err: unknown): {
   // 频率限制
   if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
     return { scope: 'model', type: 'rate_limited', message: '请求频率超限' };
+  }
+
+  // Bad Request + 常见余额/配额错误（AI SDK 可能丢失原始 body，只抛出 "Bad Request"）
+  if (lower.includes('bad request') || lower.includes('400')) {
+    // 如果同时包含余额相关关键词，分类为 payment
+    if (lower.includes('balance') || lower.includes('insufficient') || lower.includes('quota') ||
+        lower.includes('credit') || lower.includes('payment') || lower.includes('billing') ||
+        lower.includes('余额') || lower.includes('不足') || lower.includes('欠费')) {
+      return { scope: 'model', type: 'payment', message: '余额不足' };
+    }
+    // Bad Request 可能是模型不支持该请求格式，标记为 unknown 让后续重试
+    return { scope: 'model', type: 'unknown', message: `请求格式错误: ${msg.slice(0, 150)}` };
   }
 
   return { scope: 'model', type: 'unknown', message: msg.slice(0, 200) };
@@ -298,6 +315,286 @@ export async function verifyModelAccess(
 }
 
 // ==================== 异步预验证 ====================
+
+/**
+ * 模型自报能力（探测时收集）
+ */
+export interface ModelSelfReportedCapabilities {
+  /** 是否支持工具调用 */
+  toolCalling?: boolean;
+  /** 是否支持视觉/图片理解 */
+  vision?: boolean;
+  /** 是否支持流式输出 */
+  streaming?: boolean;
+  /** 上下文窗口大小 (tokens) */
+  maxContextTokens?: number;
+  /** 最大输出长度 (tokens) */
+  maxOutputTokens?: number;
+  /** 擅长领域 */
+  strengths?: string[];
+  /** 模型简述 */
+  description?: string;
+}
+
+/**
+ * 轻量 LLM 探测结果
+ */
+export interface InferenceProbeResult {
+  modelId: string;
+  reachable: boolean;
+  inferenceOk: boolean;
+  latencyMs: number;
+  error?: string;
+  errorType?: ModelAccessErrorType;
+  /** 模型自报能力（推理成功时填充） */
+  selfCapabilities?: ModelSelfReportedCapabilities;
+}
+
+/**
+ * 按模型类型探测 — 用对应端点验证是否可用
+ *
+ * 原则：能不能用 = 走对端点、发对请求、有没有回复
+ * - chat/vl-chat/omni → /v1/chat/completions
+ * - embedding → /v1/embeddings
+ * - reranker → /v1/rerank
+ * - image-gen/image-edit → /v1/images/generations
+ * - tts → /v1/audio/speech
+ * - asr/ocr/translation/other → 降级 chat 探测
+ */
+export async function probeModelInference(config: {
+  modelId: string;
+  provider: string;
+  category?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  timeoutMs?: number;
+}): Promise<InferenceProbeResult> {
+  const { modelId, provider, category, apiKey, baseUrl, timeoutMs = 8000 } = config;
+  const startMs = Date.now();
+  const rawModelId = modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
+
+  // 根据 category 路由到对应探测器
+  const probeFn = getProbeByCategory(category);
+
+  try {
+    const result = await probeFn({ modelId, rawModelId, provider, apiKey, baseUrl, timeoutMs });
+    return { ...result, modelId, latencyMs: Date.now() - startMs };
+  } catch (err) {
+    const latencyMs = Date.now() - startMs;
+    const classified = classifyProbeError(extractApiError(err));
+    return { modelId, reachable: false, inferenceOk: false, latencyMs, error: classified.message, errorType: classified.type };
+  }
+}
+
+// ==================== 按类型探测器 ====================
+
+type ProbeFn = (ctx: {
+  modelId: string; rawModelId: string; provider: string;
+  apiKey?: string; baseUrl?: string; timeoutMs: number;
+}) => Promise<{ reachable: boolean; inferenceOk: boolean; selfCapabilities?: ModelSelfReportedCapabilities }>;
+
+function getProbeByCategory(category?: string): ProbeFn {
+  switch (category) {
+    case 'embedding': return probeEmbedding;
+    case 'reranker':  return probeReranker;
+    case 'image-gen':
+    case 'image-edit': return probeImageGen;
+    case 'tts':       return probeTTS;
+    default:          return probeChat; // chat, vl-chat, omni-chat, unknown, other
+  }
+}
+
+/** Chat 探测 — /v1/chat/completions */
+const probeChat: ProbeFn = async (ctx) => {
+  const { ProviderFactory } = await import('./provider-registry.js');
+  const { generateText } = await import('ai');
+
+  const { model } = await ProviderFactory.create({
+    provider: ctx.provider, model: ctx.rawModelId, apiKey: ctx.apiKey, baseUrl: ctx.baseUrl,
+  });
+
+  const result = await withTimeout(
+    generateText({
+      model,
+      messages: [{ role: 'user', content: 'Reply with a JSON object: {"ok":true,"capabilities":{"toolCalling":bool,"vision":bool,"streaming":bool}}' }],
+      maxOutputTokens: 150,
+    }),
+    ctx.timeoutMs,
+  );
+
+  const hasOutput = !!(result.text && result.text.length > 0);
+  let selfCaps: ModelSelfReportedCapabilities | undefined;
+  if (hasOutput) {
+    try {
+      const m = result.text.match(/\{[\s\S]*\}/);
+      if (m) {
+        const p = JSON.parse(m[0]);
+        const c = p.capabilities ?? p;
+        selfCaps = {
+          toolCalling: typeof c.toolCalling === 'boolean' ? c.toolCalling : undefined,
+          vision: typeof c.vision === 'boolean' ? c.vision : undefined,
+          streaming: typeof c.streaming === 'boolean' ? c.streaming : undefined,
+        };
+      }
+    } catch { /* ignore */ }
+  }
+  return { reachable: true, inferenceOk: hasOutput, selfCapabilities: selfCaps };
+};
+
+/** Embedding 探测 — /v1/embeddings */
+const probeEmbedding: ProbeFn = async (ctx) => {
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const resp = await withTimeout(
+    fetch(`${base}/embeddings`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: ctx.rawModelId, input: 'hello' }),
+    }),
+    ctx.timeoutMs,
+  );
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json() as any;
+  const hasVector = !!(data?.data?.[0]?.embedding?.length > 0);
+  return {
+    reachable: true,
+    inferenceOk: hasVector,
+    selfCapabilities: hasVector ? {
+      streaming: false,
+      maxContextTokens: data?.usage?.total_tokens ? undefined : undefined,
+    } : undefined,
+  };
+};
+
+/** Reranker 探测 — /v1/rerank */
+const probeReranker: ProbeFn = async (ctx) => {
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const resp = await withTimeout(
+    fetch(`${base}/rerank`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: ctx.rawModelId, query: 'hello', documents: ['hi', 'bye'] }),
+    }),
+    ctx.timeoutMs,
+  );
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json() as any;
+  const hasScores = !!(data?.results?.length > 0);
+  return { reachable: true, inferenceOk: hasScores };
+};
+
+/** 图像生成探测 — /v1/images/generations */
+const probeImageGen: ProbeFn = async (ctx) => {
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const resp = await withTimeout(
+    fetch(`${base}/images/generations`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: ctx.rawModelId, prompt: 'a red dot', n: 1, size: '256x256' }),
+    }),
+    ctx.timeoutMs,
+  );
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json() as any;
+  const hasImage = !!(data?.data?.length > 0);
+  return { reachable: true, inferenceOk: hasImage };
+};
+
+/** TTS 探测 — /v1/audio/speech */
+const probeTTS: ProbeFn = async (ctx) => {
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const resp = await withTimeout(
+    fetch(`${base}/audio/speech`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: ctx.rawModelId, input: 'hi', voice: 'default' }),
+    }),
+    ctx.timeoutMs,
+  );
+  // TTS 成功返回音频流 (200 + audio/*)
+  const isAudio = resp.ok && (resp.headers.get('content-type')?.includes('audio') || resp.status === 200);
+  return { reachable: resp.ok, inferenceOk: isAudio };
+};
+
+// ==================== 工具函数 ====================
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([promise, new Promise<T>((_, r) => setTimeout(() => r(new Error(`timeout (${ms}ms)`)), ms))]);
+}
+
+/** 从 AI SDK 错误中提取原始 API 错误信息 */
+function extractApiError(err: unknown): Error {
+  const e = err as any;
+  try {
+    // APICallError: 有 statusCode + responseBody
+    if (e.responseBody || e.data?.message) {
+      const status = e.statusCode ?? '';
+      const msg = e.data?.message ?? JSON.parse(e.responseBody ?? '{}').message;
+      if (msg) return new Error(`${status} ${msg}`.trim());
+    }
+    if (e.cause?.responseBody || e.cause?.data?.message) {
+      const c = e.cause;
+      const status = c.statusCode ?? '';
+      const msg = c.data?.message ?? JSON.parse(c.responseBody ?? '{}').message;
+      if (msg) return new Error(`${status} ${msg}`.trim());
+    }
+  } catch { /* ignore */ }
+  return e instanceof Error ? e : new Error(String(e));
+}
+
+/**
+ * 批量推理探测 — 对每个入池模型发真实请求
+ *
+ * 原则：能不能用 = 发个请求有没有回复
+ * - 不做轻量 GET 检查（很多 provider 不支持）
+ * - 不做抽样（要么全测，要么不测）
+ * - 并发控制避免打爆 API
+ * - 结果实时回调，逐个更新状态
+ */
+export async function batchProbeInference(
+  models: Array<{ id: string; platform: string; category?: string }>,
+  getCredentials: (platform: string) => { apiKey?: string; baseUrl?: string } | null,
+  options?: {
+    limit?: number;
+    concurrency?: number;
+    timeoutMs?: number;
+    onResult?: (result: InferenceProbeResult) => void;
+  },
+): Promise<InferenceProbeResult[]> {
+  const limit = options?.limit ?? models.length;
+  const concurrency = options?.concurrency ?? 3;
+  const timeoutMs = options?.timeoutMs ?? 10000;
+  const toProbe = models.slice(0, limit);
+
+  const results: InferenceProbeResult[] = [];
+  let idx = 0;
+
+  const workers = Array.from({ length: Math.min(concurrency, toProbe.length) }, async () => {
+    while (idx < toProbe.length) {
+      const model = toProbe[idx++];
+      const creds = getCredentials(model.platform);
+      if (!creds) {
+        const r: InferenceProbeResult = { modelId: model.id, reachable: false, inferenceOk: false, latencyMs: 0, error: '无 API Key', errorType: 'auth' };
+        results.push(r);
+        options?.onResult?.(r);
+        continue;
+      }
+
+      const result = await probeModelInference({
+        modelId: model.id,
+        provider: model.platform,
+        category: model.category,
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
+        timeoutMs,
+      });
+      results.push(result);
+      options?.onResult?.(result);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * 异步预验证 — 端点添加后后台批量验证模型

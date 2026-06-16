@@ -634,7 +634,7 @@ export function setupRESTAPI(ctx: RESTContext): void {
       if (!id || !type) { json(res, 400, { error: '缺少 id 或 type 字段' }); return; }
 
       const { patchConfig, mapProviderType } = await import('../config.js');
-      const { verifyEndpoint } = await import('./model-access-verifier.js');
+      const { verifyEndpoint, batchProbeInference } = await import('./model-access-verifier.js');
       const endpointResult = await verifyEndpoint({ type, apiKey, baseUrl });
       if (!endpointResult.ok) {
         json(res, 400, { ok: false, error: endpointResult.message, errorType: endpointResult.error, latencyMs: endpointResult.latencyMs });
@@ -668,6 +668,8 @@ export function setupRESTAPI(ctx: RESTContext): void {
       const unifiedPool = sys.llm.getUnifiedPool();
       let modelCount = 0;
       let discoveryError: string | undefined;
+      type ProbeResultItem = Awaited<ReturnType<typeof batchProbeInference>>[number];
+      let probeResults: ProbeResultItem[] = [];
       if (unifiedPool) {
         unifiedPool.updateProviderCredentials(id, { apiKey, baseUrl });
         try {
@@ -698,8 +700,91 @@ export function setupRESTAPI(ctx: RESTContext): void {
               if (sys.modelPoolBridge) sys.modelPoolBridge.fullSync();
             }
           }).catch(() => {});
-          // 异步探活新发现的模型（5s 后，不阻塞响应）
+
+          // ── 即时探活：抽样验证新模型可调用性 ──
+          try {
+            const newModels = result.models.map(p => ({ id: p.id, platform: id, category: p.category }));
+            const sampled = await batchProbeInference(
+              newModels,
+              (platform) => {
+                if (platform === id) return { apiKey, baseUrl };
+                const creds = unifiedPool.getProviderCredentials(platform);
+                return creds ? { apiKey: creds.apiKey, baseUrl: creds.baseUrl } : null;
+              },
+              {
+                concurrency: 3,
+                timeoutMs: 8000,
+                onResult: (r) => {
+                  // 1. 回写 ModelPool.accessStatus
+                  if (r.inferenceOk) {
+                    unifiedPool.recordAccessSuccess(r.modelId);
+                  } else if (r.errorType) {
+                    unifiedPool.recordAccessFailure(r.modelId, r.errorType);
+                  }
+
+                  // 2. 构建能力快照（含模型自报能力）
+                  const caps: Record<string, { value: boolean | number | string; verified: boolean; lastVerifiedAt: number; sourcePriority: number }> = {
+                    reachable: { value: r.reachable, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 },
+                    inferenceOk: { value: r.inferenceOk, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 },
+                  };
+                  if (r.selfCapabilities) {
+                    const sc = r.selfCapabilities;
+                    if (sc.toolCalling !== undefined) caps.toolCalling = { value: sc.toolCalling, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.vision !== undefined) caps.vision = { value: sc.vision, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.streaming !== undefined) caps.streaming = { value: sc.streaming, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.maxContextTokens !== undefined) caps.maxContextTokens = { value: sc.maxContextTokens, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.maxOutputTokens !== undefined) caps.maxOutputTokens = { value: sc.maxOutputTokens, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.description) caps.description = { value: sc.description, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                    if (sc.strengths) caps.strengths = { value: sc.strengths.join(','), verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+                  }
+
+                  // 3. 同步到 ResourceHub + 更新 ModelPool 画像
+                  if (sys.resourceSystem) {
+                    sys.resourceSystem.hub.onProbeResult(`model/${r.modelId}`, {
+                      timestamp: Date.now(),
+                      source: 'probe',
+                      capabilities: caps,
+                      confidence: r.inferenceOk ? 1 : 0.5,
+                      latencyMs: r.latencyMs,
+                      error: r.error,
+                    });
+                  }
+
+                  // 4. 自报能力回写 ModelPool 画像（丰富 derived 能力）
+                  if (r.inferenceOk && r.selfCapabilities) {
+                    const profile = unifiedPool.getProfile(r.modelId);
+                    if (profile) {
+                      const sc = r.selfCapabilities;
+                      if (sc.toolCalling !== undefined) {
+                        profile.capabilities.toolCalling = sc.toolCalling;
+                        if (sc.toolCalling) profile.capabilities.toolCallingMode = 'native';
+                      }
+                      if (sc.vision !== undefined) profile.capabilities.vision = sc.vision;
+                      if (sc.streaming !== undefined) profile.capabilities.streaming = sc.streaming;
+                      if (sc.maxContextTokens) profile.maxContextTokens = sc.maxContextTokens;
+                      if (sc.maxOutputTokens) profile.realMaxOutput = sc.maxOutputTokens;
+                      if (profile.derived) {
+                        profile.derived.toolCapable = sc.toolCalling ?? profile.derived.toolCapable;
+                        profile.derived.visionCapable = sc.vision ?? profile.derived.visionCapable;
+                      }
+                    }
+                  }
+
+                  const capsText = r.selfCapabilities ? ` | caps: ${JSON.stringify(r.selfCapabilities).slice(0, 120)}` : '';
+                  if (verbose) console.log(`[Probe] ${r.modelId}: ${r.inferenceOk ? '✅' : '❌'} ${r.latencyMs}ms${r.error ? ` ${r.error}` : ''}${capsText}`);
+                },
+              },
+            );
+            probeResults.push(...sampled);
+          } catch (probeErr) {
+            if (verbose) console.warn('[Probe] 入池探活失败:', (probeErr as Error).message);
+          }
+
+          // 新模型加入优先队列（下次探测周期优先处理）
           if (sys.healthProber) {
+            const newModelIds = result.models.map(p => p.id);
+            sys.healthProber.enqueuePriority(newModelIds);
+            // 后台补全剩余模型的轻量可达性检查（不阻塞响应）
             setTimeout(() => { sys.healthProber!.probeAll().catch(() => {}); }, 5000);
           }
         }
@@ -707,8 +792,36 @@ export function setupRESTAPI(ctx: RESTContext): void {
       }
 
       linkHandler.updateConfigHash(config);
-      eb.emit({ type: 'bubble', text: `📡 已${isUpdate ? '更新' : '添加'} API 端点: ${id} (${type}), 发现 ${modelCount} 个模型` });
-      json(res, 200, { ok: true, provider: newProvider, modelCount, ...(discoveryError ? { discoveryError } : {}), ...(endpointResult.balanceWarning ? { balanceWarning: endpointResult.balanceWarning, balanceMessage: endpointResult.message } : {}), endpointLatencyMs: endpointResult.latencyMs });
+
+      // 构建探活摘要
+      const probeSummary = probeResults.length > 0 ? {
+        probed: probeResults.length,
+        inferenceOk: probeResults.filter(r => r.inferenceOk).length,
+        reachable: probeResults.filter(r => r.reachable).length,
+        failed: probeResults.filter(r => !r.inferenceOk).length,
+        details: probeResults.map(r => ({
+          modelId: r.modelId,
+          reachable: r.reachable,
+          inferenceOk: r.inferenceOk,
+          latencyMs: r.latencyMs,
+          error: r.error,
+          errorType: r.errorType,
+        })),
+      } : undefined;
+
+      const probedOk = probeResults.filter(r => r.inferenceOk).length;
+      const probedTotal = probeResults.length;
+      const probeStatusText = probedTotal > 0 ? `, 探活 ${probedOk}/${probedTotal} 通过` : '';
+      eb.emit({ type: 'bubble', text: `📡 已${isUpdate ? '更新' : '添加'} API 端点: ${id} (${type}), 发现 ${modelCount} 个模型${probeStatusText}` });
+      json(res, 200, {
+        ok: true,
+        provider: newProvider,
+        modelCount,
+        probe: probeSummary,
+        ...(discoveryError ? { discoveryError } : {}),
+        ...(endpointResult.balanceWarning ? { balanceWarning: endpointResult.balanceWarning, balanceMessage: endpointResult.message } : {}),
+        endpointLatencyMs: endpointResult.latencyMs,
+      });
     } catch (err) { json(res, 500, { error: (err as Error).message }); }
   });
 

@@ -109,6 +109,9 @@ export class LifecycleManager {
       case 'discovered':
         this.transition(resource, 'rejected', `首次探测失败: ${error}`);
         break;
+      case 'rejected':
+        // 已拒绝状态，再次失败无需转换，仅更新计数
+        break;
       case 'active':
         if (resource.consecutiveProbeFailures >= 3) {
           this.transition(resource, 'degraded', `连续 ${resource.consecutiveProbeFailures} 次探测失败`);

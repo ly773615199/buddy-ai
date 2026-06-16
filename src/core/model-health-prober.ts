@@ -65,12 +65,54 @@ export class ModelHealthProber {
   private timer: ReturnType<typeof setInterval> | null = null;
   private verbose: boolean;
   private prober: ((modelId: string) => Promise<{ reachable: boolean; latencyMs: number; error?: string }>) | null;
+  /** 新模型优先队列 — 入池后立即探测 */
+  private priorityQueue: Set<string> = new Set();
+  /** ResourceHub 回调 — 探测结果同步 */
+  private resourceHubSync: ((modelId: string, result: HealthProbeResult) => void) | null = null;
 
-  constructor(pool: ModelPool, config?: Partial<ProbeConfig>, options?: ProbeOptions, verbose = false) {
+  constructor(pool: ModelPool, config?: Partial<ProbeConfig>, options?: ProbeOptions & { resourceHubSync?: (modelId: string, result: HealthProbeResult) => void }, verbose = false) {
     this.pool = pool;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.verbose = verbose;
     this.prober = options?.prober ?? null;
+    this.resourceHubSync = options?.resourceHubSync ?? null;
+  }
+
+  /**
+   * 将新模型加入优先探测队列
+   * 入池时调用，下次探测周期会优先处理这些模型
+   */
+  enqueuePriority(modelIds: string[]): void {
+    for (const id of modelIds) this.priorityQueue.add(id);
+    // 如果探测器尚未启动，立即触发一次优先探测
+    if (this.config.enabled && !this.timer) {
+      this.probePriority().catch(() => {});
+    }
+  }
+
+  /**
+   * 立即探测优先队列中的模型（不等待定时器）
+   */
+  async probePriority(): Promise<HealthProbeResult[]> {
+    if (this.priorityQueue.size === 0) return [];
+    const ids = [...this.priorityQueue];
+    this.priorityQueue.clear();
+
+    if (this.verbose) console.log(`[HealthProber] 优先探活 ${ids.length} 个新模型...`);
+
+    const results: HealthProbeResult[] = [];
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map(id => this.probeOne(id)),
+      );
+      for (const r of batchResults) {
+        if (r.status === 'fulfilled') results.push(r.value);
+      }
+    }
+
+    return results;
   }
 
   // ==================== 生命周期 ====================
@@ -219,8 +261,11 @@ export class ModelHealthProber {
         } else {
           // 不可达 → 探活是独立检查，一次失败即标记
           const errorType = error === 'auth' ? 'auth'
+            : error === 'payment' ? 'payment'
+            : error === 'permission' ? 'permission'
             : error === 'not_found' ? 'not_found'
             : error === 'rate_limited' ? 'rate_limited'
+            : error === 'inference_failed' ? 'unknown'
             : error?.includes('abort') || error?.includes('timeout') ? 'timeout'
             : 'network';
           const PERMANENT = new Set(['auth', 'payment', 'permission', 'not_found']);
@@ -241,6 +286,11 @@ export class ModelHealthProber {
     if (quality === 'unhealthy') {
       if (this.verbose) console.warn(`[HealthProber] ${modelId} 标记为 unhealthy (连续 ${consecutiveFailures} 次失败)`);
     }
+
+    // 同步探测结果到 ResourceHub（一致性保障）
+    try {
+      this.resourceHubSync?.(modelId, result);
+    } catch { /* 静默 */ }
 
     return result;
   }

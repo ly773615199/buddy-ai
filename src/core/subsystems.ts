@@ -310,8 +310,7 @@ export class Subsystems {
       if (verbose) console.log('[UnifiedPool] 已创建（空池），等待 API 端点配置');
     }
 
-    // 模型健康探测器 — 后台定期探测模型可用性
-    // 注入真实 prober：通过 GET /v1/models 端点级探活 + 实际调用测试
+    // 探测方式：按模型类型走对应端点，能不能用 = 走对端点有没有回复
     const realProber = async (modelId: string): Promise<{ reachable: boolean; latencyMs: number; error?: string }> => {
       const profile = pool.getProfile(modelId);
       if (!profile) return { reachable: false, latencyMs: 0, error: '模型不在池中' };
@@ -319,30 +318,60 @@ export class Subsystems {
       const creds = pool.getProviderCredentials(profile.platform);
       if (!creds?.apiKey) return { reachable: false, latencyMs: 0, error: '无 API Key' };
 
-      const baseUrl = (creds.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
-      const startMs = Date.now();
-
       try {
-        // 轻量探测：GET /v1/models/{model_id} 确认模型存在
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 8000);
-        const resp = await fetch(`${baseUrl}/v1/models/${encodeURIComponent(modelId.replace(profile.platform + '/', ''))}`, {
-          headers: { 'Authorization': `Bearer ${creds.apiKey}` },
-          signal: controller.signal,
+        const { probeModelInference } = await import('./model-access-verifier.js');
+        const result = await probeModelInference({
+          modelId,
+          provider: profile.platform,
+          category: profile.category,
+          apiKey: creds.apiKey,
+          baseUrl: creds.baseUrl,
+          timeoutMs: 10000,
         });
-        clearTimeout(timer);
-        const latencyMs = Date.now() - startMs;
 
-        if (resp.ok) return { reachable: true, latencyMs };
-        if (resp.status === 401 || resp.status === 403) return { reachable: false, latencyMs, error: 'auth' };
-        if (resp.status === 404) return { reachable: false, latencyMs, error: 'not_found' };
-        if (resp.status === 429) return { reachable: true, latencyMs, error: 'rate_limited' };
-        return { reachable: true, latencyMs, error: `HTTP ${resp.status}` };
+        // 探测成功 → 更新模型能力画像
+        if (result.inferenceOk && result.selfCapabilities) {
+          const sc = result.selfCapabilities;
+          if (sc.toolCalling !== undefined) profile.capabilities.toolCalling = sc.toolCalling;
+          if (sc.vision !== undefined) profile.capabilities.vision = sc.vision;
+          if (sc.streaming !== undefined) profile.capabilities.streaming = sc.streaming;
+          if (profile.derived) {
+            profile.derived.toolCapable = sc.toolCalling ?? profile.derived.toolCapable;
+            profile.derived.visionCapable = sc.vision ?? profile.derived.visionCapable;
+          }
+        }
+
+        return {
+          reachable: result.inferenceOk,
+          latencyMs: result.latencyMs,
+          error: result.inferenceOk ? undefined : (result.errorType ?? 'inference_failed'),
+        };
       } catch (err) {
-        return { reachable: false, latencyMs: Date.now() - startMs, error: (err as Error).message };
+        return { reachable: false, latencyMs: 0, error: (err as Error).message };
       }
     };
-    this.healthProber = new ModelHealthProber(pool, { enabled: true, intervalMs: 10 * 60 * 1000 }, { prober: realProber }, verbose);
+    this.healthProber = new ModelHealthProber(pool, { enabled: true, intervalMs: 10 * 60 * 1000 }, {
+      prober: realProber,
+      resourceHubSync: (modelId, result) => {
+        // 探测结果同步到 ResourceHub（一致性保障）
+        if (this.resourceSystem) {
+          const resId = `model/${modelId}`;
+          const resource = this.resourceSystem.hub.get(resId);
+          if (resource) {
+            this.resourceSystem.hub.onProbeResult(resId, {
+              timestamp: Date.now(),
+              source: 'probe',
+              capabilities: {
+                reachable: { value: result.reachable, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 },
+              },
+              confidence: result.reachable ? 1 : 0.5,
+              latencyMs: result.latencyMs,
+              error: result.error,
+            });
+          }
+        }
+      },
+    }, verbose);
     this.healthProber.start();
 
     // §2.7: denied 模型自动重试定时器 — 每小时检查一次
