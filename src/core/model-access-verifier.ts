@@ -543,9 +543,10 @@ const probeTTS: ProbeFn = async (ctx) => {
     const body = await resp.text().catch(() => '');
     throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
   } catch (err) {
-    console.error(`[ProbeTTS] ${ctx.rawModelId} 失败:`, (err as Error).message);
-    throw err;
+    console.error(`[ProbeTTS] ${ctx.rawModelId} 失败:`, (err as Error).message.slice(0, 120));
   }
+
+  return { reachable: false, inferenceOk: false };
 };
 
 /** ASR 探测 — chat/completions + input_audio（MiMo 格式）或 /v1/audio/transcriptions */
@@ -597,9 +598,10 @@ const probeASR: ProbeFn = async (ctx) => {
     const body = await resp.text().catch(() => '');
     throw new Error(`HTTP ${resp.status}: ${body.slice(0, 200)}`);
   } catch (err) {
-    console.error(`[ProbeASR] ${ctx.rawModelId} 失败:`, (err as Error).message);
-    throw err;
+    console.error(`[ProbeASR] ${ctx.rawModelId} 失败:`, (err as Error).message.slice(0, 120));
   }
+
+  return { reachable: false, inferenceOk: false };
 };
 
 /** 生成最小静音 WAV (16kHz, 16bit, mono, 0.1s) */
