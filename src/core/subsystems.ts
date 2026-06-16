@@ -316,7 +316,7 @@ export class Subsystems {
       const profile = pool.getProfile(modelId);
       if (!profile) return { reachable: false, latencyMs: 0, error: '模型不在池中' };
 
-      const creds = (pool as any).providerCredentials?.get(profile.platform) as { apiKey?: string; baseUrl?: string } | undefined;
+      const creds = pool.getProviderCredentials(profile.platform);
       if (!creds?.apiKey) return { reachable: false, latencyMs: 0, error: '无 API Key' };
 
       const baseUrl = (creds.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');

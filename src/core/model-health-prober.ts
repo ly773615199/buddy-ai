@@ -88,7 +88,14 @@ export class ModelHealthProber {
 
     // 首次探测延迟 30 秒（等系统稳定）
     setTimeout(() => {
-      this.probeAll().catch(() => {});
+      if (this.verbose) console.log(`[HealthProber] 首次探活开始...`);
+      this.probeAll().then(results => {
+        const available = results.filter(r => r.reachable).length;
+        const denied = results.filter(r => !r.reachable).length;
+        if (this.verbose) console.log(`[HealthProber] 首次探活完成: ${available} 可用, ${denied} 不可用, 共 ${results.length} 个`);
+      }).catch(err => {
+        if (this.verbose) console.warn('[HealthProber] 首次探活失败:', (err as Error).message);
+      });
     }, 30_000);
 
     if (this.verbose) console.log(`[HealthProber] 启动，间隔 ${this.config.intervalMs / 1000}s`);
@@ -107,6 +114,7 @@ export class ModelHealthProber {
   /** 探测所有模型 */
   async probeAll(): Promise<HealthProbeResult[]> {
     const profiles = this.pool.getAllProfiles();
+    if (this.verbose) console.log(`[HealthProber] 开始探活 ${profiles.length} 个模型...`);
     const results: HealthProbeResult[] = [];
 
     // 限制并发：最多同时探测 3 个
@@ -205,18 +213,26 @@ export class ModelHealthProber {
     try {
       const profile = this.pool.getProfile(modelId);
       if (profile) {
-        if (!reachable) {
-          if (consecutiveFailures >= this.config.unhealthyThreshold) {
-            const errorType = error === 'auth' ? 'auth'
-              : error === 'not_found' ? 'not_found'
-              : error === 'rate_limited' ? 'rate_limited'
-              : error?.includes('abort') || error?.includes('timeout') ? 'timeout'
-              : 'network';
-            this.pool.recordAccessFailure(modelId, errorType as any);
-          }
-        } else {
+        if (reachable) {
           // 可达 → 恢复为 available
           this.pool.setModelAccessStatus(modelId, 'available');
+        } else {
+          // 不可达 → 探活是独立检查，一次失败即标记
+          const errorType = error === 'auth' ? 'auth'
+            : error === 'not_found' ? 'not_found'
+            : error === 'rate_limited' ? 'rate_limited'
+            : error?.includes('abort') || error?.includes('timeout') ? 'timeout'
+            : 'network';
+          const PERMANENT = new Set(['auth', 'payment', 'permission', 'not_found']);
+          // 探活是主动探测，一次不可达即标记 denied（非运行时失败累积）
+          const newStatus = PERMANENT.has(errorType) ? 'denied'
+            : consecutiveFailures >= this.config.unhealthyThreshold ? 'broken'
+            : 'denied'; // 首次不可达也标记 denied，运行时成功会自动恢复
+          this.pool.setModelAccessStatus(modelId, newStatus);
+          profile.failureType = errorType as any;
+          profile.failureStreak = consecutiveFailures;
+          profile.lastFailureAt = Date.now();
+          if (this.verbose) console.warn(`[HealthProber] ${modelId} → ${newStatus} (${errorType})`);
         }
       }
     } catch { /* 静默 */ }
