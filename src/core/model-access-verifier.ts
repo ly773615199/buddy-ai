@@ -444,7 +444,7 @@ const probeChat: ProbeFn = async (ctx) => {
 
 /** Embedding 探测 — /v1/embeddings */
 const probeEmbedding: ProbeFn = async (ctx) => {
-  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
   const resp = await withTimeout(
     fetch(`${base}/embeddings`, {
       method: 'POST',
@@ -468,7 +468,7 @@ const probeEmbedding: ProbeFn = async (ctx) => {
 
 /** Reranker 探测 — /v1/rerank */
 const probeReranker: ProbeFn = async (ctx) => {
-  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
   const resp = await withTimeout(
     fetch(`${base}/rerank`, {
       method: 'POST',
@@ -485,7 +485,7 @@ const probeReranker: ProbeFn = async (ctx) => {
 
 /** 图像生成探测 — /v1/images/generations */
 const probeImageGen: ProbeFn = async (ctx) => {
-  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+  const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
   const resp = await withTimeout(
     fetch(`${base}/images/generations`, {
       method: 'POST',
@@ -504,7 +504,7 @@ const probeImageGen: ProbeFn = async (ctx) => {
 const probeTTS: ProbeFn = async (ctx) => {
   // 方式1: 标准 OpenAI TTS 端点
   try {
-    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
     const resp = await withTimeout(
       fetch(`${base}/audio/speech`, {
         method: 'POST',
@@ -518,9 +518,11 @@ const probeTTS: ProbeFn = async (ctx) => {
 
   // 方式2: MiMo 格式 — chat/completions + assistant role
   try {
-    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
+    const url = `${base}/chat/completions`;
+    console.log(`[ProbeTTS] 尝试 MiMo 格式: ${url}, model=${ctx.rawModelId}`);
     const resp = await withTimeout(
-      fetch(`${base}/chat/completions`, {
+      fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${ctx.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -551,7 +553,7 @@ const probeTTS: ProbeFn = async (ctx) => {
 const probeASR: ProbeFn = async (ctx) => {
   // 方式1: 标准 OpenAI ASR 端点
   try {
-    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
     // 生成最小 WAV 文件（16kHz, 16bit, mono, 静音 0.1s）
     const wavBase64 = generateSilentWav();
     const formData = new FormData();
@@ -571,7 +573,7 @@ const probeASR: ProbeFn = async (ctx) => {
 
   // 方式2: MiMo 格式 — chat/completions + input_audio data URL（raw fetch）
   try {
-    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1').replace(/\/v1\/?$/, '');
+    const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
     const wavBase64 = generateSilentWav();
     const resp = await withTimeout(
       fetch(`${base}/chat/completions`, {
