@@ -201,6 +201,26 @@ export class ModelHealthProber {
 
     this.results.set(modelId, result);
 
+    // 回写 ModelPool 的 accessStatus（P2-2: 探活结果同步到模型画像）
+    try {
+      const profile = this.pool.getProfile(modelId);
+      if (profile) {
+        if (!reachable) {
+          if (consecutiveFailures >= this.config.unhealthyThreshold) {
+            const errorType = error === 'auth' ? 'auth'
+              : error === 'not_found' ? 'not_found'
+              : error === 'rate_limited' ? 'rate_limited'
+              : error?.includes('abort') || error?.includes('timeout') ? 'timeout'
+              : 'network';
+            this.pool.recordAccessFailure(modelId, errorType as any);
+          }
+        } else {
+          // 可达 → 恢复为 available
+          this.pool.setModelAccessStatus(modelId, 'available');
+        }
+      }
+    } catch { /* 静默 */ }
+
     // unhealthy 模型自动降权
     if (quality === 'unhealthy') {
       if (this.verbose) console.warn(`[HealthProber] ${modelId} 标记为 unhealthy (连续 ${consecutiveFailures} 次失败)`);
