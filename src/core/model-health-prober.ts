@@ -268,15 +268,23 @@ export class ModelHealthProber {
             : error === 'inference_failed' ? 'unknown'
             : error?.includes('abort') || error?.includes('timeout') ? 'timeout'
             : 'network';
-          const PERMANENT = new Set(['auth', 'payment', 'permission', 'not_found']);
           // 探活是主动探测，一次不可达即标记 denied（非运行时失败累积）
-          const newStatus = PERMANENT.has(errorType) ? 'denied'
+          const newStatus = errorType === 'not_found' ? 'denied' // 端点不支持，可能重试
+            : errorType === 'auth' ? 'denied'            // Key 问题，用户可能更换
             : consecutiveFailures >= this.config.unhealthyThreshold ? 'broken'
-            : 'denied'; // 首次不可达也标记 denied，运行时成功会自动恢复
+            : 'denied';
           this.pool.setModelAccessStatus(modelId, newStatus);
           profile.failureType = errorType as any;
           profile.failureStreak = consecutiveFailures;
           profile.lastFailureAt = Date.now();
+
+          // 端点永久不可用 + 非文本模型 → 直接停用，不浪费探测周期
+          if (errorType === 'not_found' && profile.category &&
+              !['chat', 'vl-chat', 'omni-chat', 'reasoning', 'unknown'].includes(profile.category)) {
+            profile.active = false;
+            if (this.verbose) console.warn(`[HealthProber] ${modelId} 非文本模型端点不支持 → active=false`);
+          }
+
           if (this.verbose) console.warn(`[HealthProber] ${modelId} → ${newStatus} (${errorType})`);
         }
       }
