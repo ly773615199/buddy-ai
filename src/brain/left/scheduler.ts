@@ -37,6 +37,12 @@ export interface SchedulerConfig {
   metacognitiveForceLlm: number;
   /** 元认知：quality 低于此值要求 LLM 验证 */
   metacognitiveCaution: number;
+  /** 冷启动探索系数（前 N 次决策时使用） */
+  coldStartExplorationFactor: number;
+  /** 冷启动阈值（决策次数低于此值时使用冷启动探索） */
+  coldStartThreshold: number;
+  /** 用户纠正后增加探索的系数 */
+  correctionExplorationBoost: number;
 }
 
 const DEFAULT_CONFIG: SchedulerConfig = {
@@ -48,6 +54,9 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   useThompsonSampling: true,
   metacognitiveForceLlm: 0.3,
   metacognitiveCaution: 0.5,
+  coldStartExplorationFactor: 2.0,
+  coldStartThreshold: 20,
+  correctionExplorationBoost: 0.5,
 };
 
 // ==================== 路由路径 ====================
@@ -137,6 +146,10 @@ export class UnifiedScheduler {
   // Phase 4: 右脑 predictDetailed 注入（可选）
   private _rightBrainPredictDetailed: ((signal: TaskSignal, resources: ResourceState, body?: BodyState) => Promise<{ tools: Array<{ name: string; probability: number }> }>) | null = null;
 
+  // O4: 决策计数器（冷启动检测 + 探索系数动态调整）
+  private decisionCount = 0;
+  private userCorrectionCount = 0;
+
   // Phase 1.1: 当前调度的资源状态（供 selectViaRouter 读取排除列表）
   private _currentResources: ResourceState | null = null;
 
@@ -165,6 +178,56 @@ export class UnifiedScheduler {
   }
 
   /**
+   * O4: 获取当前探索系数（动态调整）
+   *
+   * 三阶段策略：
+   * 1. 冷启动阶段（decisionCount < coldStartThreshold）：使用 coldStartExplorationFactor
+   * 2. 稳定阶段：使用基础 explorationFactor
+   * 3. 用户纠正后：额外增加 correctionExplorationBoost * 纠正次数
+   *
+   * 上限 3.0，防止过度探索
+   */
+  getExplorationFactor(): number {
+    let factor = this.config.explorationFactor;
+
+    // 冷启动阶段：更激进探索
+    if (this.decisionCount < this.config.coldStartThreshold) {
+      factor = this.config.coldStartExplorationFactor;
+    }
+
+    // 用户纠正后：增加探索
+    factor += this.userCorrectionCount * this.config.correctionExplorationBoost;
+
+    return Math.min(factor, 3.0);
+  }
+
+  /**
+   * O4: 记录一次调度决策（用于冷启动检测）
+   */
+  recordDecision(): void {
+    this.decisionCount++;
+  }
+
+  /**
+   * O4: 记录用户纠正（增加探索系数）
+   *
+   * 当用户对模型选择不满或主动切换模型时调用
+   */
+  recordCorrection(): void {
+    this.userCorrectionCount++;
+    if (this.verbose) {
+      console.log(`[Scheduler] 用户纠正 #${this.userCorrectionCount}，探索系数 → ${this.getExplorationFactor().toFixed(2)}`);
+    }
+  }
+
+  /**
+   * 重置纠正计数器（稳定运行一段时间后可调用）
+   */
+  resetCorrections(): void {
+    this.userCorrectionCount = 0;
+  }
+
+  /**
    * 调度决策 — 四层路由 + 元认知 + Thompson Sampling + 小脑稳态
    *
    * Phase 1.1: 新增 failureContext 参数，失败时换路走而非重跑同样流程
@@ -188,6 +251,9 @@ export class UnifiedScheduler {
     body?: BodyState,
     failureContext?: FailureAnalysis,
   ): Promise<ExecutionPlan> {
+    // O4: 记录决策次数（冷启动检测）
+    this.recordDecision();
+
     // Phase 1.1: 存储当前资源状态供 selectViaRouter 读取排除列表
     this._currentResources = resources;
 
@@ -440,7 +506,7 @@ export class UnifiedScheduler {
 
       const alpha = hist.weightedSuccesses + 1;
       const beta = hist.attempts - hist.weightedSuccesses + 1;
-      const sample = betaSample(alpha, beta) * this.config.explorationFactor;
+      const sample = betaSample(alpha, beta) * this.getExplorationFactor();
 
       toolScores.push({ tool, sample });
     }
@@ -484,7 +550,7 @@ export class UnifiedScheduler {
         // 概率先验：右脑给的 probability 乘以 5 作为额外 alpha
         const alpha = hist.weightedSuccesses + 1 + tool.probability * 5;
         const beta = hist.attempts - hist.weightedSuccesses + 1;
-        const sample = betaSample(alpha, beta) * this.config.explorationFactor;
+        const sample = betaSample(alpha, beta) * this.getExplorationFactor();
 
         toolScores.push({ tool: tool.name, sample, prob: tool.probability });
       }

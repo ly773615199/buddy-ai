@@ -1,0 +1,32 @@
+{
+  "name": "diagram_mermaid",
+  "description": "使用 Mermaid 语法生成流程图、时序图、类图等图表（输出 SVG/PNG）",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["图表", "流程图", "Mermaid"],
+  "permission": "exec_safe",
+  "parameters": {
+    "code": {
+      "type": "string",
+      "description": "Mermaid 图表代码",
+      "required": true
+    },
+    "format": {
+      "type": "string",
+      "description": "输出格式：svg / png",
+      "required": false,
+      "default": "svg",
+      "enum": ["svg", "png"]
+    },
+    "output": {
+      "type": "string",
+      "description": "输出文件路径",
+      "required": true
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport sys\ncode = '''${code}'''\nfmt = '${format}' or 'svg'\noutput = '${output}'\nimport subprocess, tempfile, os\nwith tempfile.NamedTemporaryFile(mode='w', suffix='.mmd', delete=False) as f:\n    f.write(code)\n    tmp = f.name\ntry:\n    cmd = ['npx', '-y', '@mermaid-js/mermaid-cli', 'mmdc', '-i', tmp, '-o', output, '-b', 'white']\n    if fmt == 'svg':\n        cmd.extend(['--outputFormat', 'svg'])\n    else:\n        cmd.extend(['--outputFormat', 'png'])\n    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)\n    if r.returncode == 0:\n        print(f'图表已保存到 {output}')\n    else:\n        print(f'生成失败: {r.stderr[:500]}')\n        sys.exit(1)\nfinally:\n    os.unlink(tmp)\n\" 2>&1",
+    "timeout": 90
+  },
+  "resultParser": "text"
+}

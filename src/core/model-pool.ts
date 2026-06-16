@@ -336,6 +336,90 @@ export class ModelPool {
     this.providerCredentials.set(platformId, creds);
   }
 
+  /**
+   * Provider 余额预检（P2-2）
+   *
+   * 启动时调用，检测各 provider 的账户余额。
+   * 支持 SiliconFlow 等提供余额查询 API 的平台。
+   * 余额不足时标记 provider 状态，避免后续请求级联失败。
+   */
+  async checkBalances(): Promise<Map<string, { ok: boolean; balance?: number; error?: string }>> {
+    const results = new Map<string, { ok: boolean; balance?: number; error?: string }>();
+
+    for (const [platformId, creds] of this.providerCredentials) {
+      if (!creds.apiKey) {
+        results.set(platformId, { ok: true }); // 无 key，跳过检测
+        continue;
+      }
+
+      try {
+        const result = await this.queryProviderBalance(platformId, creds.apiKey, creds.baseUrl);
+        results.set(platformId, result);
+
+        if (!result.ok) {
+          console.warn(`[ModelPool] ⚠️ ${platformId} 余额不足: ${result.balance ?? 'unknown'}`);
+          // 标记该平台所有模型为 denied
+          this.markPlatformDenied(platformId, 'balance');
+        }
+      } catch (err) {
+        results.set(platformId, { ok: true, error: (err as Error).message }); // 无法检测时假设正常
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 查询单个 provider 的余额
+   * 支持 SiliconFlow API，其他平台可扩展
+   */
+  private async queryProviderBalance(
+    platformId: string,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<{ ok: boolean; balance?: number }> {
+    // SiliconFlow 余额查询
+    if (platformId === 'siliconflow' || (baseUrl ?? '').includes('siliconflow')) {
+      const url = `${baseUrl ?? 'https://api.siliconflow.cn'}/v1/user/info`;
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { data?: { balance?: number | string } };
+        const balance = Number(data.data?.balance ?? 0);
+        return { ok: balance > 0, balance };
+      }
+      // 非 200 但不一定是余额问题
+      return { ok: true };
+    }
+
+    // 通用 OpenAI 兼容平台：尝试 /models 探活
+    const testUrl = `${baseUrl ?? 'https://api.openai.com'}/models`;
+    const resp = await fetch(testUrl, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    // 401/403 = 认证失败，可能余额耗尽
+    if (resp.status === 401 || resp.status === 403) {
+      return { ok: false, balance: 0 };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * 标记某平台所有模型为 denied（余额不足/认证失败）
+   */
+  private markPlatformDenied(platformId: string, reason: string): void {
+    for (const [id, profile] of this.profiles) {
+      if (profile.platform === platformId) {
+        profile.accessStatus = 'denied';
+        profile.failureType = reason as any;
+      }
+    }
+    console.log(`[ModelPool] ${platformId} 平台 ${reason}，已标记所有模型为 denied`);
+  }
+
   // ====================================================================
   // 旧 ModelPool：节点管理（保留，向后兼容）
   // ====================================================================
@@ -696,6 +780,11 @@ export class ModelPool {
     for (const p of providers) {
       this.providerCredentials.set(p.id, { apiKey: p.apiKey, baseUrl: p.baseUrl });
     }
+
+    // 0.5 余额预检（P2-2）— 异步执行，不阻塞后续初始化
+    this.checkBalances().catch(err => {
+      console.debug('[ModelPool] 余额预检异常:', (err as Error).message);
+    });
 
     // 1. 加载本地缓存（快速路径）
     const cachedCount = this.loadCachedProfiles();

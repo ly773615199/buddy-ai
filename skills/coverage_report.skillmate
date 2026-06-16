@@ -1,0 +1,32 @@
+{
+  "name": "coverage_report",
+  "description": "运行测试并生成覆盖率报告",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["开发", "测试", "覆盖率"],
+  "permission": "exec_safe",
+  "parameters": {
+    "path": {
+      "type": "string",
+      "description": "项目路径（默认当前目录）",
+      "required": false,
+      "default": "."
+    },
+    "pattern": {
+      "type": "string",
+      "description": "测试文件匹配模式（如 src/core/**/*.test.ts）",
+      "required": false
+    },
+    "threshold": {
+      "type": "number",
+      "description": "覆盖率阈值（低于此值标红）",
+      "required": false,
+      "default": 80
+    }
+  },
+  "execute": {
+    "command": "bash -c '\ncd ${path} 2>/dev/null || cd .\necho \"=== 测试覆盖率报告 ===\"\n\n# 检测测试框架\nif [ -f vitest.config.ts ] || [ -f vitest.config.js ]; then\n  CMD=\"npx vitest run --coverage\"\n  if [ -n \"${pattern}\" ]; then\n    CMD=\"$CMD ${pattern}\"\n  fi\n  echo \"框架: vitest\"\nelif [ -f jest.config.js ] || [ -f jest.config.ts ]; then\n  CMD=\"npx jest --coverage\"\n  if [ -n \"${pattern}\" ]; then\n    CMD=\"$CMD --testPathPattern=${pattern}\"\n  fi\n  echo \"框架: jest\"\nelse\n  echo \"未检测到测试框架配置\"\n  exit 1\nfi\n\necho \"命令: $CMD\"\necho \"---\"\neval $CMD 2>&1 | tail -50\n\n# 提取覆盖率摘要\ncoverage_pct=$(eval $CMD 2>&1 | grep -oP \"All files[|\\s]+\\K[0-9.]+\" | head -1)\nif [ -n \"$coverage_pct\" ]; then\n  echo \"\\n总覆盖率: ${coverage_pct}%\"\n  threshold=${threshold}\n  if (( $(echo \"$coverage_pct < $threshold\" | bc -l) )); then\n    echo \"⚠️  低于阈值 ${threshold}%\"\n  else\n    echo \"✅ 达标\"\n  fi\nfi\n'",
+    "timeout": 120
+  },
+  "resultParser": "text"
+}

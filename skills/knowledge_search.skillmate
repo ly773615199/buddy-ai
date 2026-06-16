@@ -1,0 +1,33 @@
+{
+  "name": "knowledge_search",
+  "description": "在项目知识库中搜索：代码、文档、记忆、经验图谱",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["知识", "搜索", "检索"],
+  "permission": "exec_safe",
+  "parameters": {
+    "query": {
+      "type": "string",
+      "description": "搜索关键词或问题",
+      "required": true
+    },
+    "scope": {
+      "type": "string",
+      "description": "搜索范围：code(代码) / docs(文档) / all(全部)",
+      "required": false,
+      "default": "all",
+      "enum": ["code", "docs", "all"]
+    },
+    "limit": {
+      "type": "number",
+      "description": "返回结果数",
+      "required": false,
+      "default": 10
+    }
+  },
+  "execute": {
+    "command": "bash -c '\nquery=\"${query}\"\nscope=\"${scope}\"\nlimit=${limit:-10}\n\necho \"=== 知识检索: $query ===\"\n\nif [ \"$scope\" = \"code\" ] || [ \"$scope\" = \"all\" ]; then\n  echo \"\\n--- 代码搜索 ---\"\n  if command -v rg &>/dev/null; then\n    rg -n -i --max-count=3 \"$query\" --type ts --type js 2>/dev/null | head -$limit || echo \"(无匹配)\"\n  else\n    grep -rn -i --include=\"*.ts\" --include=\"*.js\" --include=\"*.tsx\" --include=\"*.jsx\" \"$query\" . 2>/dev/null | head -$limit || echo \"(无匹配)\"\n  fi\nfi\n\nif [ \"$scope\" = \"docs\" ] || [ \"$scope\" = \"all\" ]; then\n  echo \"\\n--- 文档搜索 ---\"\n  if command -v rg &>/dev/null; then\n    rg -n -i --max-count=3 \"$query\" --type md --type txt 2>/dev/null | head -$limit || echo \"(无匹配)\"\n  else\n    grep -rn -i --include=\"*.md\" --include=\"*.txt\" --include=\"*.json\" \"$query\" . 2>/dev/null | head -$limit || echo \"(无匹配)\"\n  fi\nfi\n\nif [ \"$scope\" = \"all\" ]; then\n  echo \"\\n--- 经验/记忆搜索 ---\"\n  if [ -d memory ]; then\n    grep -rn -i \"$query\" memory/ 2>/dev/null | head -5 || echo \"(无匹配)\"\n  fi\n  if [ -f MEMORY.md ]; then\n    grep -n -i \"$query\" MEMORY.md 2>/dev/null | head -5 || echo \"(无匹配)\"\n  fi\nfi\n'",
+    "timeout": 30
+  },
+  "resultParser": "text"
+}

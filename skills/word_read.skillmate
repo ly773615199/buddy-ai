@@ -1,0 +1,33 @@
+{
+  "name": "word_read",
+  "description": "读取 Word 文档(.docx)内容，提取文本和段落结构",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["文档", "Word", "办公"],
+  "permission": "exec_safe",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "description": "Word 文件路径（.docx）",
+      "required": true
+    },
+    "action": {
+      "type": "string",
+      "description": "操作：text(纯文本) / structure(段落结构) / tables(提取表格)",
+      "required": false,
+      "default": "text",
+      "enum": ["text", "structure", "tables"]
+    },
+    "limit": {
+      "type": "number",
+      "description": "最大段落数",
+      "required": false,
+      "default": 100
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport zipfile, xml.etree.ElementTree as ET, sys, re\nfile = '${file}'\naction = '${action}' or 'text'\nlimit = int('${limit}' or 100)\n\n# docx 是 zip 格式，内含 document.xml\ntry:\n    z = zipfile.ZipFile(file)\nexcept Exception as e:\n    print(f'无法打开文件: {e}')\n    sys.exit(1)\n\n# 解析 document.xml\ntry:\n    xml_content = z.read('word/document.xml')\nexcept:\n    print('不是有效的 .docx 文件')\n    z.close()\n    sys.exit(1)\n\nns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}\nroot = ET.fromstring(xml_content)\n\nif action == 'text':\n    # 提取所有文本\n    texts = []\n    for p in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):\n        para_text = ''\n        for t in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'):\n            if t.text:\n                para_text += t.text\n        if para_text.strip():\n            texts.append(para_text.strip())\n    print(f'段落数: {len(texts)}')\n    print('---')\n    for t in texts[:limit]:\n        print(t)\n        print()\n\nelif action == 'structure':\n    # 提取段落结构（含标题层级）\n    paras = root.findall('.//w:p', ns)\n    count = 0\n    for p in paras:\n        if count >= limit: break\n        # 检查是否是标题\n        ppr = p.find('.//w:pPr', ns)\n        style = ''\n        if ppr is not None:\n            pstyle = ppr.find('.//w:pStyle', ns)\n            if pstyle is not None:\n                style = pstyle.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '')\n        # 获取文本\n        para_text = ''\n        for t in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'):\n            if t.text:\n                para_text += t.text\n        if not para_text.strip():\n            continue\n        prefix = ''\n        if 'heading' in style.lower() or 'Heading' in style:\n            level = re.search(r'\\d+', style)\n            if level:\n                prefix = '#' * int(level.group()) + ' '\n            else:\n                prefix = '## '\n        print(f'{prefix}{para_text.strip()}')\n        count += 1\n\nelif action == 'tables':\n    tables = root.findall('.//w:tbl', ns)\n    print(f'表格数: {len(tables)}')\n    for ti, tbl in enumerate(tables):\n        print(f'\\n--- 表格 {ti+1} ---')\n        rows = tbl.findall('.//w:tr', ns)\n        for row in rows:\n            cells = row.findall('.//w:tc', ns)\n            cell_texts = []\n            for cell in cells:\n                ct = ''\n                for t in cell.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t'):\n                    if t.text: ct += t.text\n                cell_texts.append(ct.strip())\n            print(' | '.join(cell_texts))\n\nz.close()\n\" 2>&1",
+    "timeout": 30
+  },
+  "resultParser": "text"
+}

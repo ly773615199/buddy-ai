@@ -193,6 +193,24 @@ export class RightBrain {
         const protoDist = match.prototype.toolDist;
         const totalUses = [...protoDist.values()].reduce((a, b) => a + b, 0) || 1;
 
+        // P2-3: 增强匹配 — 用 domainOverlap + intentKeyword 评分获取 top3 候选
+        const enhanced = this.prototypeMemory.findBestEnhanced(
+          output._hidden,
+          signal.domains,
+          signal.content ?? '',
+          3,
+        );
+        // 从增强结果中提取额外的工具先验（权重 0.15）
+        const enhancedToolBoost = new Map<string, number>();
+        for (const candidate of enhanced) {
+          if (candidate.score > 0.5) {
+            const tools = candidate.prototype.topTools(5);
+            for (const tool of tools) {
+              enhancedToolBoost.set(tool, (enhancedToolBoost.get(tool) ?? 0) + candidate.score);
+            }
+          }
+        }
+
         // 将原型工具先验注入 NN 工具概率（加权融合）
         for (const tool of decision.tools) {
           const protoCount = protoDist.get(tool.name) ?? 0;
@@ -200,6 +218,11 @@ export class RightBrain {
             const protoProb = protoCount / totalUses;
             // 融合：NN 概率先验 + 原型频率先验（原型权重 0.3）
             tool.probability = tool.probability * 0.7 + protoProb * 0.3;
+          }
+          // P2-3: 增强匹配加成
+          const boost = enhancedToolBoost.get(tool.name);
+          if (boost) {
+            tool.probability += boost * 0.15;
           }
         }
 

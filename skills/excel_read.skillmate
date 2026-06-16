@@ -1,0 +1,38 @@
+{
+  "name": "excel_read",
+  "description": "读取 Excel 文件内容：预览、统计、查询指定 Sheet",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["数据", "Excel", "办公"],
+  "permission": "exec_safe",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "description": "Excel 文件路径（.xlsx）",
+      "required": true
+    },
+    "sheet": {
+      "type": "string",
+      "description": "Sheet 名称，默认第一个",
+      "required": false
+    },
+    "action": {
+      "type": "string",
+      "description": "操作：list_sheets(列出所有Sheet) / head(预览) / stats(统计)",
+      "required": false,
+      "default": "head",
+      "enum": ["list_sheets", "head", "stats"]
+    },
+    "limit": {
+      "type": "number",
+      "description": "预览行数",
+      "required": false,
+      "default": 20
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport openpyxl, sys, statistics\nfile='${file}'\nsheet_name='${sheet}' or None\naction='${action}' or 'head'\nlimit=int('${limit}' or 20)\n\nwb = openpyxl.load_workbook(file, read_only=True, data_only=True)\n\nif action == 'list_sheets':\n    print(f'文件: {file}')\n    print(f'Sheet 列表 ({len(wb.sheetnames)}):')\n    for name in wb.sheetnames:\n        ws = wb[name]\n        print(f'  {name}: {ws.max_row}行 x {ws.max_column}列')\n    wb.close()\n    sys.exit(0)\n\nws = wb[sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.active\nif not ws:\n    print('Sheet 不存在'); wb.close(); sys.exit(1)\n\nprint(f'Sheet: {ws.title} ({ws.max_row}行 x {ws.max_column}列)')\n\nif action == 'head':\n    rows = list(ws.iter_rows(max_row=limit+1, values_only=True))\n    if rows:\n        headers = [str(h) if h else f'col_{i}' for i, h in enumerate(rows[0])]\n        print('列: ' + ' | '.join(headers))\n        print('---')\n        for row in rows[1:]:\n            print(' | '.join(str(v) if v is not None else '' for v in row))\n\nelif action == 'stats':\n    rows = list(ws.iter_rows(values_only=True))\n    if rows:\n        headers = [str(h) if h else f'col_{i}' for i, h in enumerate(rows[0])]\n        print(f'列数: {len(headers)}, 数据行: {len(rows)-1}')\n        print('列: ' + ', '.join(headers))\n        data_rows = rows[1:]\n        for ci, h in enumerate(headers):\n            col_vals = [row[ci] for row in data_rows if ci < len(row) and row[ci] is not None]\n            nums = [float(v) for v in col_vals if isinstance(v, (int, float))]\n            if nums:\n                print(f'  {h}: min={min(nums):.2f}, max={max(nums):.2f}, avg={statistics.mean(nums):.2f}, count={len(nums)}')\n            else:\n                uniques = set(str(v) for v in col_vals[:100])\n                print(f'  {h}: {len(col_vals)} 值, {len(uniques)} 唯一, 示例: {list(uniques)[:3]}')\n\nwb.close()\n\" 2>&1",
+    "timeout": 30
+  },
+  "resultParser": "text"
+}

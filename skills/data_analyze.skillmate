@@ -1,0 +1,40 @@
+{
+  "name": "data_analyze",
+  "description": "对 CSV/JSON 数据进行统计分析：分布、相关性、异常值检测",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": [
+    "数据",
+    "统计",
+    "分析"
+  ],
+  "permission": "exec_safe",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "description": "数据文件路径（CSV 或 JSON）",
+      "required": true
+    },
+    "analysis": {
+      "type": "string",
+      "description": "分析类型：summary/distribution/outliers/correlation",
+      "required": true,
+      "enum": [
+        "summary",
+        "distribution",
+        "outliers",
+        "correlation"
+      ]
+    },
+    "columns": {
+      "type": "string",
+      "description": "分析的列名（逗号分隔）",
+      "required": false
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport csv, json, sys, statistics, math\nfile='${file}'\nanalysis='${analysis}'\ncols='${columns}' or ''\n\ndef load_data(f):\n    if f.endswith('.json'):\n        with open(f) as fh: return json.load(fh)\n    with open(f, encoding='utf-8-sig') as fh:\n        return list(csv.DictReader(fh))\n\ndef to_nums(rows, col):\n    vals = []\n    for r in rows:\n        v = r.get(col, '')\n        try: vals.append(float(v))\n        except: pass\n    return vals\n\ndef percentile(nums, p):\n    k = (len(nums)-1) * p / 100\n    f = math.floor(k)\n    c = math.ceil(k)\n    if f == c: return nums[int(k)]\n    return nums[f] * (c-k) + nums[c] * (k-f)\n\nrows = load_data(file)\nif not rows:\n    print('数据为空'); sys.exit(0)\n\nheaders = list(rows[0].keys())\ntarget_cols = [c.strip() for c in cols.split(',') if c.strip()] if cols else []\nif not target_cols:\n    target_cols = [h for h in headers if len(to_nums(rows, h)) > len(rows)*0.5]\nif not target_cols:\n    print('未找到数值列'); sys.exit(0)\n\nprint(f'数据: {len(rows)} 行, 分析列: {target_cols}')\n\nif analysis == 'summary':\n    for col in target_cols:\n        nums = sorted(to_nums(rows, col))\n        if not nums: continue\n        n = len(nums)\n        mean = statistics.mean(nums)\n        med = statistics.median(nums)\n        sd = statistics.stdev(nums) if n > 1 else 0\n        print(f'\\n{col}:')\n        print(f'  数量={n}, 均值={mean:.4f}, 中位数={med:.4f}, 标准差={sd:.4f}')\n        print(f'  min={min(nums):.4f}, max={max(nums):.4f}, 范围={max(nums)-min(nums):.4f}')\n        print(f'  P25={percentile(nums,25):.4f}, P75={percentile(nums,75):.4f}, IQR={percentile(nums,75)-percentile(nums,25):.4f}')\n\nelif analysis == 'distribution':\n    for col in target_cols:\n        nums = sorted(to_nums(rows, col))\n        if not nums: continue\n        print(f'\\n{col} 分布:')\n        n_bins = min(10, len(set(nums)))\n        lo, hi = min(nums), max(nums)\n        if lo == hi:\n            print(f'  所有值相同: {lo}'); continue\n        step = (hi - lo) / n_bins\n        bins = [0] * n_bins\n        for v in nums:\n            idx = min(int((v - lo) / step), n_bins - 1)\n            bins[idx] += 1\n        max_bar = max(bins)\n        for i in range(n_bins):\n            bar_lo = lo + i * step\n            bar_hi = lo + (i+1) * step\n            bar = '█' * int(bins[i] / max_bar * 30) if max_bar > 0 else ''\n            print(f'  {bar_lo:>8.2f}-{bar_hi:>8.2f} | {bar} {bins[i]}')\n\nelif analysis == 'outliers':\n    for col in target_cols:\n        nums = sorted(to_nums(rows, col))\n        if len(nums) < 4: continue\n        q1 = percentile(nums, 25)\n        q3 = percentile(nums, 75)\n        iqr = q3 - q1\n        lower = q1 - 1.5 * iqr\n        upper = q3 + 1.5 * iqr\n        outliers = [v for v in nums if v < lower or v > upper]\n        print(f'\\n{col}:')\n        print(f'  IQR={iqr:.4f}, 界限=[{lower:.4f}, {upper:.4f}]')\n        print(f'  异常值: {len(outliers)}/{len(nums)} 个')\n        if outliers:\n            print(f'  值: {outliers[:10]}')\n\nelif analysis == 'correlation':\n    if len(target_cols) < 2:\n        print('相关性分析需要至少 2 列'); sys.exit(0)\n    print(f'\\n相关性矩阵:')\n    col_nums = {c: to_nums(rows, c) for c in target_cols}\n    n = min(len(v) for v in col_nums.values())\n    print(f'  {chr(32)*15}', end='')\n    for c in target_cols: print(f'{c[:10]:>12s}', end='')\n    print()\n    for c1 in target_cols:\n        print(f'  {c1[:15]:>15s}', end='')\n        for c2 in target_cols:\n            a, b = col_nums[c1][:n], col_nums[c2][:n]\n            if len(a) < 3:\n                print(f'{\"N/A\":>12s}', end=''); continue\n            ma, mb = statistics.mean(a), statistics.mean(b)\n            cov = sum((a[i]-ma)*(b[i]-mb) for i in range(n)) / n\n            sa = statistics.stdev(a); sb = statistics.stdev(b)\n            r = cov / (sa * sb) if sa > 0 and sb > 0 else 0\n            print(f'{r:>12.4f}', end='')\n        print()\n\" 2>&1",
+    "timeout": 30
+  },
+  "resultParser": "text"
+}

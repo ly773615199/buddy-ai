@@ -164,6 +164,100 @@ export class PrototypeMemory {
   }
 
   /**
+   * 增强匹配（P2-3）— 综合评分
+   *
+   * 在 cosine distance 基础上，加入：
+   * 1. 领域重叠度（domainOverlap）— prototype 标签与信号域的匹配
+   * 2. 意图关键词匹配（intentKeywordMatch）— 用户输入与原型标签的关键词匹配
+   * 3. 历史成功率权重（successWeight）— qualityScore 加权
+   *
+   * 评分公式：embedding_sim * 0.4 + domain_overlap * 0.3 + keyword_match * 0.15 + success_weight * 0.15
+   *
+   * @param hidden NN 输出的 embedding
+   * @param signalDomains 任务信号的域列表（如 ['code', 'file']）
+   * @param userInput 用户原始输入（用于关键词匹配）
+   * @param topK 返回前 K 个候选
+   */
+  findBestEnhanced(
+    hidden: Float32Array,
+    signalDomains: string[],
+    userInput: string,
+    topK = 3,
+  ): Array<{ prototype: Prototype & { topTools(k?: number): string[] }; score: number; breakdown: Record<string, number> }> {
+    if (this.prototypes.length === 0) return [];
+
+    const normed = l2Normalize(hidden);
+    const inputLower = userInput.toLowerCase();
+    const inputWords = new Set(inputLower.split(/[\s,，。.!?！？、]+/).filter(w => w.length > 1));
+
+    // 领域标签映射：原型 label → 关联域
+    const LABEL_DOMAINS: Record<string, string[]> = {
+      'file_operations': ['file', 'system'],
+      'code_operations': ['code', 'file', 'system'],
+      'git_operations': ['code', 'system'],
+      'web_operations': ['web', 'knowledge'],
+      'system_operations': ['system'],
+      'knowledge_query': ['knowledge', 'web'],
+      'conversation': ['conversation'],
+      'complex_task': ['code', 'file', 'system', 'web'],
+    };
+
+    // 关键词扩展：原型标签 → 触发关键词
+    const LABEL_KEYWORDS: Record<string, string[]> = {
+      'file_operations': ['文件', '读取', '写入', '创建', '删除', '目录', 'file', 'read', 'write', 'create'],
+      'code_operations': ['代码', '编程', '函数', '类', '调试', '编译', 'code', 'function', 'debug', 'compile'],
+      'git_operations': ['git', '提交', '分支', '合并', 'commit', 'branch', 'merge', 'push', 'pull'],
+      'web_operations': ['搜索', '网页', '查', '找', 'search', 'web', 'fetch', 'url', 'http'],
+      'system_operations': ['系统', '进程', '命令', '执行', 'system', 'process', 'exec', 'command'],
+      'knowledge_query': ['知识', '什么是', '解释', '介绍', '了解', 'knowledge', 'what', 'explain'],
+      'conversation': ['聊天', '你好', '谢谢', 'hello', 'hi', 'thanks', 'chat'],
+      'complex_task': ['分析', '优化', '设计', '实现', 'analyze', 'optimize', 'design', 'implement'],
+    };
+
+    const scored = this.prototypes.map(p => {
+      // 1. Embedding 相似度（0-1，越高越好）
+      const dist = cosineDistance(normed, p.centroid);
+      const embeddingSim = Math.max(0, 1 - dist);
+
+      // 2. 领域重叠度（0-1）
+      const protoDomains = LABEL_DOMAINS[p.label] ?? [];
+      const domainOverlap = signalDomains.length > 0 && protoDomains.length > 0
+        ? signalDomains.filter(d => protoDomains.includes(d)).length / Math.max(signalDomains.length, protoDomains.length)
+        : 0;
+
+      // 3. 意图关键词匹配（0-1）
+      const keywords = LABEL_KEYWORDS[p.label] ?? [];
+      const matchedKeywords = keywords.filter(kw => inputLower.includes(kw));
+      const keywordMatch = keywords.length > 0
+        ? matchedKeywords.length / Math.min(keywords.length, 3) // 最多算 3 个关键词命中
+        : 0;
+
+      // 4. 历史成功率权重（0-1）
+      const successWeight = p.qualityScore;
+
+      // 综合评分
+      const score = embeddingSim * 0.4
+        + domainOverlap * 0.3
+        + Math.min(1, keywordMatch) * 0.15
+        + successWeight * 0.15;
+
+      return {
+        prototype: Object.assign(p, { topTools: (k = 5) => topTools(p, k) }),
+        score,
+        breakdown: {
+          embeddingSim: +embeddingSim.toFixed(3),
+          domainOverlap: +domainOverlap.toFixed(3),
+          keywordMatch: +Math.min(1, keywordMatch).toFixed(3),
+          successWeight: +successWeight.toFixed(3),
+        },
+      };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, topK);
+  }
+
+  /**
    * 获取所有原型（用于调试和序列化）
    */
   getPrototypes(): readonly Prototype[] {

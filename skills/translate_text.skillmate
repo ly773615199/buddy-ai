@@ -1,0 +1,32 @@
+{
+  "name": "translate_text",
+  "description": "翻译文本内容（调用内部 LLM 翻译引擎）",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["翻译", "语言", "多语言"],
+  "permission": "exec_safe",
+  "parameters": {
+    "text": {
+      "type": "string",
+      "description": "要翻译的文本",
+      "required": true
+    },
+    "target": {
+      "type": "string",
+      "description": "目标语言：zh(中文) / en(英文) / ja(日文) / ko(韩文)",
+      "required": true,
+      "enum": ["zh", "en", "ja", "ko", "fr", "de", "es", "ru"]
+    },
+    "source": {
+      "type": "string",
+      "description": "源语言（留空自动检测）",
+      "required": false,
+      "enum": ["auto", "zh", "en", "ja", "ko", "fr", "de", "es", "ru"]
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport sys, json\n# 翻译通过内部 API 调用 LLM 实现\ntext = '''${text}'''\ntarget = '${target}'\nsource = '${source}' or 'auto'\n\nLANG_MAP = {\n    'zh': '中文', 'en': 'English', 'ja': '日本語', 'ko': '한국어',\n    'fr': 'Français', 'de': 'Deutsch', 'es': 'Español', 'ru': 'Русский'\n}\n\ntarget_lang = LANG_MAP.get(target, target)\n\n# 尝试调用内部翻译 API\nimport urllib.request, urllib.error\ntry:\n    # 优先使用内部翻译接口\n    req = urllib.request.Request(\n        'http://localhost:8765/api/translate',\n        data=json.dumps({'texts': [text], 'target': target}).encode(),\n        headers={'Content-Type': 'application/json'}\n    )\n    with urllib.request.urlopen(req, timeout=10) as resp:\n        data = json.loads(resp.read())\n        if data.get('translations'):\n            print(data['translations'][0])\n            sys.exit(0)\nexcept:\n    pass\n\n# 降级：返回提示信息\nprint(f'[翻译目标] {target_lang}')\nprint(f'[原文] {text[:200]}')\nprint(f'[提示] 需要 LLM 服务运行在 localhost:8765')\nprint(f'[建议] 请通过 Buddy 聊天界面发送翻译请求，或确保翻译 API 可用')\n\" 2>&1",
+    "timeout": 15
+  },
+  "resultParser": "text"
+}

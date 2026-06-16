@@ -1086,6 +1086,10 @@ export class Subsystems {
     // 接入 FeedbackLearner（用户纠正 → 高权重训练样本）
     this.feedback.setConvergenceCallback((signal) => {
       this.convergenceLayer?.ingestFeedback(signal);
+      // O4: 用户纠正时增加调度器探索系数
+      if (signal.type === 'correction') {
+        this.leftBrain?.scheduler?.recordCorrection();
+      }
     });
 
     // 接入 BuddyLearn（知识注入 → 中权重训练样本）

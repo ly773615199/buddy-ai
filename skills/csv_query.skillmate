@@ -1,0 +1,48 @@
+{
+  "name": "csv_query",
+  "description": "查询和分析 CSV 文件：筛选、统计、排序、分组聚合",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["数据", "CSV", "分析"],
+  "permission": "exec_safe",
+  "parameters": {
+    "file": {
+      "type": "string",
+      "description": "CSV 文件路径",
+      "required": true
+    },
+    "action": {
+      "type": "string",
+      "description": "操作类型：head(预览) / stats(统计) / filter(筛选) / sort(排序) / group(分组聚合)",
+      "required": true,
+      "enum": ["head", "stats", "filter", "sort", "group"]
+    },
+    "column": {
+      "type": "string",
+      "description": "操作的列名（filter/sort/group 时需要）",
+      "required": false
+    },
+    "condition": {
+      "type": "string",
+      "description": "筛选条件，如 '>100'、'==hello'、'contains:abc'（filter 时需要）",
+      "required": false
+    },
+    "agg": {
+      "type": "string",
+      "description": "聚合方式：count/sum/avg/min/max（group 时需要）",
+      "required": false,
+      "enum": ["count", "sum", "avg", "min", "max"]
+    },
+    "limit": {
+      "type": "number",
+      "description": "返回行数限制",
+      "required": false,
+      "default": 20
+    }
+  },
+  "execute": {
+    "command": "python3 -c \"\nimport csv, sys, statistics, collections\nfile='${file}'\naction='${action}'\ncolumn='${column}' or None\ncondition='${condition}' or None\nagg='${agg}' or 'count'\nlimit=int('${limit}' or 20)\n\ndef load_csv(f):\n    with open(f, 'r', encoding='utf-8-sig') as fh:\n        return list(csv.DictReader(fh))\n\ndef parse_val(v):\n    try: return float(v)\n    except: return v\n\ndef match_cond(val, cond):\n    if cond.startswith('>='): return float(val) >= float(cond[2:])\n    if cond.startswith('<='): return float(val) <= float(cond[2:])\n    if cond.startswith('>') : return float(val) >  float(cond[1:])\n    if cond.startswith('<') : return float(val) <  float(cond[1:])\n    if cond.startswith('!='): return str(val) != cond[2:]\n    if cond.startswith('=='): return str(val) == cond[2:]\n    if cond.startswith('contains:'): return cond[9:] in str(val)\n    return str(val) == cond\n\nrows = load_csv(file)\nif not rows:\n    print('CSV 为空'); sys.exit(0)\nheaders = list(rows[0].keys())\n\nif action == 'head':\n    print('列: ' + ', '.join(headers))\n    print(f'总行数: {len(rows)}')\n    print('---')\n    for r in rows[:limit]:\n        print(' | '.join(str(r.get(h,'')) for h in headers))\n\nelif action == 'stats':\n    print(f'行数: {len(rows)}, 列数: {len(headers)}')\n    print('列: ' + ', '.join(headers))\n    for h in headers:\n        vals = [parse_val(r.get(h,'')) for r in rows if r.get(h,'')]\n        nums = [v for v in vals if isinstance(v, (int,float))]\n        if nums:\n            print(f'  {h}: min={min(nums):.2f}, max={max(nums):.2f}, avg={statistics.mean(nums):.2f}, count={len(nums)}')\n        else:\n            uniques = set(str(v) for v in vals)\n            print(f'  {h}: {len(uniques)} 个唯一值, 示例: {list(uniques)[:3]}')\n\nelif action == 'filter':\n    if not column or not condition:\n        print('filter 需要 column 和 condition 参数'); sys.exit(1)\n    filtered = [r for r in rows if column in r and match_cond(r[column], condition)]\n    print(f'筛选 {column} {condition}: {len(filtered)}/{len(rows)} 行')\n    for r in filtered[:limit]:\n        print(' | '.join(str(r.get(h,'')) for h in headers))\n\nelif action == 'sort':\n    if not column:\n        print('sort 需要 column 参数'); sys.exit(1)\n    rows.sort(key=lambda r: parse_val(r.get(column,'')), reverse=True)\n    print(f'按 {column} 降序:')\n    for r in rows[:limit]:\n        print(' | '.join(str(r.get(h,'')) for h in headers))\n\nelif action == 'group':\n    if not column or not agg:\n        print('group 需要 column 和 agg 参数'); sys.exit(1)\n    groups = collections.defaultdict(list)\n    for r in rows:\n        groups[r.get(column,'')].append(r)\n    print(f'按 {column} 分组 ({agg}): {len(groups)} 组')\n    results = []\n    for k, g in groups.items():\n        if agg == 'count':\n            results.append((k, len(g)))\n        elif agg in ('sum','avg','min','max'):\n            nums = [parse_val(r.get(column,'')) for r in g if isinstance(parse_val(r.get(column,'')), (int,float))]\n            if nums:\n                v = {'sum':sum,'avg':statistics.mean,'min':min,'max':max}[agg](nums)\n                results.append((k, v))\n    results.sort(key=lambda x: x[1], reverse=True)\n    for k, v in results[:limit]:\n        print(f'  {k}: {v}')\n\" 2>&1",
+    "timeout": 30
+  },
+  "resultParser": "text"
+}

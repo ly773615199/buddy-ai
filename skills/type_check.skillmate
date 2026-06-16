@@ -1,0 +1,33 @@
+{
+  "name": "type_check",
+  "description": "运行 TypeScript 类型检查，输出错误摘要",
+  "version": "1.0.0",
+  "author": "buddy",
+  "tags": ["开发", "TypeScript", "类型检查"],
+  "permission": "exec_safe",
+  "parameters": {
+    "path": {
+      "type": "string",
+      "description": "检查路径（默认当前目录）",
+      "required": false,
+      "default": "."
+    },
+    "strict": {
+      "type": "boolean",
+      "description": "是否使用严格模式",
+      "required": false,
+      "default": false
+    },
+    "fix": {
+      "type": "boolean",
+      "description": "是否尝试自动修复",
+      "required": false,
+      "default": false
+    }
+  },
+  "execute": {
+    "command": "bash -c '\ncd ${path} 2>/dev/null || cd .\n\n# 查找 tsconfig.json\nif [ -f tsconfig.json ]; then\n  echo \"使用 tsconfig.json\"\nelif [ -f src/tsconfig.json ]; then\n  cd src\n  echo \"使用 src/tsconfig.json\"\nfi\n\n# 运行 tsc\necho \"=== TypeScript 类型检查 ===\"\nif [ \"${strict}\" = \"true\" ]; then\n  npx tsc --noEmit --strict 2>&1 | head -100\nelse\n  npx tsc --noEmit 2>&1 | head -100\nfi\n\nexit_code=$?\n\n# 统计错误数\nif [ $exit_code -eq 0 ]; then\n  echo \"\\n✅ 类型检查通过，无错误\"\nelse\n  error_count=$(npx tsc --noEmit 2>&1 | grep -c \"error TS\")\n  echo \"\\n❌ 类型检查失败，共 $error_count 个错误\"\nfi\n\nexit $exit_code\n'",
+    "timeout": 60
+  },
+  "resultParser": "text"
+}
