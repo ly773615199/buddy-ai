@@ -520,7 +520,6 @@ const probeTTS: ProbeFn = async (ctx) => {
   try {
     const base = (ctx.baseUrl ?? 'https://api.openai.com/v1')
     const url = `${base}/chat/completions`;
-    console.log(`[ProbeTTS] 尝试 MiMo 格式: ${url}, model=${ctx.rawModelId}`);
     const resp = await withTimeout(
       fetch(url, {
         method: 'POST',
