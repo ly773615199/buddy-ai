@@ -520,7 +520,7 @@ export interface UnifiedModelsConfig {
   /** API 端点列表（用户只需填这些） */
   providers: Array<{
     id: string;
-    type: 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'custom';
+    type: 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'mimo' | 'nvidia' | 'custom';
     /** 默认模型名，如 'deepseek-chat'、'gpt-4o-mini'（可选，不填则自动发现） */
     model?: string;
     apiKey?: string;

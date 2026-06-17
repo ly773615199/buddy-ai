@@ -144,6 +144,7 @@ function ModelsSection({ apiBase, primaryColor }: {apiBase: string;primaryColor:
   { value: 'siliconflow', label: "\u7845\u57FA\u6D41\u52A8", icon: '🌊', defaultUrl: 'https://api.siliconflow.cn/v1', needKey: true, needUrl: false },
   { value: 'openrouter', label: 'OpenRouter', icon: '🌐', defaultUrl: 'https://openrouter.ai/api/v1', needKey: true, needUrl: false },
   { value: 'mimo', label: 'MiMo', icon: '🤖', defaultUrl: 'https://api.xiaomimimo.com/v1', needKey: true, needUrl: false },
+  { value: 'nvidia', label: 'NVIDIA NIM', icon: '🟢', defaultUrl: 'https://integrate.api.nvidia.com/v1', needKey: true, needUrl: false },
   { value: 'ollama', label: `Ollama (${t("\u672C\u5730")})`, icon: '🦙', defaultUrl: 'http://localhost:11434/v1', needKey: false, needUrl: true },
   { value: 'lmstudio', label: `LM Studio (${t("\u672C\u5730")})`, icon: '🏠', defaultUrl: 'http://localhost:1234/v1', needKey: false, needUrl: true },
   { value: 'custom', label: "\u81EA\u5B9A\u4E49", icon: '⚙️', defaultUrl: '', needKey: false, needUrl: true }];

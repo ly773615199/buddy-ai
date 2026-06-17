@@ -768,6 +768,8 @@ function resolveBaseUrl(type: string, customBaseUrl?: string): string | null {
     google: 'https://generativelanguage.googleapis.com',
     ollama: 'http://localhost:11434',
     lmstudio: 'http://localhost:1234',
+    mimo: 'https://api.xiaomimimo.com',
+    nvidia: 'https://integrate.api.nvidia.com',
   };
 
   return URLS[type.toLowerCase()] ?? null;

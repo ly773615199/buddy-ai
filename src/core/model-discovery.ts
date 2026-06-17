@@ -52,7 +52,7 @@ function normalizeBaseName(name: string): string {
 
 export interface PlatformConfig {
   id: string;
-  type: 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'custom';
+  type: 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'mimo' | 'nvidia' | 'custom';
   apiKey?: string;
   baseUrl?: string;
   /** 用户自定义定价覆盖（¥/千token），可选 */
@@ -181,6 +181,36 @@ const PLATFORM_META: Record<string, PlatformMeta> = {
       if (data?.data) return data.data;
       if (Array.isArray(data)) return data;
       return [];
+    },
+  },
+  mimo: {
+    name: '小米 MiMo',
+    defaultBaseUrl: 'https://api.xiaomimimo.com/v1',
+    modelsEndpoint: '/models',
+    requiresAuth: true,
+    extractModels: (data: any) => {
+      const models = data?.data ?? (Array.isArray(data) ? data : []);
+      return models.map((m: any) => ({
+        ...m,
+        pricing: m.pricing ?? undefined,
+        context_length: m.context_length ?? m.max_model_len ?? undefined,
+      }));
+    },
+  },
+  nvidia: {
+    name: 'NVIDIA NIM',
+    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
+    modelsEndpoint: '/models',
+    requiresAuth: true,
+    extractModels: (data: any) => {
+      const models = data?.data ?? (Array.isArray(data) ? data : []);
+      // NVIDIA NIM 返回标准 OpenAI 格式
+      return models.map((m: any) => ({
+        id: m.id,
+        owned_by: m.owned_by,
+        context_length: m.context_length,
+        pricing: m.pricing ?? undefined,
+      }));
     },
   },
 };

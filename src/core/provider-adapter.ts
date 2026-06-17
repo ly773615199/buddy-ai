@@ -546,6 +546,16 @@ export class AdapterRegistry {
       },
     }));
 
+    // NVIDIA NIM — 英伟达推理微服务（OpenAI 兼容）
+    this.register(new OpenAICompatAdapter('nvidia', 'NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', {
+      capabilities: {
+        vision: true,
+        toolCalling: true,
+        maxContextTokens: 128000,
+        supportsDeveloperRole: false,
+      },
+    }));
+
     this.register(new OpenAICompatAdapter('ollama', 'Ollama (本地)', 'http://localhost:11434/v1', {
       capabilities: {
         vision: true,

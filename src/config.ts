@@ -340,7 +340,7 @@ export function migrateToUnifiedConfig(config: BuddyConfig): BuddyConfig {
   };
 }
 
-export function mapProviderType(provider: string): 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'custom' {
+export function mapProviderType(provider: string): 'siliconflow' | 'openrouter' | 'deepseek' | 'openai' | 'anthropic' | 'google' | 'ollama' | 'lmstudio' | 'mimo' | 'nvidia' | 'custom' {
   const lower = provider.toLowerCase();
   if (lower === 'siliconflow' || lower === 'sf') return 'siliconflow';
   if (lower === 'openrouter') return 'openrouter';
@@ -350,5 +350,7 @@ export function mapProviderType(provider: string): 'siliconflow' | 'openrouter' 
   if (lower === 'google' || lower === 'gemini') return 'google';
   if (lower === 'ollama') return 'ollama';
   if (lower === 'lmstudio' || lower === 'lm-studio' || lower === 'lm_studio') return 'lmstudio';
+  if (lower === 'mimo' || lower === 'xiaomi' || lower === 'xiaomimimo') return 'mimo';
+  if (lower === 'nvidia' || lower === 'nvidia-nim' || lower === 'nim') return 'nvidia';
   return 'custom';
 }
