@@ -1,5 +1,5 @@
 import type { BuddyConfig, Attributes, Message, OrchestrationPlan, OrchestrationNode, ExecutionResult, CollaborationMode } from '../types.js';
-import { getTrustLevel } from '../types.js';
+
 import { buildSystemPrompt } from '../personality/prompt.js';
 import { EventBus } from '../ws/server.js';
 import { FileWatcher } from '../perception/fs-watcher.js';
@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 
 import { describeToolCall, getFallbackReply } from './constants.js';
-import { needsConfirmationCompat } from './capability-gate.js';
+import { needsConfirmationCompat, getRiskLevel } from './capability-gate.js';
 import { Subsystems } from './subsystems.js';
 import { MessageProcessor } from './message-processor.js';
 import { BehaviorTracker } from './behavior-tracker.js';
@@ -284,33 +284,32 @@ export class BuddyAgent {
     };
 
     this.sys.llm.setBeforeToolExecute(async (toolName, args) => {
-      const trust = this.sys.pet.getIntimacy();
-      const trustLevel = getTrustLevel(trust);
-
       // Phase 3: 为所有工具捕获 before 快照（在权限检查之前）
       if (this.runtimeCollector) {
         const pending = this.runtimeCollector.captureBefore({ type: toolName, params: new Float32Array() });
         this.pendingSnapshots.set(toolName, pending);
       }
 
-      // PrivacyManager: 硬件权限检查
+      // PrivacyManager: 感知能力权限检查（摄像头/麦克风/屏幕等）
       const permType = HARDWARE_TOOL_MAP[toolName];
       if (permType) {
-        const access = this.sys.privacyManager.checkAccess(permType, trustLevel);
+        // 感知能力由 PrivacyManager 独立管理，与亲密度无关
+        const access = this.sys.privacyManager.checkAccess(permType, 'friend');
         if (!access.allowed) {
           this.sys.audit.logSecurityBlock(toolName, access.reason ?? '隐私权限拒绝');
-          // 权限拒绝：清理 before 快照（不会有 after）
           this.pendingSnapshots.delete(toolName);
           return { allowed: false, reason: access.reason };
         }
       }
 
-      if (!needsConfirmationCompat(toolName, trustLevel, trust)) {
+      // 风险确认模型：基于操作风险等级，与亲密度无关
+      if (!needsConfirmationCompat(toolName)) {
         return { allowed: true };
       }
 
+      const riskLevel = getRiskLevel(toolName);
       const description = describeToolCall(toolName, args);
-      this.sys.audit.logSecurityBlock(toolName, `需要确认 (信任度: ${trust}/${trustLevel})`);
+      this.sys.audit.logSecurityBlock(toolName, `需要确认 (风险等级: ${riskLevel})`);
 
       const eventBus = this.ws.getEventBus();
       const pendingConfirm = this.ws.getPendingConfirm();
@@ -320,7 +319,7 @@ export class BuddyAgent {
         const confirmId = `confirm-${Date.now()}`;
         eventBus.emit({
           type: 'tool_confirm_request',
-          id: confirmId, tool: toolName, description, trustLevel,
+          id: confirmId, tool: toolName, description, riskLevel,
         });
 
         const allowed = await new Promise<boolean>((resolve) => {
@@ -345,7 +344,7 @@ export class BuddyAgent {
       }
 
       this.pendingSnapshots.delete(toolName);
-      return { allowed: false, reason: `信任度 ${trustLevel} 不足以执行 ${toolName}，且无法请求确认` };
+      return { allowed: false, reason: `${toolName} 需要用户确认，但无法请求确认` };
     });
   }
 
@@ -383,7 +382,6 @@ export class BuddyAgent {
 
     try {
       const trust = this.sys.pet.getIntimacy();
-      const trustLevel = getTrustLevel(trust);
       this.sys.cerebellum?.onThinking();
 
       // ── Phase 3: 走编排决策路径（与 WS 路径统一）──
@@ -423,10 +421,10 @@ export class BuddyAgent {
       // 工具追踪
       if (result.toolCalls.length > 0) {
         for (const tc of result.toolCalls) {
-          this.sys.audit.logToolCall(tc.name, tc.args, trustLevel);
-          if (needsConfirmationCompat(tc.name, trustLevel, trust)) {
-            console.log(`\n  ⚠️  信任度 ${trust} (${trustLevel})：工具 ${tc.name} 需要确认`);
-            this.sys.audit.logSecurityBlock(tc.name, `需要确认 (信任度: ${trust}/${trustLevel})`);
+          this.sys.audit.logToolCall(tc.name, tc.args, 'all');
+          if (needsConfirmationCompat(tc.name)) {
+            console.log(`\n  ⚠️  ${tc.name} 需要确认`);
+            this.sys.audit.logSecurityBlock(tc.name, `需要确认 (风险等级: ${getRiskLevel(tc.name)})`);
           }
           console.log(`\n  🔧 ${tc.name}(${JSON.stringify(tc.args).slice(0, 100)})`);
           this.sys.cerebellum?.onToolSuccess();

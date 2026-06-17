@@ -1,5 +1,5 @@
 import type { BuddyConfig, Message, Attributes, ToolDef } from '../types.js';
-import { getTrustLevel, getPermissions } from '../types.js';
+import { getPermissions } from '../types.js';
 import { buildSystemPrompt, buildMessages } from '../personality/prompt.js';
 import { classifyError, getUserFriendlyMessage } from '../errors.js';
 import { getIntimacyPrompt } from '../pet/index.js';
@@ -163,13 +163,13 @@ export class MessageProcessor {
     this.speculativePrefetch(content).catch((err) => { if (this.verbose) console.debug('[DEBUG] 静默错误:', err?.message ?? err); });
 
     const trust = this.sys.pet.getIntimacy();
-    const trustLevel = getTrustLevel(trust);
-    const trustFingerprint = `${trustLevel}_${Math.floor(trust / 5)}`;
+    // 亲密度仅用于 Prompt 语气注入，不再限制工具可用性
+    const intimacyFingerprint = `intimacy_${Math.floor(trust / 5)}`;
 
-    // ─── 静态层：信任度变化才重建（~50x 减少重建频率）───
-    if (this.contextCache.static.fingerprint !== trustFingerprint) {
-      const permissions = getPermissions(trustLevel);
-      const allAvailableTools = this.sys.tools.listForPermissions(permissions);
+    // ─── 静态层：亲密度变化才重建（~50x 减少重建频率）───
+    if (this.contextCache.static.fingerprint !== intimacyFingerprint) {
+      // 所有工具可用，不再按信任度过滤
+      const allAvailableTools = this.sys.tools.listForPermissions(getPermissions());
 
       // 工具检索：意图分类（零延迟）→ 语义检索（兜底）
       let availableTools = allAvailableTools;
@@ -214,17 +214,17 @@ export class MessageProcessor {
         personalityStrength,
       );
 
-      // E3: 预序列化静态 prompt（信任度不变时直接复用）
+      // E3: 预序列化静态 prompt（亲密度变化时直接复用）
       const staticBudget = new PromptBudgetManager(this.estimateContextWindow());
       staticBudget.add({ id: 'core-instruction', source: 'system', priority: PRIORITY.CORE_INSTRUCTION, content: corePrompt, required: true });
-      staticBudget.add({ id: 'trust-permissions', source: 'trust', priority: PRIORITY.TRUST_PERMISSIONS, content: `\n## 权限级别: ${trustLevel} (信任度: ${trust.toFixed(1)})`, required: true });
+      staticBudget.add({ id: 'intimacy-info', source: 'trust', priority: PRIORITY.TRUST_PERMISSIONS, content: `\n## 亲密度: ${trust.toFixed(1)}`, required: true });
       const cachedStaticPrompt = staticBudget.assemble();
 
       this.contextCache.static = {
-        fingerprint: trustFingerprint,
+        fingerprint: intimacyFingerprint,
         corePrompt,
         toolList: availableTools,
-        permissions,
+        permissions: getPermissions(),
         cachedStaticPrompt,
       };
       this.contextCache.semiDynamic.behaviorSignals = behaviorSignals;
@@ -474,7 +474,7 @@ export class MessageProcessor {
 
     if (this.verbose) {
       const report = budget.getReport();
-      console.log(`  [DEBUG] 信任: ${trust} (${trustLevel}) | 情绪: ${this.sys.cerebellum?.inferMood() ?? 'calm'} | 可用工具: ${availableTools.map(t=>t.name).join(', ')} | 进化: ${this.sys.pet.getData().evolutionStage}`);
+      console.log(`  [DEBUG] 亲密度: ${trust} | 情绪: ${this.sys.cerebellum?.inferMood() ?? 'calm'} | 可用工具: ${availableTools.map(t=>t.name).join(', ')} | 进化: ${this.sys.pet.getData().evolutionStage}`);
       console.log(`  [Budget] ${report.estimatedTokens}/${report.budgetTokens} tokens (${(report.utilization * 100).toFixed(1)}%) | 包含: ${report.includedSegments.join(', ')}${report.droppedSegments.length ? ' | 丢弃: ' + report.droppedSegments.join(', ') : ''}`);
     }
 

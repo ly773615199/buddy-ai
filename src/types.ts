@@ -84,14 +84,20 @@ export function getTrustLevel(score: number): TrustLevel {
   return getIntimacyStage(score).trust;
 }
 
-export function getPermissions(level: TrustLevel): string[] {
-  switch (level) {
-    case 'stranger': return ['chat'];
-    case 'acquaintance': return ['chat', 'read_files', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'search_web', 'fetch_url'];
-    case 'friend': return ['chat', 'read_files', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'search_web', 'fetch_url', 'write_files', 'exec', 'analyze_file', 'scan_project', 'buddy_learn'];
-    case 'close_friend': return ['chat', 'read_files', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'search_web', 'fetch_url', 'write_files', 'exec', 'analyze_file', 'scan_project', 'buddy_learn', 'stmp_retrieve', 'dream_consolidate', 'knowledge_extract', 'experience_compile', 'camera', 'microphone'];
-    case 'soulmate': return ['chat', 'read_files', 'list_files', 'search_files', 'git_status', 'git_diff', 'git_log', 'search_web', 'fetch_url', 'write_files', 'exec', 'analyze_file', 'scan_project', 'buddy_learn', 'stmp_retrieve', 'dream_consolidate', 'knowledge_extract', 'experience_compile', 'camera', 'microphone', 'package_create', 'package_share'];
-  }
+/**
+ * 获取全部可用权限
+ * 能力不再由亲密度/信任等级限制，所有能力默认可用。
+ * 高风险操作的确认逻辑已移至 capability-gate.ts（风险确认模型）。
+ * @deprecated 保留签名兼容，内部返回全量权限
+ */
+export function getPermissions(_level?: TrustLevel): string[] {
+  return [
+    'chat', 'read_files', 'list_files', 'search_files',
+    'git_status', 'git_diff', 'git_log', 'search_web', 'fetch_url',
+    'write_files', 'exec', 'analyze_file', 'scan_project', 'buddy_learn',
+    'stmp_retrieve', 'dream_consolidate', 'knowledge_extract', 'experience_compile',
+    'camera', 'microphone', 'package_create', 'package_share',
+  ];
 }
 
 // ==================== 消息类型 ====================
@@ -131,7 +137,7 @@ export type WSEvent =
   | { type: 'status'; data: Record<string, unknown> }
   | { type: 'typing'; active: boolean }
   | { type: 'bubble'; text: string }
-  | { type: 'tool_confirm_request'; id: string; tool: string; description: string; trustLevel: string }
+  | { type: 'tool_confirm_request'; id: string; tool: string; description: string; riskLevel: string; trustLevel?: string }
   | { type: 'audio'; data: string; format: string; sentenceId?: string }
   | { type: 'audio_ready'; id: string; format: string }
   | { type: 'evolution'; from: string; to: string }

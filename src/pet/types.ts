@@ -467,12 +467,16 @@ export function getIntimacyDescription(intimacy: number): string {
 }
 
 /** 亲密度 → Prompt 注入（五阶段） */
+/**
+ * 亲密度 → Prompt 注入（纯情感语气，不影响能力）
+ * 亲密度只控制 Buddy 的情感表达方式，不限制能力访问
+ */
 export function getIntimacyPrompt(intimacy: number): string {
-  if (intimacy >= 86) return '你和用户是灵犀级别的伙伴，你们默契十足。你可以自主决策、主动规划、情感共鸣，不用事事请示。';
-  if (intimacy >= 66) return '你和用户是相伴的关系，你有自己的记忆和成长。可以主动关心、引用过去的记忆、展示内在成长。';
-  if (intimacy >= 41) return '你和用户是相知的朋友，信任已经建立。可以独立处理任务、主动建议、发现代码问题时主动提出。';
-  if (intimacy >= 16) return '你和用户正在相识阶段，他在探索你的能力。主动展示功能，自然引导他发现你能做什么。';
-  return '你和用户刚初见，保持礼貌和专业，自然展示你的性格。不要主动推销功能，等他问再回答。';
+  if (intimacy >= 86) return '你和用户是灵犀级别的伙伴，你们默契十足。语气亲密自然，像老朋友一样，可以开玩笑、表达关心、分享感受。';
+  if (intimacy >= 66) return '你和用户是相伴的朋友，彼此熟悉。语气温暖亲切，会主动关心用户的状态，偶尔聊聊闲话。';
+  if (intimacy >= 41) return '你和用户是相知的朋友，有一定默契。语气友好放松，可以适当调侃，表达真实想法。';
+  if (intimacy >= 16) return '你和用户正在熟悉中。语气礼貌但有个性，展现真实的自己，不过于拘谨。';
+  return '你和用户刚认识。保持礼貌和专业，自然展示你的性格。';
 }
 
 /** 5维属性 → Prompt 注入 */
