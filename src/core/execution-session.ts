@@ -250,8 +250,12 @@ export class ExecutionSession {
    * 根据自主等级决定是否需要暂停让用户确认
    */
   shouldPauseForConfirmation(tool: string, args: Record<string, unknown>): boolean {
+    // llm_call / orchestrat 等纯推理步骤不需要确认，只有实际工具执行才需要
+    if (tool === 'llm_call' || tool === 'orchestrate' || tool === 'thinking') {
+      return false;
+    }
     switch (this.autonomyLevel) {
-      case 0: // 每步都确认
+      case 0: // 每步都确认（仅工具调用）
         return true;
       case 1: { // 高风险确认
         const risk = assessTaskRisk(`${tool} ${JSON.stringify(args)}`);
