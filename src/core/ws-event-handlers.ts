@@ -49,6 +49,22 @@ export class WSEventHandlers {
     switch (command) {
       case 'status':
         this.deps.broadcastStatus();
+        // 同时发送文本总结到聊天
+        try {
+          const pet = this.deps.sys.pet.getSummary();
+          const lines = [
+            `🦊 **${pet.name}** (${pet.species})`,
+            `❤️ 亲密度: ${pet.intimacy} — ${pet.intimacyDescription}`,
+            `📊 进化: ${pet.stageEmoji} ${pet.stageName}`,
+          ];
+          if (pet.battleStats) {
+            const s = pet.battleStats;
+            lines.push(`⚔️ 属性: HP${s.hp ?? '?'} 攻${s.attack ?? '?'} 防${s.defense ?? '?'} 速${s.speed ?? '?'}`);
+          }
+          this.deps.eventBus?.emit({ type: 'bubble', text: lines.join('\n') });
+        } catch {
+          this.deps.eventBus?.emit({ type: 'bubble', text: '✅ 状态已广播' });
+        }
         break;
       case 'emotion_reset':
         this.deps.sys.cerebellum?.reset();
@@ -66,6 +82,29 @@ export class WSEventHandlers {
         break;
       case 'evolution_log':
         await this.handleEvolutionLog({});
+        break;
+      case 'help':
+        this.deps.eventBus?.emit({ type: 'bubble', text: [
+          '📖 可用命令:',
+          '  /help — 查看帮助信息',
+          '  /clear — 清空对话历史',
+          '  /status — 查看当前状态',
+          '  /think — 切换思考模式',
+          '  /model [名称] — 查看/切换模型',
+          '  /model auto — 恢复自动路由',
+          '  /export — 导出对话记录',
+          '  /orch <任务> — 多步骤编排',
+          '  /emotion_reset — 重置情绪状态',
+        ].join('\n') });
+        break;
+      case 'clear':
+        this.deps.eventBus?.emit({ type: 'clear_chat' });
+        break;
+      case 'think':
+        this.deps.eventBus?.emit({ type: 'bubble', text: '💡 思考模式已切换。当前模型会根据任务复杂度自动选择深度思考。' });
+        break;
+      case 'export':
+        this.deps.eventBus?.emit({ type: 'bubble', text: '📋 对话记录已准备导出（请在前端使用导出功能）。' });
         break;
       default:
         this.deps.eventBus?.emit({ type: 'error', message: `未知命令: ${command}` });

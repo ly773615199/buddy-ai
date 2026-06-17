@@ -672,6 +672,11 @@ export function setupRESTAPI(ctx: RESTContext): void {
       let probeResults: ProbeResultItem[] = [];
       if (unifiedPool) {
         unifiedPool.updateProviderCredentials(id, { apiKey, baseUrl });
+
+        // 事件驱动探测：配置变更时触发全量重探
+        if (sys.healthProber) {
+          sys.healthProber.onConfigChange(`端点 ${id} 凭证更新`);
+        }
         try {
           const result = await unifiedPool.refreshPlatform(newProvider as any);
           modelCount = result.models.length;
@@ -780,12 +785,10 @@ export function setupRESTAPI(ctx: RESTContext): void {
             if (verbose) console.warn('[Probe] 入池探活失败:', (probeErr as Error).message);
           }
 
-          // 新模型加入优先队列（下次探测周期优先处理）
+          // 新模型加入优先队列（事件驱动探测）
           if (sys.healthProber) {
             const newModelIds = result.models.map(p => p.id);
             sys.healthProber.enqueuePriority(newModelIds);
-            // 后台补全剩余模型的轻量可达性检查（不阻塞响应）
-            setTimeout(() => { sys.healthProber!.probeAll().catch(() => {}); }, 5000);
           }
         }
         catch (err) { discoveryError = (err as Error).message; if (verbose) console.warn(`[ModelPool] 刷新新端点 ${id} 失败:`, discoveryError); }

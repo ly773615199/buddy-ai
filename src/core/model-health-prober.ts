@@ -117,21 +117,29 @@ export class ModelHealthProber {
 
   // ==================== 生命周期 ====================
 
-  /** 启动后台定期探测 */
+  /**
+   * 启动事件驱动探测（不再定时轮询）
+   * 触发时机：
+   *   1. 新模型入池 → enqueuePriority()
+   *   2. 请求失败 → onRequestFailure()
+   *   3. 配置变更 → onConfigChange()
+   *   4. 首次启动 → 只探测未探测过的模型
+   */
   start(): void {
     if (!this.config.enabled) return;
-    if (this.timer) return;
+    if (this.timer) return; // 兼容旧代码，不再使用
 
-    this.timer = setInterval(() => {
-      this.probeAll().catch(err => {
-        if (this.verbose) console.warn('[HealthProber] 批量探测失败:', (err as Error).message);
-      });
-    }, this.config.intervalMs);
-
-    // 首次探测延迟 30 秒（等系统稳定）
+    // 首次启动：只探测尚未探测过的模型（画像已有数据的跳过）
     setTimeout(() => {
       if (this.verbose) console.log(`[HealthProber] 首次探活开始...`);
-      this.probeAll().then(results => {
+      const profiles = this.pool.getAllProfiles();
+      const unprobed = profiles.filter(p => !this.results.has(p.id));
+      if (unprobed.length === 0) {
+        if (this.verbose) console.log(`[HealthProber] 所有模型已有探测记录，跳过首次探活`);
+        return;
+      }
+      if (this.verbose) console.log(`[HealthProber] 发现 ${unprobed.length} 个未探测模型，开始探活...`);
+      this.probeModels(unprobed.map(p => p.id)).then(results => {
         const available = results.filter(r => r.reachable).length;
         const denied = results.filter(r => !r.reachable).length;
         if (this.verbose) console.log(`[HealthProber] 首次探活完成: ${available} 可用, ${denied} 不可用, 共 ${results.length} 个`);
@@ -140,7 +148,42 @@ export class ModelHealthProber {
       });
     }, 30_000);
 
-    if (this.verbose) console.log(`[HealthProber] 启动，间隔 ${this.config.intervalMs / 1000}s`);
+    if (this.verbose) console.log(`[HealthProber] 启动（事件驱动模式）`);
+  }
+
+  /**
+   * 请求失败时调用 — 重试验证模型是否真的不可用
+   * @param modelId 失败的模型 ID
+   * @param error 错误信息
+   */
+  onRequestFailure(modelId: string, error?: string): void {
+    if (!this.config.enabled) return;
+    const existing = this.results.get(modelId);
+    // 已经是 unhealthy 的不再重试，等配置变更时再重探
+    if (existing?.quality === 'unhealthy') return;
+    // 延迟 5 秒后重试（避免瞬时网络波动误判）
+    setTimeout(() => {
+      if (this.verbose) console.log(`[HealthProber] 请求失败重试: ${modelId}`);
+      this.probeOne(modelId).catch(() => {});
+    }, 5_000);
+  }
+
+  /**
+   * 配置变更时调用 — 全量重探
+   * @param reason 变更原因（用于日志）
+   */
+  onConfigChange(reason = '配置变更'): void {
+    if (!this.config.enabled) return;
+    if (this.verbose) console.log(`[HealthProber] ${reason}，触发全量重探...`);
+    // 清除旧结果，重新探测
+    this.results.clear();
+    this.probeAll().then(results => {
+      const available = results.filter(r => r.reachable).length;
+      const denied = results.filter(r => !r.reachable).length;
+      if (this.verbose) console.log(`[HealthProber] 全量重探完成: ${available} 可用, ${denied} 不可用, 共 ${results.length} 个`);
+    }).catch(err => {
+      if (this.verbose) console.warn('[HealthProber] 全量重探失败:', (err as Error).message);
+    });
   }
 
   /** 停止后台探测 */
@@ -152,6 +195,23 @@ export class ModelHealthProber {
   }
 
   // ==================== 探测 ====================
+
+  /** 探测指定模型列表 */
+  async probeModels(modelIds: string[]): Promise<HealthProbeResult[]> {
+    if (modelIds.length === 0) return [];
+    const results: HealthProbeResult[] = [];
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < modelIds.length; i += BATCH_SIZE) {
+      const batch = modelIds.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map(id => this.probeOne(id)),
+      );
+      for (const r of batchResults) {
+        if (r.status === 'fulfilled') results.push(r.value);
+      }
+    }
+    return results;
+  }
 
   /** 探测所有模型 */
   async probeAll(): Promise<HealthProbeResult[]> {

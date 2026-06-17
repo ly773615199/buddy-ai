@@ -374,6 +374,9 @@ export class Subsystems {
     }, verbose);
     this.healthProber.start();
 
+    // 注入健康探测器到 ModelRouter（事件驱动：请求失败时触发重试）
+    this._llm.getRouter().setHealthProber(this.healthProber);
+
     // §2.7: denied 模型自动重试定时器 — 每小时检查一次
     setInterval(() => {
       const retryModels = pool.getModelsForRetry();

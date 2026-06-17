@@ -1002,6 +1002,23 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
       }
     }
 
+    // 斜杠命令路由到 command 类型
+    const slashMatch = content.match(/^\/([a-zA-Z]+)(?:\s+(.*))?$/);
+    if (slashMatch) {
+      const cmd = slashMatch[1];
+      const args = slashMatch[2]?.trim();
+      setMessages(prev => [...prev, {
+        id: nextId(),
+        role: 'user',
+        content,
+        timestamp: Date.now(),
+        taskId,
+      }]);
+      sendRaw(JSON.stringify({ type: 'command', command: cmd, args }), Priority.HIGH);
+      setSprite('thinking');
+      return;
+    }
+
     setMessages(prev => [...prev, {
       id: nextId(),
       role: 'user',

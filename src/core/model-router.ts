@@ -191,6 +191,13 @@ export class ModelRouter {
     this.onSelection = cb;
   }
 
+  /** 健康探测器（事件驱动：请求失败时触发重试） */
+  private healthProber: import('./model-health-prober.js').ModelHealthProber | null = null;
+
+  setHealthProber(prober: import('./model-health-prober.js').ModelHealthProber): void {
+    this.healthProber = prober;
+  }
+
   /**
    * @deprecated Phase 1 兼容 — 旧代码仍通过 setUnifiedPool 注入
    * 内部委托给 setPool
@@ -439,6 +446,9 @@ export class ModelRouter {
         // 只对可能导致状态变更的错误类型更新状态
         if (mapped !== 'unknown') {
           this.pool.recordAccessFailure(outcome.modelId, mapped);
+
+          // 事件驱动探测：请求失败时触发健康重试
+          this.healthProber?.onRequestFailure(outcome.modelId, mapped);
 
           // §2.7 错误升级：连续 3 个模型都 payment 失败 → 端点级余额不足
           if (mapped === 'payment') {
