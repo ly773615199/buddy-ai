@@ -948,7 +948,13 @@ export class ModelPool {
     if (candidates.length === 0) {
       // 降级：taskType 过滤后无候选 → 不传 taskType 重试
       candidates = this.layer0StaticFilter();
-      if (candidates.length === 0) return null;
+      if (candidates.length === 0) {
+        // 最后手段：允许 denied/broken 模型（可能只是临时 404）
+        candidates = this.layer0StaticFilter(requirement.taskType, true);
+        if (candidates.length === 0) candidates = this.layer0StaticFilter(undefined, true);
+        if (candidates.length === 0) return null;
+        console.warn(`[ModelPool] 最后手段: 使用 denied/broken 模型 (${candidates.length} 个)`);
+      }
     }
 
     // Layer 1: 元数据快筛
@@ -957,7 +963,12 @@ export class ModelPool {
       console.log(`[ModelPool] layer1(${requirement.taskType}): 0 候选, 降级到无 taskType`);
       // 降级：放宽约束重试（不传 taskType）
       candidates = this.layer0StaticFilter();
-      if (candidates.length === 0) return null;
+      if (candidates.length === 0) {
+        // 最后手段：允许 denied/broken 模型
+        candidates = this.layer0StaticFilter(undefined, true);
+        if (candidates.length === 0) return null;
+        console.warn(`[ModelPool] 最后手段(layer1): 使用 denied/broken 模型 (${candidates.length} 个)`);
+      }
     }
 
     // Layer 2: Thompson Sampling
@@ -983,14 +994,14 @@ export class ModelPool {
 
   // ── Layer 0: 静态裁剪 ──
 
-  private layer0StaticFilter(taskType?: TaskType): ModelProfile[] {
+  private layer0StaticFilter(taskType?: TaskType, allowDenied = false): ModelProfile[] {
     const result: ModelProfile[] = [];
     let filteredByTask = 0;
     for (const profile of this.profiles.values()) {
       if (profile.active === false) continue;
       if (this.isExcluded(profile.id)) continue;
       // §2.7: 过滤已确认不可用的模型（denied/broken），但允许 unknown 和 available
-      if (profile.accessStatus === 'denied' || profile.accessStatus === 'broken') continue;
+      if (!allowDenied && (profile.accessStatus === 'denied' || profile.accessStatus === 'broken')) continue;
       if (!profile.capabilities.streaming) continue;
       if (profile.costPer1kInput > this.preferences.maxCostPer1k * 2) continue;
 
