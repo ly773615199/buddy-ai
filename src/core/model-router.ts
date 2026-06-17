@@ -301,6 +301,32 @@ export class ModelRouter {
       } catch (err) {
         console.warn(`[ModelRouter] 统一池选择失败: ${(err as Error).message}`);
       }
+
+      // 4b. 池已初始化但选择失败 → 尝试无约束降级选择
+      try {
+        const relaxedReq = this.buildModelRequirement(taskType, context);
+        relaxedReq.minCapabilities = {};
+        relaxedReq.requiredFeatures = [];
+        relaxedReq.executionPath = undefined;
+        relaxedReq.maxCostPer1k = undefined;
+        const relaxedSelection = this.pool.select(relaxedReq);
+        if (relaxedSelection) {
+          console.warn(`[ModelRouter] taskType=${taskType} 严格匹配失败，降级选择: ${relaxedSelection.profile.id}`);
+          if (this.onSelection) this.onSelection(relaxedSelection);
+          const creds = this.pool.getProviderCredentials(relaxedSelection.profile.platform);
+          return {
+            id: relaxedSelection.profile.id,
+            provider: relaxedSelection.profile.platform,
+            model: relaxedSelection.profile.id.split('/').slice(1).join('/'),
+            apiKey: creds?.apiKey,
+            baseUrl: creds?.baseUrl,
+            source: 'default',
+            capabilities: await this.profileToCapabilities(relaxedSelection.profile),
+          };
+        }
+      } catch (relaxErr) {
+        console.warn(`[ModelRouter] 降级选择也失败: ${(relaxErr as Error).message}`);
+      }
     }
 
     // 5. MockLLM 模式：返回 mock 模型配置（不依赖模型池）
@@ -314,9 +340,11 @@ export class ModelRouter {
     }
 
     // 6. 所有路径都不可用 → 抛错
+    const poolInfo = this.pool
+      ? `池已初始化 (${this.pool.profileCount} 个模型)，但无匹配 taskType=${taskType} 的可用模型。部分模型可能已被标记为 denied/broken。`
+      : '统一模型池未初始化。请在 config.models 中配置 providers。';
     throw new Error(
-      '[ModelRouter] 无可用模型：统一模型池未初始化。' +
-      '请在 config.models 中配置 providers。',
+      `[ModelRouter] 无可用模型：${poolInfo}`,
     );
   }
 
