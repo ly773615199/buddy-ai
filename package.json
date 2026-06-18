@@ -55,7 +55,44 @@
       "icon": "electron/icon.png"
     },
     "win": {
-      "icon": "electron/icon.png"
+      "icon": "electron/icon.ico",
+      "signingHashAlgorithms": ["sha256"],
+      "sign": "electron/sign-config.js",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "publisherName": "Buddy AI",
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
+      "installerHeaderIcon": "electron/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Buddy AI",
+      "include": "electron/nsis-custom.nsh",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "license": "LICENSE",
+      "installerLanguages": ["SimpChinese", "English"],
+      "language": "2052"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "lewyeu",
+      "repo": "buddy",
+      "releaseType": "release"
     },
     "linux": {
       "category": "Utility",
@@ -91,6 +128,8 @@
     "concurrently": "^9.2.1",
     "electron": "^41.2.2",
     "electron-builder": "^26.0.12",
+    "electron-log": "^5.2.4",
+    "electron-updater": "^6.3.9",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"

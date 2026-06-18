@@ -24,6 +24,7 @@ const { BluetoothManager } = require('./bluetooth.cjs');
 const { ScreenOverlay } = require('./screen-overlay.cjs');
 const { SystemAudioCapture } = require('./system-audio.cjs');
 const { MediaControl } = require('./media-control.cjs');
+const { AutoUpdater } = require('./auto-updater.cjs');
 
 // ── 配置 ──
 const WS_PORT = process.env.BUDDY_WS_PORT || 8765;
@@ -371,6 +372,22 @@ app.whenReady().then(() => {
   });
   mediaControl.setup();
   MediaControl.registerIPC(mediaControl);
+
+  // 自动更新
+  const autoUpdater = new AutoUpdater();
+  // 窗口创建后设置引用
+  setTimeout(() => {
+    if (mainWindow) {
+      autoUpdater.setMainWindow(mainWindow);
+    }
+    // 启动后延迟检查更新（30秒后）
+    setTimeout(() => autoUpdater.checkForUpdates(), 30000);
+  }, 2000);
+  // 注册 IPC：手动检查更新
+  ipcMain.handle('updater-check', () => autoUpdater.checkForUpdates());
+  ipcMain.handle('updater-download', () => autoUpdater.downloadUpdate());
+  ipcMain.handle('updater-install', () => autoUpdater.quitAndInstall());
+  ipcMain.handle('updater-info', () => autoUpdater.getUpdateInfo());
 
   // 延迟创建窗口（让托盘先出现）
   setTimeout(() => showWindow(), 500);
