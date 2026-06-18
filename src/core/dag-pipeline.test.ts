@@ -260,3 +260,50 @@ describe('Step 4: Gate-2 拦截', () => {
     expect(result.resolvedDAG).toBe(validResolved.dag);
   });
 });
+
+// ==================== V2: 多级降级策略测试 ====================
+
+describe('V2: 多级降级策略', () => {
+  it('Step 3.5 未匹配步骤触发降级', async () => {
+    // 构造一个 resourceSystem 但 skillResolver 不匹配任何步骤
+    const hub = new (await import('../brain/hub/unified-resource-hub.js')).UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+
+    const mockSys = {
+      dagPlanner: {
+        planSkeleton: vi.fn().mockResolvedValue({
+          id: 'skel-1', description: 'test',
+          steps: [{ id: 's1', name: 'do', intent: 'do something', deps: [] }],
+          edges: [], parallelGroups: [], complexity: 'simple', detectedDomains: [],
+        }),
+      },
+      threeBrain: { left: { getRuleEngine: () => null } },
+      skillResolver: {
+        resolve: vi.fn().mockResolvedValue({
+          dag: {
+            id: 'dag-1',
+            tasks: new Map([['s1', { id: 's1', name: 'do', tool: 'exec', args: {}, deps: [], status: 'pending' }]]),
+            edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing', defaultTimeoutMs: 30000,
+          },
+          resolutionLog: [{ stepId: 's1', stepName: 'do', resolvedTool: 'exec', source: 'builtin', confidence: 0.5 }],
+          unresolvedSteps: [],
+        }),
+        setResourceHub: vi.fn(),
+        matchExecutors: vi.fn().mockReturnValue(new Map()), // 不匹配任何步骤
+      },
+      resourceSystem: { hub },
+      waitForResourceSystem: vi.fn().mockResolvedValue(true),
+      tools: { list: () => [] },
+    } as any;
+
+    const result = await resolveDAGPipeline(mockSys, 'test', makeSignal(), makeResources(), false);
+
+    // 应有 executorMatches（降级匹配到 m1）
+    expect(result.executorMatches).toBeDefined();
+    expect(result.executorMatches!.size).toBeGreaterThan(0);
+    // 降级来源应为 fallback
+    const firstMatch = [...result.executorMatches!.values()][0];
+    expect(firstMatch.source).toBe('fallback');
+  });
+});

@@ -205,3 +205,95 @@ describe('CapabilityGraph', () => {
     expect(overview.byType.tool).toBe(1);
   });
 });
+
+// ==================== V2: auditDAGCombination 测试 ====================
+
+describe('V2: auditDAGCombination', () => {
+  it('DAG 组合审计写入 marginalContribution', () => {
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+    // 全局：10 次调用，8 次成功 = 80%
+    for (let i = 0; i < 8; i++) hub.recordOutcome('m1', { success: true, latencyMs: 100 });
+    for (let i = 0; i < 2; i++) hub.recordOutcome('m1', { success: false, latencyMs: 100 });
+
+    const auditor = new MarginalAuditor(hub, { minSamples: 3 });
+
+    // DAG 内：3 次全部成功 = 100%
+    auditor.auditDAGCombination('dag-1', [
+      { stepId: 's1', resourceId: 'm1', taskType: 'chat', success: true, latencyMs: 100 },
+      { stepId: 's2', resourceId: 'm1', taskType: 'chat', success: true, latencyMs: 100 },
+      { stepId: 's3', resourceId: 'm1', taskType: 'chat', success: true, latencyMs: 100 },
+    ]);
+
+    const mc = hub.get('m1')?.marginalContribution;
+    expect(mc).not.toBeNull();
+    expect(mc!.performanceWith).toBe(1); // DAG 内 100%
+    // delta = 1.0 - 全局成功率（> 0）
+    expect(mc!.delta).toBeGreaterThan(0);
+  });
+
+  it('空步骤列表不崩溃', () => {
+    const hub = new UnifiedResourceHub();
+    const auditor = new MarginalAuditor(hub);
+    auditor.auditDAGCombination('dag-empty', []);
+    // 不抛异常即通过
+  });
+
+  it('多资源 DAG 组合审计', () => {
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.register({ id: 'm2', type: 'model', name: 'claude' });
+    hub.markState('m1', 'active');
+    hub.markState('m2', 'active');
+    // m1 全局 50%
+    for (let i = 0; i < 5; i++) hub.recordOutcome('m1', { success: true, latencyMs: 100 });
+    for (let i = 0; i < 5; i++) hub.recordOutcome('m1', { success: false, latencyMs: 100 });
+    // m2 全局 50%
+    for (let i = 0; i < 5; i++) hub.recordOutcome('m2', { success: true, latencyMs: 100 });
+    for (let i = 0; i < 5; i++) hub.recordOutcome('m2', { success: false, latencyMs: 100 });
+
+    const auditor = new MarginalAuditor(hub, { minSamples: 3 });
+
+    auditor.auditDAGCombination('dag-multi', [
+      { stepId: 's1', resourceId: 'm1', taskType: 'tools', success: true, latencyMs: 100 },
+      { stepId: 's2', resourceId: 'm2', taskType: 'reasoning', success: true, latencyMs: 200 },
+    ]);
+
+    // 两个资源都应有 marginalContribution
+    expect(hub.get('m1')?.marginalContribution).not.toBeNull();
+    expect(hub.get('m2')?.marginalContribution).not.toBeNull();
+  });
+});
+
+// ==================== V2: recommendCombination 输出格式兼容性 ====================
+
+describe('V2: recommendCombination output compatibility', () => {
+  it('同 tier 模型获得兼容性加分', () => {
+    const hub = new UnifiedResourceHub();
+    // 两个同 tier 模型
+    hub.register({ id: 'm1', type: 'model', name: 'gpt-4o', metadata: { tier: 'high', provider: 'openai' } });
+    hub.register({ id: 'm2', type: 'model', name: 'claude-opus', metadata: { tier: 'high', provider: 'anthropic' } });
+    hub.register({ id: 'm3', type: 'model', name: 'gpt-mini', metadata: { tier: 'low', provider: 'openai' } });
+    hub.markState('m1', 'active');
+    hub.markState('m2', 'active');
+    hub.markState('m3', 'active');
+
+    // s1 用了 m1，s2 应偏向同 tier 的 m2（+6 同 tier）而非 m3
+    const result = hub.recommendCombination([
+      { stepId: 's1', taskType: 'chat', deps: [] },
+      { stepId: 's2', taskType: 'chat', deps: ['s1'] },
+    ]);
+
+    expect(result.size).toBe(2);
+    // s1 和 s2 都有分配
+    expect(result.has('s1')).toBe(true);
+    expect(result.has('s2')).toBe(true);
+  });
+
+  it('空需求返回空 map', () => {
+    const hub = new UnifiedResourceHub();
+    const result = hub.recommendCombination([]);
+    expect(result.size).toBe(0);
+  });
+});

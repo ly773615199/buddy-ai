@@ -740,3 +740,65 @@ describe('ModelPool', () => {
     });
   });
 });
+
+// ==================== V2-缺口3: getAffinityScore 测试 ====================
+
+describe('V2: getAffinityScore', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pool-test-'));
+  });
+
+  function createTestPool(): ModelPool {
+    const pool = new ModelPool(null, tmpDir);
+    pool.addProfile({
+      id: 'test-model',
+      displayName: 'Test Model',
+      platform: 'test',
+      active: true,
+      tier: 'standard',
+      costPer1kInput: 0.01,
+      costPer1kOutput: 0.02,
+      capabilities: { toolCalling: true, toolCallingMode: 'auto', vision: false, streaming: true },
+      stats: { totalCalls: 0, successes: 0, failures: 0, avgLatencyMs: 0, lastUsed: 0, byTaskType: {} },
+    } as any);
+    return pool;
+  }
+
+  it('无数据时返回 0.5（中性）', () => {
+    const pool = createTestPool();
+    const score = pool.getAffinityScore('test-model', 'chat');
+    expect(score).toBe(0.5);
+  });
+
+  it('多次成功后亲和度 > 0.5', () => {
+    const pool = createTestPool();
+    for (let i = 0; i < 10; i++) {
+      pool.recordFeedback('test-model', 'chat' as any, true, 100, 0.01, 0.9);
+    }
+    const score = pool.getAffinityScore('test-model', 'chat');
+    expect(score).toBeGreaterThan(0.5);
+  });
+
+  it('多次失败后亲和度 < 0.5', () => {
+    const pool = createTestPool();
+    for (let i = 0; i < 10; i++) {
+      pool.recordFeedback('test-model', 'chat' as any, false, 100, 0.01, 0.1);
+    }
+    const score = pool.getAffinityScore('test-model', 'chat');
+    expect(score).toBeLessThan(0.5);
+  });
+
+  it('不同 taskType 亲和度独立', () => {
+    const pool = createTestPool();
+    for (let i = 0; i < 10; i++) {
+      pool.recordFeedback('test-model', 'chat' as any, true, 100, 0.01, 0.9);
+    }
+    for (let i = 0; i < 10; i++) {
+      pool.recordFeedback('test-model', 'reasoning' as any, false, 100, 0.01, 0.1);
+    }
+    expect(pool.getAffinityScore('test-model', 'chat')).toBeGreaterThan(0.5);
+    expect(pool.getAffinityScore('test-model', 'reasoning')).toBeLessThan(0.5);
+  });
+});

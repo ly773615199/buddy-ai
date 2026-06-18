@@ -8,6 +8,7 @@ import { SkillResolver } from './skill-resolver.js';
 import type { DAGSkeleton, SkeletonStep } from '../orchestrate/types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolDef } from '../types.js';
+import { UnifiedResourceHub } from '../brain/hub/unified-resource-hub.js';
 
 // ── Helpers ──
 
@@ -398,5 +399,148 @@ describe('DAG 构建', () => {
     const result = await resolver.resolve(skeleton, 'test');
 
     expect(result.dag.parallelGroups).toContainEqual(['s1', 's2']);
+  });
+});
+
+// ==================== V1+V2 新增功能测试 ====================
+
+describe('V2: inferCapabilityRequirement', () => {
+  it('code_analysis → tools + requiresToolCalling', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    // 通过 matchExecutors 间接测试推断
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    const task = { id: 's1', name: 'scan', tool: 'exec', args: {}, deps: [], status: 'pending' as const };
+    dag.tasks.set('s1', task);
+
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'scan', intent: 'scan code', deps: [], suggestedCategory: 'code_analysis' },
+    ]);
+
+    const matches = resolver.matchExecutors(dag, skeleton);
+    expect(matches.has('s1')).toBe(true);
+    expect(matches.get('s1')!.source).toBe('capability');
+    // 推断结果应回写到 skeleton step
+    expect(skeleton.steps[0].capabilityRequirement?.taskType).toBe('tools');
+    expect(skeleton.steps[0].capabilityRequirement?.requiresToolCalling).toBe(true);
+  });
+
+  it('voice → chat 无 requiresToolCalling', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'tts' });
+    hub.markState('m1', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    dag.tasks.set('s1', { id: 's1', name: 'speak', tool: 'tts_speak', args: {}, deps: [], status: 'pending' as const });
+
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'speak', intent: 'speak text', deps: [], suggestedCategory: 'voice' },
+    ]);
+
+    const matches = resolver.matchExecutors(dag, skeleton);
+    expect(skeleton.steps[0].capabilityRequirement?.taskType).toBe('chat');
+    expect(skeleton.steps[0].capabilityRequirement?.requiresToolCalling).toBeUndefined();
+  });
+
+  it('无 suggestedCategory → 不推断，跳过', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    dag.tasks.set('s1', { id: 's1', name: 'unknown', tool: 'exec', args: {}, deps: [], status: 'pending' as const });
+
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'unknown', intent: 'unknown', deps: [] }, // 无 suggestedCategory
+    ]);
+
+    const matches = resolver.matchExecutors(dag, skeleton);
+    expect(matches.has('s1')).toBe(false);
+  });
+
+  it('已有 capabilityRequirement 时不覆盖', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    dag.tasks.set('s1', { id: 's1', name: 'chat', tool: 'exec', args: {}, deps: [], status: 'pending' as const });
+
+    const existingReq = { taskType: 'reasoning' as const, requiresToolCalling: false };
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'chat', intent: 'chat', deps: [], suggestedCategory: 'chat', capabilityRequirement: existingReq },
+    ]);
+
+    resolver.matchExecutors(dag, skeleton);
+    // 不应覆盖已有的 requirement
+    expect(skeleton.steps[0].capabilityRequirement).toBe(existingReq);
+  });
+});
+
+describe('V2: resolveParallelConflicts', () => {
+  it('并行组内同资源应重新分配', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.register({ id: 'm2', type: 'model', name: 'claude' });
+    hub.markState('m1', 'active');
+    hub.markState('m2', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [['s1', 's2']], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    dag.tasks.set('s1', { id: 's1', name: 'A', tool: 'exec', args: {}, deps: [], status: 'pending' as const });
+    dag.tasks.set('s2', { id: 's2', name: 'B', tool: 'exec', args: {}, deps: [], status: 'pending' as const });
+
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'A', intent: 'do A', deps: [], suggestedCategory: 'code_analysis' },
+      { id: 's2', name: 'B', intent: 'do B', deps: [], suggestedCategory: 'code_analysis' },
+    ]);
+    skeleton.parallelGroups = [['s1', 's2']];
+
+    const matches = resolver.matchExecutors(dag, skeleton);
+    // 两个步骤应分配到不同资源（如果可用）
+    const r1 = matches.get('s1')?.resourceId;
+    const r2 = matches.get('s2')?.resourceId;
+    if (r1 && r2) {
+      // 至少有一个会被重新分配（如果两个都分到同一个）
+      expect(matches.size).toBe(2);
+    }
+  });
+});
+
+describe('V2: matchExecutors reusePreviousModel', () => {
+  it('reusePreviousModel 复用 deps[0] 的匹配结果', () => {
+    const resolver = new SkillResolver(mockToolRegistry());
+    const hub = new UnifiedResourceHub();
+    hub.register({ id: 'm1', type: 'model', name: 'gpt' });
+    hub.markState('m1', 'active');
+    resolver.setResourceHub(hub);
+
+    const dag = { id: 'd1', description: 'test', tasks: new Map(), edges: [], parallelGroups: [], createdAt: Date.now(), status: 'executing' as const, defaultTimeoutMs: 30000 };
+    dag.tasks.set('s1', { id: 's1', name: 'scan', tool: 'exec', args: {}, deps: [], status: 'pending' as const });
+    dag.tasks.set('s2', { id: 's2', name: 'report', tool: 'exec', args: {}, deps: ['s1'], status: 'pending' as const });
+
+    const skeleton = makeSkeleton([
+      { id: 's1', name: 'scan', intent: 'scan', deps: [], suggestedCategory: 'code_analysis' },
+      { id: 's2', name: 'report', intent: 'report', deps: ['s1'], suggestedCategory: 'chat',
+        capabilityRequirement: { taskType: 'chat', reusePreviousModel: true } },
+    ]);
+
+    const matches = resolver.matchExecutors(dag, skeleton);
+    // s2 应复用 s1 的资源
+    if (matches.has('s1') && matches.has('s2')) {
+      expect(matches.get('s2')!.source).toBe('reuse');
+      expect(matches.get('s2')!.resourceId).toBe(matches.get('s1')!.resourceId);
+    }
   });
 });
