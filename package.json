@@ -63,12 +63,13 @@
     }
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/anthropic": "^3.0.85",
     "@ai-sdk/deepseek": "^2.0.29",
-    "@ai-sdk/google": "^3.0.64",
-    "@ai-sdk/openai": "^3.0.53",
-    "@ai-sdk/openai-compatible": "^2.0.41",
-    "ai": "^6.0.168",
+    "@ai-sdk/google": "^3.0.83",
+    "@ai-sdk/openai": "^3.0.73",
+    "@ai-sdk/openai-compatible": "^2.0.51",
+    "@ai-sdk/provider-utils": "^4.0.30",
+    "ai": "^6.0.208",
     "better-sqlite3": "^12.9.0",
     "glob": "^13.0.6",
     "seedrandom": "^3.0.5",

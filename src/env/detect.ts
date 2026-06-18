@@ -33,13 +33,22 @@ export async function detectEnvironment(): Promise<EnvCheck[]> {
     checks.push({ name: 'Node.js', ok: false, value: '未检测到', suggestion: '请安装 Node.js 18+' });
   }
 
-  // 网络连接
-  try {
-    await exec('curl -s --connect-timeout 5 https://api.openai.com', { timeout: 8000 });
-    checks.push({ name: '网络连接', ok: true, value: '正常' });
-  } catch {
-    checks.push({ name: '网络连接', ok: false, value: '不可用', suggestion: '检查网络或代理设置' });
+  // 网络连接（国内优先检测，海外兜底）
+  const netProbes = [
+    'https://integrate.api.nvidia.com/v1/models',
+    'https://api.deepseek.com',
+    'https://api.siliconflow.cn',
+    'https://api.openai.com',
+  ];
+  let netOk = false;
+  for (const url of netProbes) {
+    try {
+      await exec(`curl -s --connect-timeout 3 -o /dev/null -w '%{http_code}' ${url}`, { timeout: 5000 });
+      netOk = true;
+      break;
+    } catch { /* try next */ }
   }
+  checks.push({ name: '网络连接', ok: netOk, value: netOk ? '正常' : '不可用', suggestion: netOk ? undefined : '检查网络或代理设置' });
 
   // Git
   try {
