@@ -178,6 +178,17 @@ export class Subsystems {
     auditor: import('../brain/hub/marginal-auditor.js').MarginalAuditor;
     graph: import('../brain/hub/capability-graph.js').CapabilityGraph;
   } | null = null;
+  /** resourceSystem 异步初始化完成的 Promise（供外部 await） */
+  private _resourceSystemReady: Promise<void> = Promise.resolve();
+  private _resolveResourceSystemReady: (() => void) | null = null;
+
+  /** 等待 resourceSystem 初始化完成（最多等 timeoutMs） */
+  async waitForResourceSystem(timeoutMs = 5000): Promise<boolean> {
+    if (this.resourceSystem) return true;
+    const timeout = new Promise<boolean>(r => setTimeout(() => r(false), timeoutMs));
+    const ready = this._resourceSystemReady.then(() => true);
+    return Promise.race([timeout, ready]);
+  }
   /** 左脑：理性决策脑（规则+调度+策略蒸馏） */
   leftBrain: LeftBrain | null = null;
   /** 右脑：直觉学习脑（轻量NN+在线学习+蒸馏） */
@@ -206,6 +217,11 @@ export class Subsystems {
 
   constructor(config: BuddyConfig, verbose: boolean) {
     const dbDir = path.join(process.env.HOME ?? '/tmp', '.buddy');
+
+    // 初始化 resourceSystem ready promise（deferred 模式）
+    this._resourceSystemReady = new Promise<void>(resolve => {
+      this._resolveResourceSystemReady = resolve;
+    });
 
     // --- E2E Mock LLM: 强制使用 mock provider ---
     if (process.env.BUDDY_MOCK_LLM === '1') {
@@ -973,6 +989,8 @@ export class Subsystems {
         });
         this.resourceSystem = system;
         this.resourceHub = system.adapter as any; // 向后兼容
+        // 通知等待者 resourceSystem 已就绪
+        this._resolveResourceSystemReady?.();
 
         // 生命周期事件监听
         system.hub.onLifecycleEvent((event) => {

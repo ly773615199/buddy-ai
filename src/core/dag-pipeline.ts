@@ -81,6 +81,10 @@ export async function resolveDAGPipeline(
 
   // ── Step 3.5: 能力匹配 — 为每个任务匹配执行单元（模型） ──
   let executorMatches: Map<string, import('../orchestrate/types.js').ExecutorMatch> | undefined;
+  // 等待 resourceSystem 异步初始化完成（最多 3s）
+  if (!sys.resourceSystem?.hub) {
+    await sys.waitForResourceSystem(3000);
+  }
   const unifiedHub = sys.resourceSystem?.hub;
   if (sys.skillResolver && unifiedHub) {
     sys.skillResolver.setResourceHub(unifiedHub);
