@@ -100,23 +100,38 @@ export async function resolveDAGPipeline(
     sys.skillResolver.setResourceHub(unifiedHub);
     executorMatches = sys.skillResolver.matchExecutors(resolved.dag, skeleton);
 
-    // V2-缺口2: 对未匹配到执行单元的步骤降级重试
+    // V2-缺口2: 对未匹配到执行单元的步骤逐步放宽降级
     for (const task of resolved.dag.tasks.values()) {
       if (executorMatches.has(task.id)) continue;
-      // 降级匹配：从 skeleton step 推断 taskType，放宽约束重试
       const step = skeleton.steps.find(s => s.id === task.id);
-      const inferredTaskType = step?.capabilityRequirement?.taskType
-        ?? inferFallbackTaskType(step);
-      const fallbackCandidates = unifiedHub.recommend(inferredTaskType);
-      if (fallbackCandidates.length > 0) {
-        const best = fallbackCandidates[0];
-        executorMatches.set(task.id, {
-          taskId: task.id,
-          resourceId: best.id,
-          resourceName: best.name,
-          score: 0,
-          source: 'fallback',
-        });
+      const req = step?.capabilityRequirement;
+      const inferredTaskType = req?.taskType ?? inferFallbackTaskType(step);
+
+      // 降级策略：逐步放宽约束，直到找到候选
+      const fallbackLevels = [
+        // Level 1: 去掉成本约束
+        { taskType: inferredTaskType, context: { requiresToolCalling: req?.requiresToolCalling, requiresVision: req?.requiresVision } },
+        // Level 2: 去掉能力约束
+        { taskType: inferredTaskType, context: {} },
+        // Level 3: 任意 active 模型
+        { taskType: undefined as unknown as string, context: {} },
+      ];
+
+      for (const level of fallbackLevels) {
+        const candidates = level.taskType
+          ? unifiedHub.recommend(level.taskType, undefined, undefined, level.context)
+          : unifiedHub.getAll().filter(r => r.state === 'active' || r.state === 'degraded');
+        if (candidates.length > 0) {
+          const best = candidates[0];
+          executorMatches.set(task.id, {
+            taskId: task.id,
+            resourceId: best.id,
+            resourceName: best.name,
+            score: 0,
+            source: 'fallback',
+          });
+          break;
+        }
       }
     }
 

@@ -168,6 +168,89 @@ export class MarginalAuditor {
   }
 
   /**
+   * 审计 DAG 中资源组合的边际贡献
+   *
+   * 方法：将 DAG 中使用的资源组合视为一个整体，比较组合中每个资源
+   * 在 DAG 任务类型上的实际表现 vs 该资源在全局同类任务上的表现。
+   * 如果组合中某资源表现显著低于其全局水平，说明该组合不适配。
+   *
+   * @param dagId DAG ID（用于日志）
+   * @param steps DAG 步骤执行结果 [{stepId, resourceId, taskType, success, latencyMs}]
+   */
+  auditDAGCombination(
+    dagId: string,
+    steps: Array<{
+      stepId: string;
+      resourceId: string;
+      taskType: string;
+      success: boolean;
+      latencyMs: number;
+    }>,
+  ): void {
+    if (steps.length === 0) return;
+
+    // 1. 回写每个步骤的执行结果到 ResourceHub
+    for (const step of steps) {
+      this.hub.recordOutcome(step.resourceId, {
+        success: step.success,
+        latencyMs: step.latencyMs,
+        taskType: step.taskType,
+      });
+    }
+
+    // 2. 计算 DAG 级组合边际贡献
+    // 将 DAG 中使用的资源 ID 去重
+    const uniqueResources = [...new Set(steps.map(s => s.resourceId))];
+
+    for (const resourceId of uniqueResources) {
+      // 该资源在 DAG 中的步骤
+      const resourceSteps = steps.filter(s => s.resourceId === resourceId);
+      if (resourceSteps.length === 0) continue;
+
+      // 该资源在 DAG 中的成功率
+      const dagSuccesses = resourceSteps.filter(s => s.success).length;
+      const dagRate = dagSuccesses / resourceSteps.length;
+
+      // 该资源的全局成功率
+      const resource = this.hub.get(resourceId);
+      if (!resource) continue;
+      const globalRate = resource.stats.totalCalls > 0
+        ? resource.stats.successes / resource.stats.totalCalls
+        : 0.5;
+
+      // 组合边际贡献 = DAG 内成功率 - 全局成功率
+      const delta = dagRate - globalRate;
+
+      // EMA 平滑
+      const existing = resource.marginalContribution;
+      const smoothedDelta = existing
+        ? this.alpha * delta + (1 - this.alpha) * existing.smoothedDelta
+        : delta;
+
+      const mc: MarginalContribution = {
+        resourceId,
+        performanceWith: dagRate,
+        performanceWithout: globalRate,
+        delta,
+        smoothedDelta,
+        sampleCount: resourceSteps.length,
+        lastAuditedAt: Date.now(),
+      };
+
+      this.hub.updateMarginalContribution(resourceId, mc);
+
+      // 3. 审计决策
+      const decision = this.audit(mc);
+      if (decision === 'retire') {
+        this.hub.applyAuditDecision(resourceId, 'retire',
+          `DAG 组合审计: 边际贡献 ${smoothedDelta.toFixed(3)} (dag=${dagId})`);
+      }
+    }
+
+    console.log(`[MarginalAuditor] DAG ${dagId} 组合审计完成: ${uniqueResources.length} 个资源, ${steps.length} 个步骤`);
+  }
+
+  /**
    * 执行审计并应用决策
    */
   runAndApply(taskType?: string): {

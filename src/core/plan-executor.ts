@@ -892,6 +892,23 @@ async function executeDAG(ctx: ExecutionContext, plan: OrchestrationPlan): Promi
       }
     }
 
+    // Phase 3.3: MarginalAuditor DAG 组合审计
+    const auditor = ctx.sys.resourceSystem?.auditor;
+    if (auditor && plan.dagSkeleton) {
+      const auditSteps = result.taskResults.map(tr => {
+        const task = dag.tasks.get(tr.id);
+        const step = stepMap?.get(tr.id);
+        return {
+          stepId: tr.id,
+          resourceId: task?.executorResourceId ?? `tool/${task?.tool ?? 'unknown'}`,
+          taskType: step?.capabilityRequirement?.taskType ?? task?.tool ?? 'unknown',
+          success: tr.success,
+          latencyMs: tr.durationMs,
+        };
+      });
+      auditor.auditDAGCombination(dag.id, auditSteps);
+    }
+
     return {
       text: summary,
       source: `dag/${dag.id}`,

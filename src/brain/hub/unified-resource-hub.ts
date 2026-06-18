@@ -373,6 +373,36 @@ export class UnifiedResourceHub {
           }
         }
 
+        // 输出格式兼容性加分：前序步骤的输出格式对当前步骤的兼容度 → +0~12
+        for (const depId of req.deps) {
+          const depResourceId = assignment.get(depId);
+          if (!depResourceId) continue;
+          const depResource = this.get(depResourceId);
+          if (!depResource) continue;
+
+          // 相同模型 → 最高兼容（输出风格一致）
+          if (depResourceId === c.id) {
+            score += 12;
+            break;
+          }
+
+          // 同 tier 模型 → 中等兼容（输出复杂度相近）
+          const cTier = (c.metadata.tier as string) ?? '';
+          const depTier = (depResource.metadata.tier as string) ?? '';
+          if (cTier && depTier && cTier === depTier) {
+            score += 6;
+            break;
+          }
+
+          // 同 capabilities → 基础兼容（都能处理同类输入/输出）
+          const cToolCalling = c.capabilities.toolCalling?.value ?? false;
+          const depToolCalling = depResource.capabilities.toolCalling?.value ?? false;
+          if (cToolCalling === depToolCalling) {
+            score += 3;
+            break;
+          }
+        }
+
         return { resource: c, score };
       });
 
