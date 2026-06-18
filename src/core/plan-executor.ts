@@ -868,16 +868,25 @@ async function executeDAG(ctx: ExecutionContext, plan: OrchestrationPlan): Promi
       .join('\n\n');
 
     // P1-1: 回写 DAG 中每个任务的结果
+    // V2-缺口6: 从 skeleton capabilityRequirement 提取精确 taskType
+    const stepMap = plan.dagSkeleton?.steps
+      ? new Map(plan.dagSkeleton.steps.map(s => [s.id, s]))
+      : null;
+
     if (dag.tasks) {
       for (const tr of result.taskResults) {
         const task = dag.tasks.get(tr.id);
         if (task) {
+          // V2-缺口6: 优先从 capabilityRequirement 取 taskType，否则 fallback
+          const step = stepMap?.get(tr.id);
+          const taskType = step?.capabilityRequirement?.taskType ?? task.tool;
+
           // DAG 任务使用工具，资源 ID 为 tool/{toolName}
-          recordResourceOutcome(ctx.sys, `tool/${task.tool}`, tr.success, tr.durationMs);
+          recordResourceOutcome(ctx.sys, `tool/${task.tool}`, tr.success, tr.durationMs, undefined, taskType);
 
           // Phase 3.2: 如果任务有匹配的执行单元，也回写到该资源
           if (task.executorResourceId) {
-            recordResourceOutcome(ctx.sys, task.executorResourceId, tr.success, tr.durationMs);
+            recordResourceOutcome(ctx.sys, task.executorResourceId, tr.success, tr.durationMs, undefined, taskType);
           }
         }
       }

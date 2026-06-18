@@ -12,7 +12,7 @@
  * Phase 2: 编排-执行分离的核心桥梁
  */
 
-import type { DAGSkeleton, SkeletonStep, TaskDAG, Task, ResolvedTask, ResolveResult } from '../orchestrate/types.js';
+import type { DAGSkeleton, SkeletonStep, TaskDAG, Task, ResolvedTask, ResolveResult, StepCapabilityRequirement } from '../orchestrate/types.js';
 import { createDAG, createTask, addTask, addEdge } from '../orchestrate/dag.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolRetriever } from '../tools/tool-retriever.js';
@@ -97,8 +97,9 @@ export class SkillResolver {
    *
    * 逻辑：
    * 1. 有 capabilityRequirement → 用 UnifiedResourceHub.recommend() 匹配
-   * 2. reusePreviousModel=true → 复用前序步骤的匹配结果
-   * 3. 无需求 → 跳过（使用默认模型）
+   * 2. 无 capabilityRequirement → 自动推断（V2-缺口1）
+   * 3. reusePreviousModel=true → 复用前序步骤的匹配结果
+   * 4. 并行步骤冲突检测（V2-缺口4）
    *
    * @param dag 解析后的完整 DAG
    * @param skeleton 原始骨架（携带 capabilityRequirement）
@@ -115,7 +116,8 @@ export class SkillResolver {
 
     for (const task of dag.tasks.values()) {
       const step = stepMap.get(task.id);
-      const req = step?.capabilityRequirement;
+      // V2-缺口1: 无 capabilityRequirement 时自动推断
+      const req = step?.capabilityRequirement ?? this.inferCapabilityRequirement(step);
       if (!req) continue;
 
       // 检查是否复用前序模型
@@ -158,7 +160,80 @@ export class SkillResolver {
       }
     }
 
+    // V2-缺口4: 并行步骤冲突检测
+    this.resolveParallelConflicts(dag, skeleton, matches);
+
     return matches;
+  }
+
+  /**
+   * V2-缺口1: 从 suggestedCategory + intent 自动推断 capabilityRequirement
+   */
+  private inferCapabilityRequirement(step: SkeletonStep | undefined): StepCapabilityRequirement | null {
+    if (!step) return null;
+    const cat = step.suggestedCategory;
+    if (!cat) return null;
+
+    const CATEGORY_TASK_MAP: Record<string, StepCapabilityRequirement> = {
+      code_analysis:  { taskType: 'tools', requiresToolCalling: true },
+      file_ops:       { taskType: 'tools', requiresToolCalling: true },
+      web_search:     { taskType: 'tools', requiresToolCalling: true },
+      git:            { taskType: 'tools', requiresToolCalling: true },
+      voice:          { taskType: 'chat' },
+      chat:           { taskType: 'chat' },
+      system:         { taskType: 'tools', requiresToolCalling: true },
+    };
+
+    return CATEGORY_TASK_MAP[cat] ?? null;
+  }
+
+  /**
+   * V2-缺口4: 并行步骤冲突检测
+   * 同一 parallelGroup 中的步骤避免分配同一个资源（防止速率限制冲突）
+   */
+  private resolveParallelConflicts(
+    dag: import('../orchestrate/types.js').TaskDAG,
+    skeleton: DAGSkeleton,
+    matches: Map<string, import('../orchestrate/types.js').ExecutorMatch>,
+  ): void {
+    const stepMap = new Map(skeleton.steps.map(s => [s.id, s]));
+
+    for (const group of skeleton.parallelGroups) {
+      // 收集本组中已匹配的步骤
+      const groupMatches = group
+        .map(id => ({ id, match: matches.get(id) }))
+        .filter((m): m is { id: string; match: import('../orchestrate/types.js').ExecutorMatch } => !!m.match);
+
+      // 检测相同 resourceId
+      const byResource = new Map<string, string[]>();
+      for (const { id, match } of groupMatches) {
+        const existing = byResource.get(match.resourceId) ?? [];
+        existing.push(id);
+        byResource.set(match.resourceId, existing);
+      }
+
+      // 对重复的步骤尝试分配其他资源
+      for (const [resourceId, taskIds] of byResource) {
+        if (taskIds.length <= 1) continue;
+        for (let i = 1; i < taskIds.length; i++) {
+          const step = stepMap.get(taskIds[i]);
+          const req = step?.capabilityRequirement ?? this.inferCapabilityRequirement(step);
+          if (!req) continue;
+
+          const altCandidates = this.resourceHub!.recommend(req.taskType)
+            .filter(r => r.id !== resourceId);
+          if (altCandidates.length > 0) {
+            matches.set(taskIds[i], {
+              taskId: taskIds[i],
+              resourceId: altCandidates[0].id,
+              resourceName: altCandidates[0].name,
+              score: 0,
+              source: 'capability',
+            });
+          }
+        }
+      }
+    }
   }
 
   /**

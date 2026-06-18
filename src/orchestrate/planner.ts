@@ -14,6 +14,7 @@ import { createDAG, createTask, addTask, addEdge } from './dag.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolRetriever } from '../tools/tool-retriever.js';
 import type { ExperienceScheduler } from '../skills/scheduler.js';
+import type { UnifiedResourceHub } from '../brain/hub/unified-resource-hub.js';
 
 /** LLM 调用接口 */
 export type LLMCaller = (messages: Array<{ role: string; content: string }>) => Promise<string>;
@@ -43,6 +44,8 @@ export class DAGPlanner {
   private config: PlannerConfig;
   /** Phase 4: 领域知识包调度器 */
   private scheduler: ExperienceScheduler | null = null;
+  /** V2-缺口5: 资源中心 — 用于资源感知规划 */
+  private resourceHub: UnifiedResourceHub | null = null;
 
   constructor(
     llm: LLMCaller,
@@ -59,6 +62,11 @@ export class DAGPlanner {
   /** Phase 4: 注入领域知识包调度器 */
   setScheduler(scheduler: ExperienceScheduler): void {
     this.scheduler = scheduler;
+  }
+
+  /** V2-缺口5: 注入资源中心 */
+  setResourceHub(hub: UnifiedResourceHub): void {
+    this.resourceHub = hub;
   }
 
   /**
@@ -133,9 +141,12 @@ export class DAGPlanner {
       }
     }
 
-    // 2. 构建骨架规划 prompt
+    // 2. V2-缺口5: 构建资源摘要注入
+    const resourceSummary = this.buildResourceSummary();
+
+    // 3. 构建骨架规划 prompt
     const systemPrompt = this.buildSkeletonSystemPrompt();
-    const userPrompt = this.buildSkeletonUserPrompt(userIntent, contextTags, domainKnowledge);
+    const userPrompt = this.buildSkeletonUserPrompt(userIntent, contextTags, domainKnowledge, resourceSummary);
 
     // 3. 调用 LLM
     const rawResponse = await this.llm([
@@ -197,7 +208,18 @@ export class DAGPlanner {
 2. deps 引用其他步骤的 id，空数组 [] 表示无依赖
 3. 同时无依赖的步骤可自动并行
 4. 不要编造步骤，每一步都必须对完成任务有直接贡献
-5. suggestedCategory 用于约束后续工具选择，必须准确`;
+5. suggestedCategory 用于约束后续工具选择，必须准确
+
+**capabilityRequirement（可选但推荐）**：
+每个步骤可选填 capabilityRequirement，帮助系统选择最合适的执行模型：
+- taskType: 'reasoning' | 'chat' | 'tools' | 'embedding' | 'background'
+  - reasoning: 需要深度推理（分析、规划、决策）
+  - chat: 对话、生成、总结
+  - tools: 需要调用外部工具
+- requiresToolCalling: true/false，是否需要工具调用能力
+- reusePreviousModel: true/false，是否复用前序步骤模型
+
+不填时系统会自动推断，但填写可提高匹配精度。`
   }
 
   /** 骨架规划 user prompt */
@@ -205,6 +227,7 @@ export class DAGPlanner {
     intent: string,
     contextTags: string[],
     domainKnowledge: string = '',
+    resourceSummary: string = '',
   ): string {
     let prompt = `## 用户意图
 ${intent}`;
@@ -218,8 +241,35 @@ ${contextTags.join(', ')}`;
       prompt += `\n\n## 领域知识${domainKnowledge}`;
     }
 
+    if (resourceSummary) {
+      prompt += resourceSummary;
+    }
+
     prompt += `\n\n请规划执行步骤，输出严格 JSON（不要 markdown 代码块包裹）。`;
     return prompt;
+  }
+
+  /**
+   * V2-缺口5: 构建可用资源摘要，注入 planner prompt
+   */
+  private buildResourceSummary(): string {
+    if (!this.resourceHub) return '';
+    const active = this.resourceHub.getActive();
+    if (active.length === 0) return '';
+
+    const byType = new Map<string, string[]>();
+    for (const r of active) {
+      const list = byType.get(r.type) ?? [];
+      list.push(r.name);
+      byType.set(r.type, list);
+    }
+
+    let summary = '\n\n## 可用资源\n';
+    for (const [type, names] of byType) {
+      summary += `- ${type}: ${names.join(', ')}\n`;
+    }
+    summary += '\n请基于可用资源规划步骤，不要规划需要不存在资源的步骤。';
+    return summary;
   }
 
   /** 解析 LLM 输出为 DAGSkeleton */

@@ -1532,6 +1532,21 @@ export class ModelPool {
     return result;
   }
 
+  /**
+   * V2-缺口3: 获取指定模型在指定任务类型上的 Thompson Sampling 亲和度
+   * 返回 0~1 的值，表示 Beta 分布的均值 (alpha / (alpha + beta))
+   *
+   * @param modelId 模型 ID
+   * @param taskType 任务类型
+   * @returns 亲和度分数 0~1，无数据时返回 0.5（中性）
+   */
+  getAffinityScore(modelId: string, taskType: string): number {
+    const key = `${taskType}:${modelId}`;
+    const params = this.tsParams.get(key);
+    if (!params || params.totalCalls === 0) return 0.5; // 无数据时返回中性值
+    return params.alpha / (params.alpha + params.beta);
+  }
+
   // ==================== 决策信息查询（阶段 2） ====================
 
   /**

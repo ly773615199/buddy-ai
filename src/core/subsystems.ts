@@ -689,6 +689,7 @@ export class Subsystems {
     // Phase 4: 注入领域知识包调度器到 Planner
     this.dagPlanner.setScheduler(this.experienceScheduler);
     this.taskExecutor = new TaskExecutor(this.tools, undefined, verbose);
+    // V1-改动3: TaskExecutor 内置 modelSwitcher，工具可通过 taskExecutor.currentModelOverride 读取模型覆盖
 
     // --- Phase 2: 三脑能力补全 ---
     this.decisionExplainer = new DecisionExplainer();
@@ -989,6 +990,9 @@ export class Subsystems {
         });
         this.resourceSystem = system;
         this.resourceHub = system.adapter as any; // 向后兼容
+
+        // V2-缺口5: 注入资源中心到 DAG 规划器（资源感知规划）
+        this.dagPlanner.setResourceHub(system.hub);
         // 通知等待者 resourceSystem 已就绪
         this._resolveResourceSystemReady?.();
 
@@ -1031,6 +1035,13 @@ export class Subsystems {
             }
           }
           if (verbose) console.log(`[ResourceHub] 已同步 ${synced} 个模型资源（统一资源系统）`);
+
+          // V2-缺口3: 注入 Thompson Sampling 亲和度提供器
+          system.hub.setAffinityProvider((modelId: string, taskType: string) => {
+            // modelId 格式: model/{provider}/{model}，需要去掉 model/ 前缀
+            const rawId = modelId.replace(/^model\//, '');
+            return pool.getAffinityScore(rawId, taskType);
+          });
         }
 
         // 启动探测调度器（延迟 60s，等系统稳定）

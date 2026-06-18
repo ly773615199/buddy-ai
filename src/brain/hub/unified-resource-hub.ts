@@ -42,6 +42,9 @@ export class UnifiedResourceHub {
   private lifecycle: LifecycleManager;
   private driftDetector: DriftDetector;
 
+  /** V2-缺口3: Thompson Sampling 亲和度提供器（由外部注入） */
+  private affinityProvider: ((modelId: string, taskType: string) => number) | null = null;
+
   constructor(options?: {
     driftWindowSize?: number;
     driftWarningThreshold?: number;
@@ -56,6 +59,11 @@ export class UnifiedResourceHub {
         criticalThreshold: options?.driftCriticalThreshold ?? 0.6,
       },
     });
+  }
+
+  /** V2-缺口3: 注入 Thompson Sampling 亲和度提供器 */
+  setAffinityProvider(provider: (modelId: string, taskType: string) => number): void {
+    this.affinityProvider = provider;
   }
 
   // ==================== 生命周期事件订阅 ====================
@@ -295,6 +303,13 @@ export class UnifiedResourceHub {
 
       // 7. 健康度 (0-10)
       score += r.healthScore * 0.1;
+
+      // 8. Thompson Sampling 亲和度 (0-15) — V2-缺口3
+      if (this.affinityProvider && r.type === 'model') {
+        const affinity = this.affinityProvider(r.id, taskType);
+        // affinity 0~1，映射到 0~15 分
+        score += affinity * 15;
+      }
 
       return { resource: r, score };
     });

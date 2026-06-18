@@ -4,7 +4,7 @@ import {
   skipUnreachable, getRetryConfig, calcRetryDelay, isRetryable, hasFailureFallback,
 } from './dag.js';
 import type { ToolRegistry } from '../tools/registry.js';
-import { ToolExecutionMiddleware } from '../tools/execution-middleware.js';
+import { ToolExecutionMiddleware, type ModelSwitcher } from '../tools/execution-middleware.js';
 
 type EventCallback = (event: OrchestrateEvent) => void;
 
@@ -136,14 +136,35 @@ export class CerebellumExecutionMonitor implements ExecutionMonitor {
 export class TaskExecutor {
   private middleware: ToolExecutionMiddleware;
 
+  /**
+   * 当前 per-step 模型覆盖 ID（V1-改动3）
+   * 格式: model/{provider}/{model} 或 undefined
+   * 工具可通过 TaskExecutor.currentModelOverride 读取
+   */
+  private _currentModelOverride: string | undefined;
+  get currentModelOverride(): string | undefined {
+    return this._currentModelOverride;
+  }
+
   constructor(
     private toolRegistry: ToolRegistry,
     private beforeToolExecute?: (name: string, args: Record<string, unknown>) => Promise<{ allowed: boolean; reason?: string }>,
     private verbose: boolean = false,
   ) {
+    const self = this;
+    const modelSwitcher: ModelSwitcher = {
+      setModel(resourceId: string) {
+        self._currentModelOverride = resourceId.replace(/^model\//, '');
+      },
+      restore() {
+        self._currentModelOverride = undefined;
+      },
+    };
+
     this.middleware = new ToolExecutionMiddleware(toolRegistry, {
       beforeExecute: beforeToolExecute,
       defaultTimeoutMs: 60000,
+      modelSwitcher,
     });
   }
 

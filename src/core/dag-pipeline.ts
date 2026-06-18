@@ -90,6 +90,23 @@ export async function resolveDAGPipeline(
     sys.skillResolver.setResourceHub(unifiedHub);
     executorMatches = sys.skillResolver.matchExecutors(resolved.dag, skeleton);
 
+    // V2-缺口2: 对未匹配到执行单元的步骤降级重试
+    for (const task of resolved.dag.tasks.values()) {
+      if (executorMatches.has(task.id)) continue;
+      // 降级匹配：用任务的 tool 推断 taskType，放宽约束重试
+      const fallbackCandidates = unifiedHub.recommend('tools');
+      if (fallbackCandidates.length > 0) {
+        const best = fallbackCandidates[0];
+        executorMatches.set(task.id, {
+          taskId: task.id,
+          resourceId: best.id,
+          resourceName: best.name,
+          score: 0,
+          source: 'fallback',
+        });
+      }
+    }
+
     // 将匹配结果注入到 Task.executorResourceId
     for (const [taskId, match] of executorMatches) {
       const task = resolved.dag.tasks.get(taskId);
@@ -101,7 +118,8 @@ export async function resolveDAGPipeline(
     if (verbose) {
       const matched = [...executorMatches.values()].filter(m => m.source === 'capability').length;
       const reused = [...executorMatches.values()].filter(m => m.source === 'reuse').length;
-      console.log(`  [能力匹配] ${matched} 步匹配到执行单元, ${reused} 步复用前序模型`);
+      const fallback = [...executorMatches.values()].filter(m => m.source === 'fallback').length;
+      console.log(`  [能力匹配] ${matched} 步匹配, ${reused} 步复用, ${fallback} 步降级`);
     }
   }
 

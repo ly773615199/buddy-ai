@@ -33,6 +33,14 @@ export interface ToolExecutionResult {
 
 export type BeforeToolExecute = (name: string, args: Record<string, unknown>) => Promise<{ allowed: boolean; reason?: string }>;
 
+/** 模型切换接口 — 由上层注入，中间件在执行前/后调用 */
+export interface ModelSwitcher {
+  /** 切换到指定资源 ID 对应的模型 */
+  setModel(resourceId: string): void;
+  /** 恢复到切换前的模型 */
+  restore(): void;
+}
+
 export class ToolExecutionMiddleware {
   constructor(
     private registry: ToolRegistry,
@@ -40,6 +48,8 @@ export class ToolExecutionMiddleware {
       beforeExecute?: BeforeToolExecute;
       maxResultLength?: number;
       defaultTimeoutMs?: number;
+      /** 模型切换器 — 当 executorResourceId 为 model/ 前缀时自动切换 */
+      modelSwitcher?: ModelSwitcher;
     },
   ) {}
 
@@ -88,13 +98,25 @@ export class ToolExecutionMiddleware {
       // schema 解析异常，降级兼容继续执行
     }
 
-    // 4. 带超时的执行
+    // 4. Per-step 模型切换（V1-改动3）
+    const resourceId = ctx.executorResourceId;
+    const needsSwitch = resourceId?.startsWith('model/') && this.options?.modelSwitcher;
+    if (needsSwitch) {
+      this.options!.modelSwitcher!.setModel(resourceId!);
+    }
+
+    // 5. 带超时的执行
     const timeoutMs = ctx.timeoutMs ?? this.options?.defaultTimeoutMs ?? 30000;
     try {
       const result = await this.withTimeout(tool.execute(ctx.args), timeoutMs);
+
+      // 恢复模型
+      if (needsSwitch) {
+        this.options!.modelSwitcher!.restore();
+      }
       let resultStr = typeof result === 'string' ? result : JSON.stringify(result);
 
-      // 5. 结果截断
+      // 6. 结果截断
       const maxLen = this.options?.maxResultLength ?? TOOL_RESULT_LIMITS.maxRaw;
       if (resultStr.length > maxLen) {
         resultStr = resultStr.slice(0, maxLen) + `\n... [已截断, 原长 ${resultStr.length} 字符]`;
@@ -102,6 +124,10 @@ export class ToolExecutionMiddleware {
 
       return { success: true, result: resultStr, durationMs: Date.now() - startMs };
     } catch (err) {
+      // 恢复模型（即使执行失败）
+      if (needsSwitch) {
+        this.options!.modelSwitcher!.restore();
+      }
       const msg = err instanceof Error ? err.message : String(err);
       const isTimeout = err instanceof TimeoutError;
       const rawError = `[${isTimeout ? '超时' : '执行错误'}: ${msg}]`;
