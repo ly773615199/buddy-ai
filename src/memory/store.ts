@@ -276,11 +276,20 @@ export class MemoryStore {
     } catch (err) {
       const msg = (err as Error).message;
       // P2-2: 检测余额不足/认证失败，自动降级到 FTS5
-      if (msg.includes('403') || msg.includes('balance') || msg.includes('401') || msg.includes('insufficient')) {
+      // FIX: 只在真正的认证/余额问题时禁用 embedding，
+      // 多模态端点的 403（模型不支持该端点）不禁用 — 下次可能选到正确的 embedding 模型
+      const isRealAuth = msg.includes('401') && !msg.includes('403'); // 401 = Key 无效
+      const isBalance = msg.includes('insufficient') || msg.includes('balance') || msg.includes('quota');
+      const isCapabilityMismatch = msg.includes('400') || msg.includes('403') ||
+        msg.includes('bad request') || msg.includes('capability') || msg.includes('not supported');
+      if (isRealAuth || isBalance) {
         this.embeddingAvailable = false;
-        console.warn('[MemoryStore] Embedding 不可用（余额不足或认证失败），降级到 FTS5 全文搜索');
+        console.warn(`[MemoryStore] Embedding 不可用（${isRealAuth ? '认证失败' : '余额不足'}），降级到 FTS5 全文搜索`);
+      } else if (isCapabilityMismatch) {
+        // 能力不匹配/403 不禁用 embedding（可能是模型选择问题，下次可能选到正确的模型）
+        console.debug('[MemoryStore] embedMemory 能力不匹配，不禁用 embedding:', msg.slice(0, 120));
       } else {
-        console.warn('[MemoryStore] embedMemory failed:', msg);
+        console.warn('[MemoryStore] embedMemory failed:', msg.slice(0, 200));
       }
     }
   }

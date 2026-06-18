@@ -943,15 +943,22 @@ export class ModelPool {
   selectFromUnified(requirement: ModelRequirement): ModelSelection | null {
     if (this.profiles.size === 0) return null;
 
+    // FIX: 多模态任务（embedding/asr/image-gen 等）有专用端点，
+    // 不应降级到非兼容模型（如 chat 模型调 /v1/embeddings），否则会级联 denied
+    const isMultimodalTask = !!requirement.preferredCategories?.length;
+
     // Layer 0: 静态裁剪（传入 taskType 过滤不兼容的模型）
     let candidates = this.layer0StaticFilter(requirement.taskType);
     if (candidates.length === 0) {
       // 降级：taskType 过滤后无候选 → 不传 taskType 重试
-      candidates = this.layer0StaticFilter();
+      // 但多模态任务禁止降级到非兼容模型
+      if (!isMultimodalTask) {
+        candidates = this.layer0StaticFilter();
+      }
       if (candidates.length === 0) {
         // 最后手段：允许 denied/broken 模型（可能只是临时 404）
         candidates = this.layer0StaticFilter(requirement.taskType, true);
-        if (candidates.length === 0) candidates = this.layer0StaticFilter(undefined, true);
+        if (candidates.length === 0 && !isMultimodalTask) candidates = this.layer0StaticFilter(undefined, true);
         if (candidates.length === 0) return null;
         console.warn(`[ModelPool] 最后手段: 使用 denied/broken 模型 (${candidates.length} 个)`);
       }
@@ -962,7 +969,10 @@ export class ModelPool {
     if (candidates.length === 0) {
       console.log(`[ModelPool] layer1(${requirement.taskType}): 0 候选, 降级到无 taskType`);
       // 降级：放宽约束重试（不传 taskType）
-      candidates = this.layer0StaticFilter();
+      // 但多模态任务禁止降级到非兼容模型
+      if (!isMultimodalTask) {
+        candidates = this.layer0StaticFilter();
+      }
       if (candidates.length === 0) {
         // 最后手段：允许 denied/broken 模型
         candidates = this.layer0StaticFilter(undefined, true);

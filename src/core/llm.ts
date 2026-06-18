@@ -445,11 +445,20 @@ export class LLMAdapter {
   /**
    * Phase 3: 结构化错误分类
    */
-  private classifyErrorType(err: unknown): 'capability_mismatch' | 'prompt_too_long' | 'auth' | 'rate_limit' | 'network' | 'payment' | 'not_found' | 'unknown' {
+  private classifyErrorType(err: unknown, taskType?: TaskType): 'capability_mismatch' | 'prompt_too_long' | 'auth' | 'rate_limit' | 'network' | 'payment' | 'not_found' | 'unknown' {
     const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
     if (msg.includes('400') || msg.includes('bad request')) return 'capability_mismatch';
     if (msg.includes('token') || msg.includes('too long') || msg.includes('context length')) return 'prompt_too_long';
-    if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('forbidden')) return 'auth';
+    if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('forbidden')) {
+      // FIX: 多模态端点的 403 可能是模型不支持该端点（capability_mismatch），而非认证失败
+      // 例：chat 模型调 /v1/embeddings 返回 403 — 不应标记 auth/denied
+      const MULTIMODAL_ENDPOINTS = ['embedding', 'audio', 'image', 'video', 'rerank', 'transcription', 'speech'];
+      const MULTIMODAL_TASKS: TaskType[] = ['embedding', 'asr', 'image-gen', 'image-edit', 'video-gen', 'tts', 'ocr'];
+      const hitsEndpoint = MULTIMODAL_ENDPOINTS.some(ep => msg.includes(ep));
+      const isMultimodalTask = taskType ? MULTIMODAL_TASKS.includes(taskType) : false;
+      if (hitsEndpoint && isMultimodalTask) return 'capability_mismatch';
+      return 'auth';
+    }
     if (msg.includes('402') || msg.includes('insufficient') || msg.includes('balance') || msg.includes('quota') || msg.includes('billing')) return 'payment';
     if (msg.includes('404') || msg.includes('not found') || msg.includes('does not exist')) return 'not_found';
     if (msg.includes('429') || msg.includes('rate limit')) return 'rate_limit';
@@ -499,7 +508,7 @@ export class LLMAdapter {
       // 级联也失败，记录并抛出
       this.router.recordOutcome({
         taskType, modelId: stronger.id, success: false,
-        latencyMs: 0, errorType: this.classifyErrorType(cascadeErr), timestamp: Date.now(),
+        latencyMs: 0, errorType: this.classifyErrorType(cascadeErr, taskType), timestamp: Date.now(),
         input: context.content, context, modelConfig: stronger,
       });
       throw cascadeErr;
@@ -542,7 +551,7 @@ export class LLMAdapter {
 
       return result;
     } catch (callErr) {
-      const errorType = this.classifyErrorType(callErr);
+      const errorType = this.classifyErrorType(callErr, taskType);
       const latencyMs = Date.now() - startTime;
 
       // Phase 3: 能力不匹配（400）→ 级联到更强模型，而不是直接失败
@@ -1360,7 +1369,7 @@ ${originalOutput.slice(0, 300)}
         modelId: selected.id,
         success: false,
         latencyMs,
-        errorType: this.classifyErrorType(err),
+        errorType: this.classifyErrorType(err, taskType),
         timestamp: Date.now(),
         input: context.content,
         context,
