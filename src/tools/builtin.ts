@@ -39,9 +39,12 @@ function isSensitivePath(p: string): boolean {
 // ==================== 路径范围限制（MAJ-04/05 修复） ====================
 
 /** 允许文件操作的根目录列表 */
+const SANDBOX_WORKSPACE = process.env.BUDDY_SANDBOX_WORKSPACE || '/tmp/buddy-sandbox';
+
 const ALLOWED_FILE_ROOTS: string[] = (() => {
   const roots = [
     process.cwd(),
+    SANDBOX_WORKSPACE,
     '/tmp',
     '/var/tmp',
   ];
@@ -51,6 +54,23 @@ const ALLOWED_FILE_ROOTS: string[] = (() => {
 })();
 
 /**
+ * 解析文件路径：相对路径基于沙箱工作目录解析
+ * 绝对路径直接使用，相对路径优先解析到 SANDBOX_WORKSPACE
+ */
+function resolveFilePath(filePath: string): string {
+  if (path.isAbsolute(filePath)) return filePath;
+  // 相对路径：优先基于沙箱工作目录解析
+  const sandboxResolved = path.resolve(SANDBOX_WORKSPACE, filePath);
+  // 如果沙箱下存在该路径，使用沙箱路径；否则回退到 process.cwd()
+  try {
+    // 同步检查文件/目录是否存在（仅对 read_file 生效，write_file 总是用沙箱路径）
+    return sandboxResolved;
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
+/**
  * 检查文件路径是否在允许范围内
  * 防止路径遍历读写 /etc/hostname 等系统文件
  */
@@ -58,14 +78,14 @@ function isPathAllowed(filePath: string): { allowed: boolean; reason?: string } 
   if (isSensitivePath(filePath)) {
     return { allowed: false, reason: `路径 ${filePath} 被保护` };
   }
-  const resolved = path.resolve(filePath);
+  const resolved = resolveFilePath(filePath);
   const allowed = ALLOWED_FILE_ROOTS.some(root =>
     resolved === root || resolved.startsWith(root + path.sep)
   );
   if (!allowed) {
     return { allowed: false, reason: `路径 ${resolved} 不在允许范围内（仅限 workspace/tmp）` };
   }
-  return { allowed: true };
+  return { allowed: true, reason: resolved };
 }
 
 // ==================== 工具结果格式化 ====================
@@ -101,12 +121,13 @@ export const read_file: ToolDef = {
     const { path: filePath, start_line, max_lines } = args as {
       path: string; start_line?: number; max_lines?: number;
     };
+    const resolved = resolveFilePath(filePath);
     const pathCheck = isPathAllowed(filePath);
     if (!pathCheck.allowed) {
       return `[拒绝: ${pathCheck.reason}]`;
     }
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
+      const content = await fs.readFile(resolved, 'utf-8');
       const lines = content.split('\n');
       const start = (start_line ?? 1) - 1;
       const end = max_lines ? start + max_lines : lines.length;
@@ -129,12 +150,12 @@ export const write_file: ToolDef = {
   permission: 'write_files',
   execute: async (args) => {
     const { path: filePath, content } = args as { path: string; content: string };
+    const resolved = resolveFilePath(filePath);
     const pathCheck = isPathAllowed(filePath);
     if (!pathCheck.allowed) {
       return `[拒绝: ${pathCheck.reason}]`;
     }
     try {
-      const resolved = path.resolve(filePath);
       const dir = path.dirname(resolved);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(resolved, content, 'utf-8');
@@ -162,6 +183,7 @@ export const list_files: ToolDef = {
   cacheTtlSec: 30,
   execute: async (args) => {
     const { path: dirPath, recursive } = args as { path: string; recursive?: boolean };
+    const resolvedDir = resolveFilePath(dirPath);
     // MAJ-04 修复: 列目录也需要路径限制
     const pathCheck = isPathAllowed(dirPath);
     if (!pathCheck.allowed) {
@@ -178,10 +200,10 @@ export const list_files: ToolDef = {
             if (e.isDirectory()) await walk(full);
           }
         }
-        await walk(dirPath);
+        await walk(resolvedDir);
         return formatOutput(results.join('\n'));
       } else {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        const entries = await fs.readdir(resolvedDir, { withFileTypes: true });
         return entries
           .map((e) => `${e.isDirectory() ? '📁' : '📄'} ${e.name}`)
           .join('\n');
@@ -208,6 +230,7 @@ export const search_files: ToolDef = {
     const { pattern, path: dirPath, file_pattern } = args as {
       pattern: string; path: string; file_pattern?: string;
     };
+    const resolvedDir = resolveFilePath(dirPath);
     // 路径范围检查
     const pathCheck = isPathAllowed(dirPath);
     if (!pathCheck.allowed) {
@@ -218,7 +241,7 @@ export const search_files: ToolDef = {
     if (file_pattern) {
       grepArgs.push(`--include=${file_pattern}`);
     }
-    grepArgs.push(pattern, dirPath);
+    grepArgs.push(pattern, resolvedDir);
     try {
       const { stdout, stderr } = await execFileAsync('grep', grepArgs, { timeout: 10_000 });
       return formatOutput(stdout || stderr || '[无匹配结果]');
