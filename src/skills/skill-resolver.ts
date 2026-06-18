@@ -117,7 +117,12 @@ export class SkillResolver {
     for (const task of dag.tasks.values()) {
       const step = stepMap.get(task.id);
       // V2-缺口1: 无 capabilityRequirement 时自动推断
-      const req = step?.capabilityRequirement ?? this.inferCapabilityRequirement(step);
+      let req = step?.capabilityRequirement;
+      if (!req && step) {
+        req = this.inferCapabilityRequirement(step) ?? undefined;
+        // 回写推断结果到 skeleton step，供 plan-executor 回流时使用
+        if (req) step.capabilityRequirement = req;
+      }
       if (!req) continue;
 
       // 检查是否复用前序模型

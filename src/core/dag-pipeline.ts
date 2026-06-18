@@ -7,10 +7,20 @@
 
 import type { TaskSignal, ResourceState } from './agent-types.js';
 import type { Subsystems } from './subsystems.js';
-import type { DAGSkeleton, TaskDAG, ResolveResult } from '../orchestrate/types.js';
+import type { DAGSkeleton, SkeletonStep, TaskDAG, ResolveResult } from '../orchestrate/types.js';
 import { logger } from '../audit/structured-logger.js';
 
 const log = logger.child('DAGPipeline');
+
+/** 从 suggestedCategory 推断 fallback taskType */
+function inferFallbackTaskType(step: SkeletonStep | undefined): string {
+  const cat = step?.suggestedCategory;
+  const map: Record<string, string> = {
+    code_analysis: 'tools', file_ops: 'tools', web_search: 'tools', git: 'tools', system: 'tools',
+    voice: 'chat', chat: 'chat',
+  };
+  return map[cat ?? ''] ?? 'tools';
+}
 
 export interface DAGPipelineResult {
   resolvedDAG: TaskDAG | null;
@@ -93,8 +103,11 @@ export async function resolveDAGPipeline(
     // V2-缺口2: 对未匹配到执行单元的步骤降级重试
     for (const task of resolved.dag.tasks.values()) {
       if (executorMatches.has(task.id)) continue;
-      // 降级匹配：用任务的 tool 推断 taskType，放宽约束重试
-      const fallbackCandidates = unifiedHub.recommend('tools');
+      // 降级匹配：从 skeleton step 推断 taskType，放宽约束重试
+      const step = skeleton.steps.find(s => s.id === task.id);
+      const inferredTaskType = step?.capabilityRequirement?.taskType
+        ?? inferFallbackTaskType(step);
+      const fallbackCandidates = unifiedHub.recommend(inferredTaskType);
       if (fallbackCandidates.length > 0) {
         const best = fallbackCandidates[0];
         executorMatches.set(task.id, {
