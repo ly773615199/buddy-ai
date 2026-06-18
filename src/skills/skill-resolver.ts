@@ -84,6 +84,84 @@ export class SkillResolver {
   }
 
   /**
+   * 注入资源中心 — 供 matchExecutors 使用
+   */
+  private resourceHub: import('../brain/hub/unified-resource-hub.js').UnifiedResourceHub | null = null;
+
+  setResourceHub(hub: import('../brain/hub/unified-resource-hub.js').UnifiedResourceHub): void {
+    this.resourceHub = hub;
+  }
+
+  /**
+   * 为 DAG 中每个任务匹配执行单元（模型）
+   *
+   * 逻辑：
+   * 1. 有 capabilityRequirement → 用 UnifiedResourceHub.recommend() 匹配
+   * 2. reusePreviousModel=true → 复用前序步骤的匹配结果
+   * 3. 无需求 → 跳过（使用默认模型）
+   *
+   * @param dag 解析后的完整 DAG
+   * @param skeleton 原始骨架（携带 capabilityRequirement）
+   * @returns stepId → resourceId 的映射
+   */
+  matchExecutors(
+    dag: import('../orchestrate/types.js').TaskDAG,
+    skeleton: import('../orchestrate/types.js').DAGSkeleton,
+  ): Map<string, import('../orchestrate/types.js').ExecutorMatch> {
+    const matches = new Map<string, import('../orchestrate/types.js').ExecutorMatch>();
+    if (!this.resourceHub) return matches;
+
+    const stepMap = new Map(skeleton.steps.map(s => [s.id, s]));
+
+    for (const task of dag.tasks.values()) {
+      const step = stepMap.get(task.id);
+      const req = step?.capabilityRequirement;
+      if (!req) continue;
+
+      // 检查是否复用前序模型
+      if (req.reusePreviousModel && task.deps.length > 0) {
+        const depMatch = matches.get(task.deps[0]);
+        if (depMatch) {
+          matches.set(task.id, {
+            taskId: task.id,
+            resourceId: depMatch.resourceId,
+            resourceName: depMatch.resourceName,
+            score: depMatch.score,
+            source: 'reuse',
+          });
+          continue;
+        }
+      }
+
+      // 通过 UnifiedResourceHub.recommend() 匹配
+      const candidates = this.resourceHub.recommend(
+        req.taskType,
+        undefined,
+        undefined,
+        {
+          requiresToolCalling: req.requiresToolCalling,
+          requiresVision: req.requiresVision,
+          maxCostPer1k: req.maxCostPer1k,
+          latencyTolerance: req.latencyTolerance,
+        },
+      );
+
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        matches.set(task.id, {
+          taskId: task.id,
+          resourceId: best.id,
+          resourceName: best.name,
+          score: 0,
+          source: 'capability',
+        });
+      }
+    }
+
+    return matches;
+  }
+
+  /**
    * 将 DAG 骨架解析为完整可执行的 TaskDAG
    */
   async resolve(

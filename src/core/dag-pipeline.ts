@@ -16,6 +16,8 @@ export interface DAGPipelineResult {
   resolvedDAG: TaskDAG | null;
   dagSkeleton: DAGSkeleton | null;
   reason: string;
+  /** Step 3.5 的执行单元匹配结果（供反馈闭环使用） */
+  executorMatches?: Map<string, import('../orchestrate/types.js').ExecutorMatch>;
 }
 
 /**
@@ -77,6 +79,28 @@ export async function resolveDAGPipeline(
     return { resolvedDAG: null, dagSkeleton: skeleton, reason: `SkillResolver 失败: ${(err as Error).message}` };
   }
 
+  // ── Step 3.5: 能力匹配 — 为每个任务匹配执行单元（模型） ──
+  let executorMatches: Map<string, import('../orchestrate/types.js').ExecutorMatch> | undefined;
+  const unifiedHub = sys.resourceSystem?.hub;
+  if (sys.skillResolver && unifiedHub) {
+    sys.skillResolver.setResourceHub(unifiedHub);
+    executorMatches = sys.skillResolver.matchExecutors(resolved.dag, skeleton);
+
+    // 将匹配结果注入到 Task.executorResourceId
+    for (const [taskId, match] of executorMatches) {
+      const task = resolved.dag.tasks.get(taskId);
+      if (task) {
+        task.executorResourceId = match.resourceId;
+      }
+    }
+
+    if (verbose) {
+      const matched = [...executorMatches.values()].filter(m => m.source === 'capability').length;
+      const reused = [...executorMatches.values()].filter(m => m.source === 'reuse').length;
+      console.log(`  [能力匹配] ${matched} 步匹配到执行单元, ${reused} 步复用前序模型`);
+    }
+  }
+
   // ── Step 4: Gate-2 — 工具-意图验证 ──
   if (ruleEngine) {
     const gate2 = ruleEngine.validateResolvedDAG(resolved.dag, signal, sys.tools);
@@ -92,5 +116,5 @@ export async function resolveDAGPipeline(
     }
   }
 
-  return { resolvedDAG: resolved.dag, dagSkeleton: skeleton, reason: 'DAG 管线完成' };
+  return { resolvedDAG: resolved.dag, dagSkeleton: skeleton, reason: 'DAG 管线完成', executorMatches };
 }

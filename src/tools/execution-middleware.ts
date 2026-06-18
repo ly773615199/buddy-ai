@@ -20,6 +20,8 @@ export interface ToolExecutionContext {
   args: Record<string, unknown>;
   source: 'llm' | 'dag' | 'chain' | 'experience';
   timeoutMs?: number;
+  /** 匹配到的执行单元资源 ID（由 DAG 能力匹配层注入，工具可选用特定模型） */
+  executorResourceId?: string;
 }
 
 export interface ToolExecutionResult {

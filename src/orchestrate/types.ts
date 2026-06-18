@@ -22,6 +22,8 @@ export interface Task {
   timeoutMs?: number;
   /** 输出变量名，供后续任务通过 ${taskId.output} 引用 */
   outputVar?: string;
+  /** 匹配到的执行单元资源 ID（由 SkillResolver.matchExecutors 填充） */
+  executorResourceId?: string;
 }
 
 export type TaskStatus = 'pending' | 'ready' | 'running' | 'done' | 'failed' | 'skipped' | 'retrying';
@@ -163,6 +165,26 @@ export interface DAGSkeleton {
   detectedDomains: string[];
 }
 
+/** 步骤级能力需求 — 描述该步骤需要什么样的执行单元 */
+export interface StepCapabilityRequirement {
+  /** 该步骤需要的任务类型（用于 UnifiedResourceHub.recommend） */
+  taskType: 'chat' | 'tools' | 'reasoning' | 'embedding' | 'background';
+  /** 偏好的模型类别（可选，不填则不限） */
+  preferredCategories?: string[];
+  /** 最低能力要求（可选） */
+  minCapabilities?: Record<string, number>;
+  /** 是否需要工具调用能力 */
+  requiresToolCalling?: boolean;
+  /** 是否需要视觉能力 */
+  requiresVision?: boolean;
+  /** 成本上限（可选） */
+  maxCostPer1k?: number;
+  /** 延迟容忍度 */
+  latencyTolerance?: 'low' | 'medium' | 'high';
+  /** 是否允许复用前序步骤的执行单元（节省模型切换开销） */
+  reusePreviousModel?: boolean;
+}
+
 /** 骨架步骤：只描述意图，不含具体工具 */
 export interface SkeletonStep {
   id: string;
@@ -172,6 +194,17 @@ export interface SkeletonStep {
   suggestedCategory?: string; // 建议的工具类别（如 'code_analysis'）
   retry?: RetryConfig;
   timeoutMs?: number;
+  /** 步骤级能力需求 — 描述该步骤需要什么样的执行单元（可选） */
+  capabilityRequirement?: StepCapabilityRequirement;
+}
+
+/** 执行单元匹配结果 */
+export interface ExecutorMatch {
+  taskId: string;
+  resourceId: string;      // UnifiedResourceHub 中的资源 id
+  resourceName: string;
+  score: number;           // 匹配分数
+  source: 'capability' | 'reuse' | 'fallback';
 }
 
 /** SkillResolver 解析结果 */

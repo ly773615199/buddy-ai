@@ -993,6 +993,7 @@ export class BuddyAgent {
       const dagResult = await this.resolveDAGPipeline(content, signal, resources);
       plan.resolvedDAG = dagResult.resolvedDAG ?? undefined;
       plan.dagSkeleton = dagResult.dagSkeleton ?? undefined;
+      plan.executorMatches = dagResult.executorMatches ?? undefined;
       // Gate-1 拦截 → 降级 single
       if (!dagResult.resolvedDAG && dagResult.dagSkeleton) {
         plan.useDAG = false;
@@ -1136,6 +1137,7 @@ export class BuddyAgent {
       const dagResult = await this.resolveDAGPipeline(content, signal, resources);
       plan.resolvedDAG = dagResult.resolvedDAG ?? undefined;
       plan.dagSkeleton = dagResult.dagSkeleton ?? undefined;
+      plan.executorMatches = dagResult.executorMatches ?? undefined;
       if (!dagResult.resolvedDAG && dagResult.dagSkeleton) {
         plan.useDAG = false;
         plan.mode = 'single';

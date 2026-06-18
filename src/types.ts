@@ -850,6 +850,8 @@ export interface OrchestrationPlan {
   resolvedDAG?: import('./orchestrate/types.js').TaskDAG;
   /** Phase 2: DAG 骨架（useDAG=true 时由 planSkeleton 生成） */
   dagSkeleton?: import('./orchestrate/types.js').DAGSkeleton;
+  /** Phase 3.2: 执行单元匹配结果（供反馈闭环使用） */
+  executorMatches?: Map<string, import('./orchestrate/types.js').ExecutorMatch>;
   /** 经验路由决策（Phase 1: ExperienceRouter 接入） */
   routeDecision?: import('./intelligence/types.js').RouteDecision;
   /** Step 14: 直接执行工具 — 跳过 LLM，直接调用工具返回结果 */

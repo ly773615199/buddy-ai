@@ -304,6 +304,71 @@ export class UnifiedResourceHub {
   }
 
   /**
+   * 为 DAG 中多个步骤联合推荐执行单元组合
+   *
+   * 比 recommend() 多考虑：
+   * 1. 模型切换成本（复用前序步骤的模型加分）
+   * 2. 同 provider 优先（减少 API 调用分散）
+   *
+   * @param requirements 步骤需求列表（按拓扑序）
+   * @returns stepId → resourceId 的映射
+   */
+  recommendCombination(
+    requirements: Array<{
+      stepId: string;
+      taskType: string;
+      deps: string[];
+      context?: {
+        requiresToolCalling?: boolean;
+        requiresVision?: boolean;
+        maxCostPer1k?: number;
+        latencyTolerance?: 'low' | 'medium' | 'high';
+      };
+    }>,
+  ): Map<string, string> {
+    const assignment = new Map<string, string>();
+
+    for (const req of requirements) {
+      const candidates = this.recommend(req.taskType, undefined, undefined, req.context);
+      if (candidates.length === 0) continue;
+
+      // 评分：独立匹配分 + 复用加分
+      const scored = candidates.map((c, idx) => {
+        let score = (candidates.length - idx) * 10; // 独立排名分
+
+        // 复用加分：前序步骤用了同一个模型 → +15
+        for (const depId of req.deps) {
+          if (assignment.get(depId) === c.id) {
+            score += 15;
+            break;
+          }
+        }
+
+        // 同 provider 加分：前序步骤用了同 provider 的不同模型 → +8
+        const cProvider = (c.metadata.provider as string) ?? '';
+        if (cProvider) {
+          for (const depId of req.deps) {
+            const depResourceId = assignment.get(depId);
+            if (!depResourceId) continue;
+            const depResource = this.get(depResourceId);
+            if (depResource && (depResource.metadata.provider as string) === cProvider) {
+              score += 8;
+              break;
+            }
+          }
+        }
+
+        return { resource: c, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      assignment.set(req.stepId, scored[0].resource.id);
+    }
+
+    return assignment;
+  }
+
+  /**
    * 按状态分组查询
    */
   getByState(state: LifecycleState, type?: ResourceType): UnifiedResource[] {

@@ -874,6 +874,11 @@ async function executeDAG(ctx: ExecutionContext, plan: OrchestrationPlan): Promi
         if (task) {
           // DAG 任务使用工具，资源 ID 为 tool/{toolName}
           recordResourceOutcome(ctx.sys, `tool/${task.tool}`, tr.success, tr.durationMs);
+
+          // Phase 3.2: 如果任务有匹配的执行单元，也回写到该资源
+          if (task.executorResourceId) {
+            recordResourceOutcome(ctx.sys, task.executorResourceId, tr.success, tr.durationMs);
+          }
         }
       }
     }

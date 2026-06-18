@@ -396,11 +396,13 @@ export class TaskExecutor {
     const resolvedArgs = this.resolveArgs(task.args, dag);
 
     // Task 6.1: 通过统一中间件执行（权限检查 + 参数校验 + 超时 + 结果截断）
+    // Phase 3.1: 如果任务匹配了执行单元，传入 executorResourceId
     const result = await this.middleware.execute({
       toolName: task.tool,
       args: resolvedArgs,
       source: 'dag',
       timeoutMs,
+      executorResourceId: task.executorResourceId,
     });
 
     if (!result.success) {
