@@ -120,6 +120,108 @@ export class RightBrain {
    * - encodeFeaturesFast(): 8-10 tokens vs 20-60+ tokens
    * - forwardInferenceFast(): 低阈值 early exit + 跳过 spatial/scene heads
    */
+
+  /**
+   * 冷启动预热 — 用合成数据训练 NN，让 hit 在合理输入上为 true
+   *
+   * 在系统初始化时调用，用常见模式的合成样本预训练 NN。
+   * 这样即使没有真实用户交互，NN 也能产生有意义的输出。
+   *
+   * 每个意图类别生成 5 个样本，共 40 个样本，训练 3 轮。
+   * 耗时约 50-100ms，不影响启动速度。
+   */
+  async warmupWithSyntheticData(): Promise<{ trained: number; loss: number }> {
+    const INTENT_LABELS = [
+      'file_operations', 'code_operations', 'git_operations', 'web_operations',
+      'system_operations', 'knowledge_query', 'conversation', 'complex_task',
+    ];
+
+    // 合成训练样本：每个意图 5 个典型输入
+    const SYNTHETIC_SAMPLES: Array<{ intent: number; tools: number[]; quality: number; signal: TaskSignal }> = [
+      // file_operations
+      { intent: 0, tools: [0, 1], quality: 0.8, signal: { domains: ['file'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      { intent: 0, tools: [0], quality: 0.9, signal: { domains: ['file'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      { intent: 0, tools: [1, 3], quality: 0.7, signal: { domains: ['file'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 0, tools: [0, 2], quality: 0.85, signal: { domains: ['file'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 0, tools: [1], quality: 0.75, signal: { domains: ['file'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.75, criticality: 'normal' } },
+      // code_operations
+      { intent: 1, tools: [0, 4, 14], quality: 0.6, signal: { domains: ['code'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 1, tools: [4, 15], quality: 0.5, signal: { domains: ['code'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.6, criticality: 'high' } },
+      { intent: 1, tools: [0, 3], quality: 0.8, signal: { domains: ['code'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 1, tools: [4], quality: 0.7, signal: { domains: ['code'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.75, criticality: 'normal' } },
+      { intent: 1, tools: [0, 4], quality: 0.65, signal: { domains: ['code'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      // git_operations
+      { intent: 2, tools: [5, 7], quality: 0.9, signal: { domains: ['git'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      { intent: 2, tools: [8, 9], quality: 0.85, signal: { domains: ['git'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'normal' } },
+      { intent: 2, tools: [5, 6, 7], quality: 0.8, signal: { domains: ['git'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'low' } },
+      { intent: 2, tools: [10, 11], quality: 0.7, signal: { domains: ['git'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 2, tools: [9, 11], quality: 0.75, signal: { domains: ['git'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      // web_operations
+      { intent: 3, tools: [12, 13], quality: 0.7, signal: { domains: ['web'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'low' } },
+      { intent: 3, tools: [12], quality: 0.8, signal: { domains: ['web'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 3, tools: [13], quality: 0.75, signal: { domains: ['web'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.75, criticality: 'normal' } },
+      { intent: 3, tools: [12, 13, 4], quality: 0.6, signal: { domains: ['web'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 3, tools: [12], quality: 0.85, signal: { domains: ['web'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      // system_operations
+      { intent: 4, tools: [4], quality: 0.8, signal: { domains: ['system'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      { intent: 4, tools: [4, 27], quality: 0.85, signal: { domains: ['system'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 4, tools: [4], quality: 0.7, signal: { domains: ['system'], complexity: 'medium', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 4, tools: [4, 0], quality: 0.75, signal: { domains: ['system'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      { intent: 4, tools: [4], quality: 0.9, signal: { domains: ['system'], complexity: 'simple', taskType: 'tools', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      // knowledge_query
+      { intent: 5, tools: [12], quality: 0.8, signal: { domains: ['knowledge'], complexity: 'simple', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      { intent: 5, tools: [], quality: 0.9, signal: { domains: ['knowledge'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      { intent: 5, tools: [12], quality: 0.7, signal: { domains: ['knowledge'], complexity: 'medium', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.7, criticality: 'normal' } },
+      { intent: 5, tools: [], quality: 0.85, signal: { domains: ['knowledge'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 5, tools: [12], quality: 0.75, signal: { domains: ['knowledge'], complexity: 'simple', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'normal' } },
+      // conversation
+      { intent: 6, tools: [], quality: 0.9, signal: { domains: ['conversation'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      { intent: 6, tools: [], quality: 0.85, signal: { domains: ['conversation'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.85, criticality: 'low' } },
+      { intent: 6, tools: [], quality: 0.95, signal: { domains: ['conversation'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.95, criticality: 'low' } },
+      { intent: 6, tools: [], quality: 0.8, signal: { domains: ['conversation'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.8, criticality: 'low' } },
+      { intent: 6, tools: [], quality: 0.9, signal: { domains: ['conversation'], complexity: 'simple', taskType: 'chat', shouldUseDAG: false, dagReason: '', intentConfidence: 0.9, criticality: 'low' } },
+      // complex_task
+      { intent: 7, tools: [0, 4, 12, 14], quality: 0.5, signal: { domains: ['code', 'system'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: true, dagReason: 'multi-step', intentConfidence: 0.6, criticality: 'high' } },
+      { intent: 7, tools: [0, 1, 4], quality: 0.6, signal: { domains: ['code', 'file'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.65, criticality: 'high' } },
+      { intent: 7, tools: [12, 0, 4], quality: 0.55, signal: { domains: ['web', 'code'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.6, criticality: 'high' } },
+      { intent: 7, tools: [0, 3, 4], quality: 0.45, signal: { domains: ['code'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: true, dagReason: 'multi-step', intentConfidence: 0.55, criticality: 'high' } },
+      { intent: 7, tools: [4, 12, 13], quality: 0.5, signal: { domains: ['system', 'web'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.6, criticality: 'high' } },
+    ];
+
+    // 构建训练样本
+    const samples = SYNTHETIC_SAMPLES.map(s => {
+      const toolLabels = new Array(32).fill(0);
+      for (const t of s.tools) toolLabels[t] = 1;
+      return {
+        input: '',
+        signal: s.signal,
+        resources: { budgetRemaining: 100, availableNodeCount: 5, localCoverageRatio: 0.5, localConfidence: 0.5, userCorrectionCount: 0, experienceHit: null },
+        intentLabel: s.intent,
+        toolLabels,
+        qualityLabel: s.quality,
+        outcome: { success: s.quality > 0.5, latencyMs: 1000, toolsUsed: [], costEstimate: 0 },
+      };
+    });
+
+    // 训练 3 轮
+    let totalLoss = 0;
+    let trainCount = 0;
+    for (let epoch = 0; epoch < 3; epoch++) {
+      for (const sample of samples) {
+        this.learner.ingestSample(sample as any);
+      }
+      const result = await this.learner.update();
+      totalLoss += result.loss;
+      trainCount++;
+    }
+
+    if (this.verbose) {
+      console.log(`[RightBrain] 冷启动预热完成: ${SYNTHETIC_SAMPLES.length} 样本 × 3 轮, loss=${(totalLoss / trainCount).toFixed(4)}`);
+    }
+
+    return { trained: SYNTHETIC_SAMPLES.length * 3, loss: totalLoss / trainCount };
+  }
+
   async predict(
     input: string,
     signal: TaskSignal,

@@ -102,6 +102,13 @@ export class ThreeBrain {
       this.right.predictDetailed(signal, resources, body),
     );
 
+    // 冷启动预热：用合成数据训练 NN，让 hit 在合理输入上为 true
+    this.right.warmupWithSyntheticData().then(result => {
+      if (this.verbose) console.log(`[ThreeBrain] NN 预热完成: ${result.trained} 样本, loss=${result.loss.toFixed(4)}`);
+    }).catch(err => {
+      if (this.verbose) console.warn(`[ThreeBrain] NN 预热失败: ${err.message}`);
+    });
+
     // 影子大脑：可选初始化 + 绑定 BrainProvider
     if (config?.shadow?.llm) {
       this.shadow = new ShadowBrainOrchestrator({

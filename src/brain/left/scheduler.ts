@@ -340,23 +340,26 @@ export class UnifiedScheduler {
     }
 
     // ── Layer 1: 元认知控制信号（连续函数，无硬阈值） ──
-    if (intuition?.hit) {
-      const quality = intuition.qualityEstimate;
+    // NN 冷启动时 (hit=false)，用信号特征推断质量，不跳过整个决策链
+    const nnAvailable = !!intuition?.hit;
+    const effectiveQuality = nnAvailable
+      ? intuition!.qualityEstimate
+      : this.estimateQualityFromSignal(signal, resources);  // 冷启动 fallback
 
-      // Sigmoid 衰减：quality 越低，forceLLM 权重越高
+    {
+      const quality = effectiveQuality;
+
       const forceLlmWeight = 1 / (1 + Math.exp((quality - this.config.metacognitiveForceLlm) * 15));
       const verifyWeight = 1 / (1 + Math.exp((quality - this.config.metacognitiveCaution) * 10));
 
-      // forceLLM 权重 > 0.7 → 强制 LLM
       if (forceLlmWeight > 0.7) {
         return await this.selectViaRouter('metacognitive_override', signal, body,
-          `元认知降级: quality=${quality.toFixed(2)}, forceWeight=${forceLlmWeight.toFixed(2)}`);
+          `元认知降级: quality=${quality.toFixed(2)}, forceWeight=${forceLlmWeight.toFixed(2)}, nn=${nnAvailable}`);
       }
 
-      // verify 权重 > 0.5 → 走经验但要求 LLM 验证
       if (verifyWeight > 0.5 && resources.experienceHit && resources.localConfidence >= 0.4) {
         return this.makePlan('exp_verified', 'cascade',
-          `元认知谨慎: quality=${quality.toFixed(2)}, verifyWeight=${verifyWeight.toFixed(2)}`,
+          `元认知谨慎: quality=${quality.toFixed(2)}, verifyWeight=${verifyWeight.toFixed(2)}, nn=${nnAvailable}`,
           quality, [
             { id: 'experience', type: 'experience' },
             { id: 'local', type: 'local_expert' },
@@ -434,8 +437,8 @@ export class UnifiedScheduler {
         ]);
     }
 
-    // ── Layer 3: Thompson Sampling 选择 ──
-    if (intuition?.hit && this.config.useThompsonSampling) {
+    // ── Layer 3: Thompson Sampling 选择（NN 可用时） ──
+    if (nnAvailable && this.config.useThompsonSampling) {
       // Phase 4: 优先用 predictDetailed 的概率分布加权
       const tsResult = this._rightBrainPredictDetailed
         ? await this.thompsonSelectWithProbs(signal, resources, body)
@@ -443,10 +446,28 @@ export class UnifiedScheduler {
       if (tsResult) return tsResult;
     }
 
-    // ── Layer 4: 右脑直觉信号注入 ──
-    if (intuition?.hit && intuition.intent.confidence > 0.7) {
+    // ── Layer 4: 右脑直觉信号注入（NN 可用时） ──
+    if (nnAvailable && intuition!.intent.confidence > 0.7) {
       return await this.selectViaRouter('llm_with_hint', signal, body,
-        `直觉推荐: ${intuition.intent.category} (conf=${intuition.intent.confidence.toFixed(2)})`);
+        `直觉推荐: ${intuition!.intent.category} (conf=${intuition!.intent.confidence.toFixed(2)})`);
+    }
+
+    // ── Layer 4.5: 冷启动信号推断（NN 不可用时用信号特征） ──
+    if (!nnAvailable) {
+      // 高复杂度/高关键性 → LLM
+      if (signal.complexity === 'complex' || signal.criticality === 'high') {
+        return await this.selectViaRouter('llm_only', signal, body,
+          `冷启动信号推断: complexity=${signal.complexity}, criticality=${signal.criticality}`);
+      }
+      // 有经验命中 → 经验验证
+      if (resources.experienceHit && resources.localConfidence >= 0.5) {
+        return this.makePlan('exp_verified', 'cascade',
+          `冷启动经验: localConfidence=${resources.localConfidence.toFixed(2)}`,
+          resources.localConfidence, [
+            { id: 'experience', type: 'experience' },
+            { id: 'local', type: 'local_expert' },
+          ]);
+      }
     }
 
     // ── Layer 5: 小脑稳态注入（渐进调节，无悬崖） ──
@@ -806,6 +827,37 @@ export class UnifiedScheduler {
    * - 延迟惩罚
    * - 小脑状态调节
    */
+
+  /**
+   * 冷启动质量估计 — NN 不可用时，用信号特征推断质量
+   *
+   * 基于：
+   * - 复杂度：simple→高, complex→低
+   * - 关键性：high→低, low→高
+   * - 意图置信度：高→高
+   * - 本地覆盖：高→高
+   */
+  private estimateQualityFromSignal(signal: TaskSignal, resources: ResourceState): number {
+    let quality = 0.5; // 基线
+
+    // 复杂度影响：简单任务质量预估高
+    if (signal.complexity === 'simple') quality += 0.2;
+    else if (signal.complexity === 'complex') quality -= 0.2;
+
+    // 关键性影响：关键任务质量预估低（需要更强模型）
+    if (signal.criticality === 'high') quality -= 0.15;
+    else if (signal.criticality === 'low') quality += 0.1;
+
+    // 意图置信度：高置信度 → 质量预估高
+    quality += (signal.intentConfidence - 0.5) * 0.3;
+
+    // 本地覆盖：有经验 → 质量预估高
+    if (resources.experienceHit) quality += 0.1;
+    quality += resources.localConfidence * 0.1;
+
+    return Math.max(0, Math.min(1, quality));
+  }
+
   private computeBrainScore(
     model: {
       id: string;
@@ -819,27 +871,36 @@ export class UnifiedScheduler {
     body?: BodyState,
   ): number {
     let score = 0;
+    const isColdStart = model.history.confidence <= 0.3;
 
-    // 1. 历史质量分（权重最高）
-    if (model.history.confidence > 0.3) {
+    // 1. 历史质量分（有数据时）/ 能力评分（冷启动时）
+    if (!isColdStart) {
       score += model.history.avgQuality * 40;
     } else {
-      // 冷启动：默认分
-      score += 20;
+      // 冷启动：用能力评分代替历史评分，不同模型得分不同
+      const caps = model.capabilities;
+      if (taskType === 'reasoning') {
+        score += (caps.reasoning ?? 0.5) * 30 + (caps.code ?? 0.5) * 10;
+      } else if (taskType === 'tools') {
+        score += (caps.code ?? 0.5) * 20 + (caps.reasoning ?? 0.5) * 10 + (caps.toolCalling ? 10 : 0);
+      } else {
+        score += (caps.reasoning ?? 0.5) * 15 + (caps.code ?? 0.5) * 10 + 5;
+      }
     }
 
     // 2. 任务成功率
-    score += model.history.taskSuccessRate * 25;
+    score += model.history.taskSuccessRate * (isColdStart ? 10 : 25);
 
     // 3. 关键性加权
+    const tierBonus: Record<string, number> = { premium: 15, standard: 10, budget: 5, free: 0 };
     if (criticality === 'high') {
-      // 关键任务：强推理能力加分
       score += (model.capabilities.reasoning ?? 0) * 20;
-      const tierBonus: Record<string, number> = { premium: 15, standard: 10, budget: 5, free: 0 };
       score += tierBonus[model.tier] ?? 0;
     } else if (criticality === 'low') {
-      // 闲聊：便宜优先
       score += Math.max(0, 10 - model.costPer1kInput * 5);
+    } else {
+      // 普通任务：tier 也有小加分
+      score += (tierBonus[model.tier] ?? 0) * 0.3;
     }
 
     // 4. 延迟惩罚
@@ -850,13 +911,16 @@ export class UnifiedScheduler {
     // 5. 小脑状态调节
     if (body) {
       if (body.load > 80) {
-        // 高负载：优先便宜快速的
         score -= model.costPer1kInput * 3;
       }
       if (body.energy < 30) {
-        // 低精力：优先可靠的
-        score += model.history.taskSuccessRate * 10;
+        score += (isColdStart ? 5 : model.history.taskSuccessRate * 10);
       }
+    }
+
+    // 6. 冷启动随机扰动（保证探索多样性，避免锁定第一个模型）
+    if (isColdStart) {
+      score += Math.random() * 8;
     }
 
     return score;
