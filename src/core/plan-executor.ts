@@ -562,6 +562,20 @@ async function executeLocal(ctx: ExecutionContext, plan: OrchestrationPlan): Pro
 /** single — 单 LLM 调用 */
 async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const startTime = Date.now();
+
+  // 三脑已选定具体模型 → 直接使用，不再重新选择
+  const node = plan.selectedNodes[0];
+  if (node?.type === 'cloud_node' && node.provider && node.model) {
+    try {
+      return await executeWithConcreteNode(ctx, node, plan.content);
+    } catch (err) {
+      if (ctx.verbose) {
+        console.warn(`[PlanExecutor] 三脑选定的模型 ${node.provider}/${node.model} 执行失败，降级到 processStream: ${(err as Error).message}`);
+      }
+      // 降级到 processStream（内部重新选择）
+    }
+  }
+
   try {
     const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true, taskType: plan.taskType });
     const elapsed = Date.now() - startTime;
@@ -666,7 +680,58 @@ async function executeParallel(ctx: ExecutionContext, plan: OrchestrationPlan): 
 
 /** cascade — 统一池按任务类型选择，质量不够升级（Phase 4.1: 质量感知） */
 async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
-  // 第一层：chat 模型
+  const criticality = plan.meta?.criticality ?? 'normal';
+  const nnQuality = plan.meta?.nnQualityScore;
+
+  // NN 预判质量很低 → 直接用最强模型，不浪费一轮弱模型
+  if (nnQuality != null && nnQuality < 0.3) {
+    const reasoningStart = Date.now();
+    try {
+      const reasoningResult = await ctx.sys.llm.chat(
+        [{ role: 'user', content: plan.content, timestamp: Date.now() }],
+        [], 1, { taskType: 'reasoning' }
+      );
+      const reasoningElapsed = Date.now() - reasoningStart;
+      const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+      if (reasoningSelection) {
+        recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, true, reasoningElapsed, undefined, 'reasoning');
+      }
+      return { text: reasoningResult.text ?? '', source: 'cascade/reasoning/nn-direct', toolCalls: [], cascadeQuality: 0.9 };
+    } catch (err) {
+      const reasoningElapsed = Date.now() - reasoningStart;
+      const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+      if (reasoningSelection) {
+        recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, false, reasoningElapsed, undefined, 'reasoning');
+      }
+      throw err;
+    }
+  }
+
+  // 高关键性任务 → 直接用 reasoning 模型
+  if (criticality === 'high') {
+    const reasoningStart = Date.now();
+    try {
+      const reasoningResult = await ctx.sys.llm.chat(
+        [{ role: 'user', content: plan.content, timestamp: Date.now() }],
+        [], 1, { taskType: 'reasoning' }
+      );
+      const reasoningElapsed = Date.now() - reasoningStart;
+      const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+      if (reasoningSelection) {
+        recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, true, reasoningElapsed, undefined, 'reasoning');
+      }
+      return { text: reasoningResult.text ?? '', source: 'cascade/reasoning/critical', toolCalls: [], cascadeQuality: 0.9 };
+    } catch (err) {
+      const reasoningElapsed = Date.now() - reasoningStart;
+      const reasoningSelection = ctx.sys.llm.consumeLastUnifiedSelection();
+      if (reasoningSelection) {
+        recordResourceOutcome(ctx.sys, `model/${reasoningSelection.profile.id}`, false, reasoningElapsed, undefined, 'reasoning');
+      }
+      throw err;
+    }
+  }
+
+  // 标准 cascade：先 chat 后 reasoning
   const chatStart = Date.now();
   try {
     const chatResult = await ctx.sys.llm.chat(
@@ -676,7 +741,6 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
     const chatElapsed = Date.now() - chatStart;
     const quality = evaluateQuality(chatResult.text ?? '', plan.content);
 
-    // P1-1: 记录 chat 层结果
     const chatSelection = ctx.sys.llm.consumeLastUnifiedSelection();
     if (chatSelection) {
       recordResourceOutcome(ctx.sys, `model/${chatSelection.profile.id}`, true, chatElapsed, undefined, 'chat');
@@ -685,7 +749,6 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
     if (quality >= 0.6) {
       return { text: chatResult.text ?? '', source: 'cascade/chat', toolCalls: [], cascadeQuality: quality };
     }
-    // 中等质量：尝试 reasoning 模型改进
     if (quality >= 0.3) {
       const reasoningStart = Date.now();
       try {
@@ -707,7 +770,6 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
       } catch { /* reasoning 失败 */ }
     }
   } catch {
-    // P1-1: chat 层失败回写
     const chatElapsed = Date.now() - chatStart;
     const chatSelection = ctx.sys.llm.consumeLastUnifiedSelection();
     if (chatSelection) {
@@ -715,7 +777,7 @@ async function executeCascade(ctx: ExecutionContext, plan: OrchestrationPlan): P
     }
   }
 
-  // 第二层：reasoning 模型
+  // 最终 fallback：reasoning 模型
   const reasoningStart = Date.now();
   try {
     const reasoningResult = await ctx.sys.llm.chat(

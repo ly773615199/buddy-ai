@@ -1640,6 +1640,99 @@ export class ModelPool {
     };
   }
 
+  // ==================== 三脑专用查询接口（只读，不做决策） ====================
+
+  /**
+   * 三脑专用：返回所有可用模型的完整信息，三脑自己做决策
+   *
+   * 与 queryCapableModels() 的区别：
+   * - 返回更完整的信息（含 TS 分数、能力详情）
+   * - 支持过滤条件（三脑根据任务需求构建）
+   * - 不做任何决策（不调 Thompson Sampling 采样）
+   */
+  queryForBrain(taskType: TaskType, filter?: {
+    minReasoning?: number;
+    requireToolCalling?: boolean;
+    maxCost?: number;
+    excludeIds?: string[];
+  }): Array<{
+    id: string;
+    displayName: string;
+    tier: string;
+    platform: string;
+    capabilities: ModelProfile['capabilities'];
+    costPer1kInput: number;
+    costPer1kOutput: number;
+    maxContextTokens: number;
+    history: {
+      taskSuccessRate: number;
+      avgLatencyMs: number;
+      totalCalls: number;
+      avgQuality: number;
+      confidence: number;
+    };
+    tsScore: number;
+    accessStatus: string;
+    active: boolean;
+  }> {
+    let candidates = this.layer0StaticFilter(taskType);
+
+    // 应用过滤条件
+    if (filter) {
+      if (filter.excludeIds) {
+        candidates = candidates.filter(p => !filter.excludeIds!.includes(p.id));
+      }
+      if (filter.requireToolCalling) {
+        candidates = candidates.filter(p => p.capabilities.toolCalling && p.capabilities.toolCallingMode !== 'none');
+      }
+      if (filter.minReasoning != null) {
+        candidates = candidates.filter(p => (p.capabilities.reasoning ?? 0) >= filter.minReasoning!);
+      }
+      if (filter.maxCost != null) {
+        candidates = candidates.filter(p => p.costPer1kInput <= filter.maxCost!);
+      }
+    }
+
+    return candidates.map(p => {
+      const taskStats = p.stats.byTaskType[taskType];
+      const totalCalls = taskStats?.attempts ?? 0;
+      const successes = taskStats?.successes ?? 0;
+      const tsKey = `${taskType}:${p.id}`;
+      const tsParams = this.tsParams.get(tsKey);
+
+      return {
+        id: p.id,
+        displayName: p.displayName,
+        tier: p.tier,
+        platform: p.platform,
+        capabilities: p.capabilities,
+        costPer1kInput: p.costPer1kInput,
+        costPer1kOutput: p.costPer1kOutput,
+        maxContextTokens: p.maxContextTokens,
+        history: {
+          taskSuccessRate: totalCalls > 0 ? successes / totalCalls : 1,
+          avgLatencyMs: p.stats.avgLatencyMs,
+          totalCalls,
+          avgQuality: taskStats?.avgQuality ?? 0.5,
+          confidence: Math.min(1, totalCalls / 10),
+        },
+        tsScore: tsParams ? tsParams.avgQuality : 0.5,
+        accessStatus: p.accessStatus ?? 'unknown',
+        active: p.active !== false,
+      };
+    });
+  }
+
+  /**
+   * 获取 Thompson Sampling 分数（供三脑参考，不是自动选择）
+   */
+  getThompsonScore(modelId: string, taskType: TaskType): number {
+    const key = `${taskType}:${modelId}`;
+    const params = this.tsParams.get(key);
+    if (!params) return 0.5;
+    return params.avgQuality;
+  }
+
   get profileCount(): number {
     return this.profiles.size;
   }

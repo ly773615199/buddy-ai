@@ -1009,6 +1009,8 @@ export class BuddyAgent {
         intuition: decision.intuition,
         homeostasisActions: decision.homeostasisActions,
         traceId,
+        criticality: signal.criticality,
+        nnQualityScore: decision.intuition?.qualityEstimate,
       },
     };
 

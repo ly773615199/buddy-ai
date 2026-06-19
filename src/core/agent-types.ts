@@ -32,6 +32,8 @@ export interface TaskSignal {
   intentConfidence: number;
   /** 用户原始输入（供 ModelRouter 构建需求） */
   content?: string;
+  /** 任务关键性 — 由三脑在感知阶段评估，驱动模型选择和 cascade 策略 */
+  criticality?: 'low' | 'normal' | 'high';
 }
 
 /** Stage 2 输入：运行时资源状态 */

@@ -871,6 +871,10 @@ export interface OrchestrationPlan {
     homeostasisActions?: unknown[];
     /** 决策追踪 ID（用于关联决策与执行结果） */
     traceId?: string;
+    /** 任务关键性（从 TaskSignal 透传） */
+    criticality?: 'low' | 'normal' | 'high';
+    /** NN 质量预判分数（从 IntuitionSignal 透传） */
+    nnQualityScore?: number;
     /** 审议环元数据 */
     deliberation?: {
       action: 'proceed' | 'refine' | 'brainstorm' | 'concede';

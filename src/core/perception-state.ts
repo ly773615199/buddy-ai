@@ -24,6 +24,7 @@ export interface PerceptionState {
   shouldUseDAG: boolean;
   dagReason: string;
   intentConfidence: number;     // 兼容 TaskSignal 的 intentConfidence
+  criticality: 'low' | 'normal' | 'high';  // 任务关键性
 
   // === 语义向量（可选） ===
   embedding?: Float32Array;     // TextEncoder 输出的池化向量（供下游复用）
@@ -106,6 +107,29 @@ export function assessDAG(content: string): { shouldUseDAG: boolean; dagReason: 
   }
 
   return { shouldUseDAG: false, dagReason: '' };
+}
+
+/**
+ * 评估任务关键性
+ *
+ * 高关键性：复杂任务 + 长内容 + 开发/设计关键词
+ * 低关键性：短消息、闲聊
+ * 其余：普通
+ */
+export function assessCriticality(
+  content: string,
+  intent: { category: string; confidence: number },
+): 'low' | 'normal' | 'high' {
+  // 高关键性：复杂任务 + 长内容 + 开发设计关键词
+  if (intent.category === 'complex_task' && content.length > 300) return 'high';
+  if (content.length > 500 && /架构|系统|设计|重构|优化|实现|分布式|微服务|architecture|system|design|refactor|implement|distributed/i.test(content)) return 'high';
+  if (intent.category === 'code_operations' && content.length > 200 && /重构|优化|设计|架构|refactor|optimize|design|architect/i.test(content)) return 'high';
+
+  // 低关键性：短消息、闲聊
+  if (content.length < 50 && intent.category === 'conversation') return 'low';
+  if (content.length < 30) return 'low';
+
+  return 'normal';
 }
 
 /**

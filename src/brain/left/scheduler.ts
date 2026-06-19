@@ -696,63 +696,175 @@ export class UnifiedScheduler {
    * 本方法负责从统一池选出具体模型节点。
    * router 不可用时降级到本地专家。
    */
+  /**
+   * 三脑直接选择模型 — 替代 Thompson Sampling 自治决策
+   *
+   * 核心变化：
+   * - 旧: selectViaRouter() → ModelRouter.select() → ModelPool.select() → Thompson Sampling 决策
+   * - 新: selectModel() → pool.queryForBrain() → 三脑自己评分 → 三脑决策
+   *
+   * 评分维度：
+   * 1. 历史质量分（权重最高）
+   * 2. 任务成功率
+   * 3. 关键性加权（high→强推理模型, low→便宜模型）
+   * 4. 延迟惩罚
+   * 5. 小脑状态调节（负载/精力）
+   */
+  private async selectModel(
+    routePath: RoutePath,
+    signal: TaskSignal,
+    body: BodyState | undefined,
+    reason: string,
+  ): Promise<ExecutionPlan> {
+    const pool = this.router?.getPool();
+    if (!pool || pool.profileCount === 0) {
+      return this.makePlan(routePath, 'local_only', `${reason} → 无模型池`, 0.3, [
+        { id: 'local', type: 'local_expert' },
+      ]);
+    }
+
+    const taskType = signal.taskType as TaskType;
+    const criticality = signal.criticality ?? 'normal';
+
+    // 构建查询条件
+    const filter: Parameters<typeof pool.queryForBrain>[1] = {};
+    if (taskType === 'reasoning' || taskType === 'tools') {
+      filter.minReasoning = 0.6;
+    }
+    if (taskType === 'tools') {
+      filter.requireToolCalling = true;
+    }
+    // 关键任务不限成本
+    if (criticality === 'high') {
+      // 不设 maxCost
+    } else if (criticality === 'low') {
+      filter.maxCost = 2.0;
+    }
+
+    // 排除失败模型
+    const excludeIds = (this._currentResources as any)?._excludeModelIds as string[] | undefined;
+    if (excludeIds) filter.excludeIds = excludeIds;
+
+    // 查询可用模型
+    let models = pool.queryForBrain(taskType, filter);
+
+    // 无结果 → 放宽约束重试
+    if (models.length === 0) {
+      models = pool.queryForBrain(taskType, {});
+      if (models.length === 0) {
+        return this.makePlan(routePath, 'local_only', `${reason} → 无可用模型`, 0.3, [
+          { id: 'local', type: 'local_expert' },
+        ]);
+      }
+    }
+
+    // 三脑综合评分
+    const scored = models.map(m => ({
+      model: m,
+      score: this.computeBrainScore(m, criticality, taskType, body),
+    }));
+    scored.sort((a, b) => b.score - a.score);
+
+    const best = scored[0].model;
+    const creds = pool.getProviderCredentials(best.id.split('/')[0]);
+    const node: OrchestrationNode = {
+      id: best.id,
+      type: 'cloud_node',
+      model: best.id.split('/').slice(1).join('/'),
+      provider: best.platform,
+      apiKey: creds?.apiKey,
+      baseUrl: creds?.baseUrl,
+    };
+
+    if (this.verbose) {
+      console.log(`[Scheduler] ${routePath}: ${reason} → 三脑选择: ${best.id} (score=${scored[0].score.toFixed(2)}, criticality=${criticality})`);
+    }
+
+    return {
+      mode: 'single',
+      reason: `[${routePath}] ${reason} → ${best.id} (brain-score=${scored[0].score.toFixed(2)})`,
+      selectedNodes: [node],
+      confidence: 0.8,
+      source: 'scheduler',
+    };
+  }
+
+  /**
+   * 三脑综合评分 — 替代 Thompson Sampling 的随机采样
+   *
+   * 不是概率采样，而是确定性评分：
+   * - 历史质量分 × 40
+   * - 任务成功率 × 25
+   * - 关键性加权 × 20
+   * - 延迟惩罚
+   * - 小脑状态调节
+   */
+  private computeBrainScore(
+    model: {
+      id: string;
+      tier: string;
+      capabilities: { reasoning: number; code: number; toolCalling: boolean };
+      costPer1kInput: number;
+      history: { taskSuccessRate: number; avgLatencyMs: number; totalCalls: number; avgQuality: number; confidence: number };
+    },
+    criticality: string,
+    taskType: string,
+    body?: BodyState,
+  ): number {
+    let score = 0;
+
+    // 1. 历史质量分（权重最高）
+    if (model.history.confidence > 0.3) {
+      score += model.history.avgQuality * 40;
+    } else {
+      // 冷启动：默认分
+      score += 20;
+    }
+
+    // 2. 任务成功率
+    score += model.history.taskSuccessRate * 25;
+
+    // 3. 关键性加权
+    if (criticality === 'high') {
+      // 关键任务：强推理能力加分
+      score += (model.capabilities.reasoning ?? 0) * 20;
+      const tierBonus: Record<string, number> = { premium: 15, standard: 10, budget: 5, free: 0 };
+      score += tierBonus[model.tier] ?? 0;
+    } else if (criticality === 'low') {
+      // 闲聊：便宜优先
+      score += Math.max(0, 10 - model.costPer1kInput * 5);
+    }
+
+    // 4. 延迟惩罚
+    if (model.history.avgLatencyMs > 0) {
+      score -= Math.min(10, model.history.avgLatencyMs / 3000);
+    }
+
+    // 5. 小脑状态调节
+    if (body) {
+      if (body.load > 80) {
+        // 高负载：优先便宜快速的
+        score -= model.costPer1kInput * 3;
+      }
+      if (body.energy < 30) {
+        // 低精力：优先可靠的
+        score += model.history.taskSuccessRate * 10;
+      }
+    }
+
+    return score;
+  }
+
+  /**
+   * 旧方法保留作为兼容（内部调用 selectModel）
+   */
   private async selectViaRouter(
     routePath: RoutePath,
     signal: TaskSignal,
     body: BodyState | undefined,
     reason: string,
   ): Promise<ExecutionPlan> {
-    if (this.router) {
-      try {
-        const taskType = signal.taskType as TaskType;
-        const context = { content: signal.content ?? '', bodyState: body };
-
-        // Phase 1.1: 检查是否有排除列表（失败感知重试注入）
-        const excludeIds = (this._currentResources as any)?._excludeModelIds as string[] | undefined;
-
-        let selection;
-        if (excludeIds && excludeIds.length > 0) {
-          // 排除失败模型后选择
-          selection = await this.router.selectExcluding(taskType, context, excludeIds);
-          if (this.verbose && selection) {
-            console.log(`[Scheduler] 排除模型 [${excludeIds.join(',')}] 后选择: ${selection.id}`);
-          }
-        } else {
-          selection = await this.router.select(taskType, context);
-        }
-
-        if (selection) {
-          const creds = this.router.getPool()?.getProviderCredentials(selection.provider);
-          const node: OrchestrationNode = {
-            id: selection.id,
-            type: 'cloud_node',
-            model: selection.model,
-            provider: selection.provider,
-            apiKey: creds?.apiKey,
-            baseUrl: creds?.baseUrl,
-          };
-          if (this.verbose) {
-            console.log(`[Scheduler] ${routePath}: ${reason} → ModelRouter: ${selection.id} (${selection.source})`);
-          }
-          return {
-            mode: 'single',
-            reason: `[${routePath}] ${reason} → ${selection.id} (${selection.source})`,
-            selectedNodes: [node],
-            confidence: 0.8,
-            source: 'scheduler',
-          };
-        }
-      } catch (err) {
-        if (this.verbose) {
-          console.warn(`[Scheduler] ModelRouter 选择失败: ${(err as Error).message}`);
-        }
-      }
-    }
-
-    // router 不可用或无选择结果 → 降级到本地专家
-    return this.makePlan(routePath, 'local_only', `${reason} → 本地模型`, 0.5, [
-      { id: 'local', type: 'local_expert' },
-    ]);
+    return this.selectModel(routePath, signal, body, reason);
   }
 
   private makePlan(

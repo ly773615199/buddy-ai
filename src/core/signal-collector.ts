@@ -17,6 +17,7 @@ import {
   type PerceptionState,
   inferDomains,
   assessComplexity,
+  assessCriticality,
   assessDAG,
   mapTaskType,
 } from './perception-state.js';
@@ -200,6 +201,9 @@ export function collectPerceptionState(
     } catch { /* 状态机错误不影响分类 */ }
   }
 
+  // 关键性评估
+  const criticality = assessCriticality(content, { category: finalCategory, confidence: finalConfidence });
+
   return {
     intent: {
       category: finalCategory,
@@ -214,6 +218,7 @@ export function collectPerceptionState(
     shouldUseDAG,
     dagReason,
     intentConfidence: finalConfidence,
+    criticality,
     embedding: intent.embedding,
     timestamp: Date.now(),
     computeMs: performance.now() - t0,
@@ -236,6 +241,7 @@ export function collectSignals(sys: Subsystems, content: string, conversationSM?
     dagReason: ps.dagReason,
     intentConfidence: ps.intentConfidence,
     content,
+    criticality: ps.criticality,
   };
 }
 
