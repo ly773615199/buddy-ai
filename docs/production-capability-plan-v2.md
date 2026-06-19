@@ -469,7 +469,159 @@ Week 3: Phase 5.3 — 动态 Prompt 注入
 
 ---
 
-## 五、风险与缓解
+## 五、Phase 6: 对话状态机（讨论→确认→执行）
+
+### 6.1 问题
+
+当前系统只看单条消息的关键词判断任务类型，不看对话上下文。导致：
+- "我想做一款游戏" → 被分类为 chat → 模型问 5 个问题 → 用户说"别问了直接做" → 仍然不执行
+- 系统没有"从讨论到执行"的流程管理
+- 用户的执行意图被当作闲聊处理
+
+### 6.2 设计思路
+
+**核心原则：对话是一个过程，不是一个点**
+
+```
+用户: "我想做一款游戏"
+  → 状态: idle → discussing
+  → 行为: 问 2-3 个关键问题（不是 5 个）
+
+用户: "roguelike 卡牌，类似杀戮尖塔，用 TypeScript"
+  → 状态: discussing → confirming
+  → 行为: 输出方案摘要，等确认
+
+用户: "好，开始吧"
+  → 状态: confirming → executing
+  → 行为: 分配资源，调用工具，创建文件
+```
+
+### 6.3 对话状态机
+
+```typescript
+type ConversationPhase = 'idle' | 'discussing' | 'confirming' | 'executing' | 'done';
+
+interface ConversationState {
+  phase: ConversationPhase;
+  /** 用户的原始意图 */
+  intent: string;
+  /** 收集到的需求 */
+  requirements: Record<string, string>;
+  /** 确认的方案 */
+  confirmedPlan: string | null;
+  /** 本轮提问次数 */
+  questionsAsked: number;
+  /** 最大提问次数 */
+  maxQuestions: number;
+  /** 状态开始时间 */
+  phaseStartedAt: number;
+}
+```
+
+### 6.4 状态转换规则
+
+```typescript
+function nextState(
+  current: ConversationPhase,
+  userMessage: string,
+  state: ConversationState,
+): ConversationPhase {
+  switch (current) {
+    case 'idle':
+      // 用户提出意图 → 进入讨论
+      if (hasExecutionIntent(userMessage)) return 'discussing';
+      return 'idle';
+
+    case 'discussing':
+      // 用户提供了具体信息 → 进入确认
+      if (hasSpecificDetails(userMessage) || state.questionsAsked >= state.maxQuestions) {
+        return 'confirming';
+      }
+      // 用户说"直接做" → 跳过确认
+      if (isDirectExecution(userMessage)) return 'executing';
+      return 'discussing';
+
+    case 'confirming':
+      // 用户确认 → 进入执行
+      if (isConfirmation(userMessage)) return 'executing';
+      // 用户提出修改 → 回到讨论
+      if (hasModification(userMessage)) return 'discussing';
+      return 'confirming';
+
+    case 'executing':
+      // 执行完成
+      return 'done';
+
+    case 'done':
+      // 新意图
+      return 'idle';
+  }
+}
+```
+
+### 6.5 意图识别
+
+```typescript
+/** 判断用户消息是否包含执行意图 */
+function hasExecutionIntent(content: string): boolean {
+  const intentPatterns = [
+    /做.*游戏/, /开发.*应用/, /创建.*项目/, /写.*程序/,
+    /build|create|develop|make|implement/i,
+    /帮我.*做/, /帮我.*写/, /帮我.*创建/,
+  ];
+  return intentPatterns.some(p => p.test(content));
+}
+
+/** 判断用户是否要求直接执行 */
+function isDirectExecution(content: string): boolean {
+  const directPatterns = [
+    /直接做/, /直接开始/, /别问了/, /不用问/, /现在就做/,
+    /just do it|start now|go ahead|begin/i,
+  ];
+  return directPatterns.some(p => p.test(content));
+}
+
+/** 判断用户是否确认方案 */
+function isConfirmation(content: string): boolean {
+  const confirmPatterns = [
+    /^好$/, /^可以$/, /^行$/, /^开始/, /^确认/, /^就这样/,
+    /^ok$/i, /^yes$/i, /^go$/i, /^start$/i,
+  ];
+  return confirmPatterns.some(p => p.test(content.trim()));
+}
+```
+
+### 6.6 注入 Prompt 策略
+
+```typescript
+function buildPhasePrompt(phase: ConversationPhase, state: ConversationState): string {
+  switch (phase) {
+    case 'discussing':
+      return `\n## 当前阶段: 需求讨论\n- 用户意图: ${state.intent}\n- 已收集: ${JSON.stringify(state.requirements)}\n- 还可以问 ${state.maxQuestions - state.questionsAsked} 个问题\n- 问最关键的问题，不要问太多`;
+
+    case 'confirming':
+      return `\n## 当前阶段: 方案确认\n- 输出方案摘要（技术栈、模块、计划）\n- 等用户确认后开始执行\n- 不要再问问题`;
+
+    case 'executing':
+      return `\n## 当前阶段: 执行\n- 直接调用工具创建文件\n- 不要再问问题\n- 不要只给方案，要实际执行`;
+
+    default:
+      return '';
+  }
+}
+```
+
+### 6.7 验收标准
+
+- [ ] "我想做一款游戏" → discussing 阶段，最多问 2 个问题
+- [ ] "roguelike 卡牌，TypeScript" → confirming 阶段，输出方案
+- [ ] "好，开始吧" → executing 阶段，调用工具创建文件
+- [ ] "别问了直接做" → 跳过确认，直接 executing
+- [ ] 状态机会话级持久化
+
+---
+
+## 六、风险与缓解
 
 | 风险 | 概率 | 影响 | 缓解措施 |
 |------|------|------|----------|
