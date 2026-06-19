@@ -329,8 +329,15 @@ export class OnlineLearner {
       if (idx !== undefined) toolLabels[idx] = 1;
     }
 
-    // 质量标签（从 outcome 推断）
-    const qualityLabel = outcome.success ? 0.8 : 0.2;
+    // 质量标签（从 outcome 多维推断，不只是成功/失败）
+    let qualityLabel = outcome.success ? 0.7 : 0.3;
+    // 工具全部成功 → 加分
+    if (outcome.success && outcome.toolsUsed.length > 0) qualityLabel += 0.1;
+    // 延迟合理 → 加分
+    if (outcome.latencyMs < 5000) qualityLabel += 0.1;
+    // 有用户纠正 → 大幅扣分
+    if (resources.userCorrectionCount > 0) qualityLabel -= 0.2;
+    qualityLabel = Math.max(0, Math.min(1, qualityLabel));
 
     this.collectSample('', signal, resources, intentIdx, toolLabels, qualityLabel, outcome, body);
   }

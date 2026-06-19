@@ -189,11 +189,14 @@ export class RightBrain {
     ];
 
     // 构建训练样本并写入 ReplayBuffer
-    const defaultResources: ResourceState = {
-      budgetRemaining: 100, availableNodeCount: 5,
-      localCoverageRatio: 0.5, localConfidence: 0.5,
-      userCorrectionCount: 0, experienceHit: null,
-    };
+    // 资源多样性：不同预算/模型数/工具健康度
+    const RESOURCE_PROFILES: ResourceState[] = [
+      { budgetRemaining: 1.0, availableNodeCount: 20, localCoverageRatio: 0.8, localConfidence: 0.8, userCorrectionCount: 0, experienceHit: {} as any },
+      { budgetRemaining: 0.5, availableNodeCount: 10, localCoverageRatio: 0.5, localConfidence: 0.5, userCorrectionCount: 0, experienceHit: null },
+      { budgetRemaining: 0.1, availableNodeCount: 3, localCoverageRatio: 0.2, localConfidence: 0.3, userCorrectionCount: 2, experienceHit: null },
+      { budgetRemaining: 0.0, availableNodeCount: 1, localCoverageRatio: 0.0, localConfidence: 0.0, userCorrectionCount: 5, experienceHit: null },
+    ];
+
     const defaultOutcome: DecisionOutcome = {
       success: true, latencyMs: 1000, toolsUsed: [], costEstimate: 0,
     };
@@ -201,8 +204,10 @@ export class RightBrain {
     for (const s of SYNTHETIC_SAMPLES) {
       const toolLabels = new Array(32).fill(0);
       for (const t of s.tools) toolLabels[t] = 1;
+      // 每个样本随机选一个资源画像
+      const resources = RESOURCE_PROFILES[Math.floor(Math.random() * RESOURCE_PROFILES.length)];
       this.learner.collectSample(
-        '', s.signal, defaultResources,
+        '', s.signal, resources,
         s.intent, toolLabels, s.quality,
         { ...defaultOutcome, success: s.quality > 0.5 },
       );
@@ -212,12 +217,12 @@ export class RightBrain {
     let totalLoss = 0;
     let trainCount = 0;
     for (let epoch = 0; epoch < 3; epoch++) {
-      // 每轮重新写入样本（buffer 可能被采样消耗）
       for (const s of SYNTHETIC_SAMPLES) {
         const toolLabels = new Array(32).fill(0);
         for (const t of s.tools) toolLabels[t] = 1;
+        const resources = RESOURCE_PROFILES[Math.floor(Math.random() * RESOURCE_PROFILES.length)];
         this.learner.collectSample(
-          '', s.signal, defaultResources,
+          '', s.signal, resources,
           s.intent, toolLabels, s.quality,
           { ...defaultOutcome, success: s.quality > 0.5 },
         );

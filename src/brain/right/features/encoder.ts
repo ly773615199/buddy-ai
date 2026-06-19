@@ -128,6 +128,21 @@ export function encodeFeatures(input: EncodeInput): number[] {
   tokens.push(discretize100(input.resources.localCoverageRatio * 100));
   tokens.push(3);
 
+  // ── 资源画像（700-719）──
+  // 预算剩余：归一化到 0-1（hourlyBudget 通常 1.0）
+  const budgetNorm = Math.max(0, Math.min(1, input.resources.budgetRemaining));
+  tokens.push(700 + Math.floor(budgetNorm * 10));
+  // 可用模型数：归一化到 0-1（假设最多 50 个模型）
+  const modelCountNorm = Math.min(1, input.resources.availableNodeCount / 50);
+  tokens.push(710 + Math.floor(modelCountNorm * 10));
+  // 工具健康度：不可靠工具数（0=健康，越多越差）
+  const toolUnreliable = input.resources.toolHealth?.unreliableTools?.length ?? 0;
+  tokens.push(720 + Math.min(toolUnreliable, 9));
+  // 用户纠正次数：高纠正 = 需要更强模型
+  const correctionNorm = Math.min(1, input.resources.userCorrectionCount / 10);
+  tokens.push(730 + Math.floor(correctionNorm * 10));
+  tokens.push(3);
+
   // Suggested tools（经验系统推荐）
   if (input.suggestedTools) {
     for (const tool of input.suggestedTools.slice(0, 8)) {
@@ -218,7 +233,12 @@ export function encodeFeaturesFast(input: EncodeInput): number[] {
   tokens.push(discretize100(input.resources.localCoverageRatio * 100));
   tokens.push(3); // SEP
 
-  return tokens; // 通常 8-10 个 token
+  // 预算剩余（快速路径也需要，影响模型选择）
+  const budgetNorm = Math.max(0, Math.min(1, input.resources.budgetRemaining));
+  tokens.push(700 + Math.floor(budgetNorm * 10));
+  tokens.push(3); // SEP
+
+  return tokens; // 通常 10-12 个 token
 }
 
 /**
