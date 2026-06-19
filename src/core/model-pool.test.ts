@@ -802,3 +802,120 @@ describe('V2: getAffinityScore', () => {
     expect(pool.getAffinityScore('test-model', 'reasoning')).toBeLessThan(0.5);
   });
 });
+
+// ==================== queryForBrain（三脑专用查询） ====================
+
+describe('queryForBrain', () => {
+  let pool: ModelPool;
+  let tmpDir: string;
+
+  function makeProfile(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'test/model-1',
+      platform: 'test',
+      displayName: 'Test Model',
+      tier: 'standard' as const,
+      capabilities: {
+        reasoning: 0.8, code: 0.7, chinese: 0.6, english: 0.8,
+        math: 0.7, creative: 0.5, toolCalling: true, toolCallingMode: 'native' as const,
+        vision: false, streaming: true,
+      },
+      maxContextTokens: 32000,
+      maxOutputTokens: 4096,
+      costPer1kInput: 0.01,
+      costPer1kOutput: 0.02,
+      stats: { totalCalls: 0, successes: 0, avgLatencyMs: 0, byTaskType: {} },
+      source: 'user_added' as const,
+      discoveredAt: Date.now(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pool-brain-'));
+    pool = new ModelPool(makeConfig([]), tmpDir);
+    pool.addProfile(makeProfile({ id: 'openai/gpt-4o', tier: 'premium', costPer1kInput: 0.05 }));
+    pool.addProfile(makeProfile({ id: 'openai/gpt-4o-mini', tier: 'standard', costPer1kInput: 0.01 }));
+    pool.addProfile(makeProfile({ id: 'deepseek/deepseek-chat', tier: 'standard', costPer1kInput: 0.002 }));
+    pool.addProfile(makeProfile({ id: 'ollama/llama3', tier: 'free', costPer1kInput: 0, capabilities: { reasoning: 0.3, code: 0.3, chinese: 0.5, english: 0.5, math: 0.2, creative: 0.3, toolCalling: false, toolCallingMode: 'none' as const, vision: false, streaming: true } }));
+  });
+
+  it('返回所有可用模型的完整信息', () => {
+    const models = pool.queryForBrain('chat');
+    expect(models.length).toBeGreaterThan(0);
+    const m = models[0];
+    expect(m).toHaveProperty('id');
+    expect(m).toHaveProperty('tier');
+    expect(m).toHaveProperty('capabilities');
+    expect(m).toHaveProperty('costPer1kInput');
+    expect(m).toHaveProperty('history');
+    expect(m).toHaveProperty('tsScore');
+    expect(m).toHaveProperty('active');
+    expect(m.history).toHaveProperty('taskSuccessRate');
+    expect(m.history).toHaveProperty('avgQuality');
+    expect(m.history).toHaveProperty('confidence');
+  });
+
+  it('过滤 requireToolCalling', () => {
+    const all = pool.queryForBrain('chat');
+    const toolOnly = pool.queryForBrain('chat', { requireToolCalling: true });
+    expect(toolOnly.length).toBeLessThan(all.length);
+    // ollama/llama3 toolCalling=false 应被排除
+    expect(toolOnly.find(m => m.id === 'ollama/llama3')).toBeUndefined();
+  });
+
+  it('过滤 maxCost', () => {
+    const cheap = pool.queryForBrain('chat', { maxCost: 0.01 });
+    for (const m of cheap) {
+      expect(m.costPer1kInput).toBeLessThanOrEqual(0.01);
+    }
+    // gpt-4o costPer1kInput=0.05 应被排除
+    expect(cheap.find(m => m.id === 'openai/gpt-4o')).toBeUndefined();
+  });
+
+  it('过滤 excludeIds', () => {
+    const all = pool.queryForBrain('chat');
+    const excluded = pool.queryForBrain('chat', { excludeIds: [all[0].id] });
+    expect(excluded.length).toBe(all.length - 1);
+    expect(excluded.find(m => m.id === all[0].id)).toBeUndefined();
+  });
+
+  it('默认 tsScore 为 0.5', () => {
+    const models = pool.queryForBrain('chat');
+    for (const m of models) {
+      expect(m.tsScore).toBe(0.5);
+    }
+  });
+
+  it('history.confidence 基于调用次数', () => {
+    const models = pool.queryForBrain('chat');
+    for (const m of models) {
+      expect(m.history.confidence).toBe(0);
+    }
+  });
+});
+
+// ==================== getThompsonScore ====================
+
+describe('getThompsonScore', () => {
+  let pool: ModelPool;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pool-ts-'));
+    pool = new ModelPool(
+      makeConfig([makeNode({ id: 'test/model', provider: 'test', model: 'model' })]),
+      tmpDir,
+    );
+  });
+
+  it('无历史数据返回 0.5', () => {
+    expect(pool.getThompsonScore('test/model', 'chat')).toBe(0.5);
+  });
+
+  it('记录反馈后返回 avgQuality', () => {
+    pool.recordFeedback('test/model', 'chat', true, 1000, 0.01, 0.8);
+    const score = pool.getThompsonScore('test/model', 'chat');
+    expect(score).toBeGreaterThan(0.5);
+  });
+});

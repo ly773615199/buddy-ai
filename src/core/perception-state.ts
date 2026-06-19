@@ -138,14 +138,14 @@ export function assessCriticality(
   content: string,
   intent: { category: string; confidence: number },
 ): 'low' | 'normal' | 'high' {
-  // 高关键性：复杂任务 + 长内容 + 开发设计关键词
-  if (intent.category === 'complex_task' && content.length > 300) return 'high';
-  if (content.length > 500 && /架构|系统|设计|重构|优化|实现|分布式|微服务|architecture|system|design|refactor|implement|distributed/i.test(content)) return 'high';
-  if (intent.category === 'code_operations' && content.length > 200 && /重构|优化|设计|架构|refactor|optimize|design|architect/i.test(content)) return 'high';
+  // 高关键性：复杂任务 + 开发设计关键词
+  if (intent.category === 'complex_task' && content.length > 100) return 'high';
+  if (content.length > 100 && /架构|系统设计|重构|优化方案|分布式|微服务|architecture|system design|refactor|distributed|microservice/i.test(content)) return 'high';
+  if (intent.category === 'code_operations' && content.length > 80 && /重构|优化|设计|架构|refactor|optimize|design|architect/i.test(content)) return 'high';
 
   // 低关键性：短消息、闲聊
-  if (content.length < 50 && intent.category === 'conversation') return 'low';
-  if (content.length < 30) return 'low';
+  if (content.length < 30 && intent.category === 'conversation') return 'low';
+  if (content.length < 15) return 'low';
 
   return 'normal';
 }
