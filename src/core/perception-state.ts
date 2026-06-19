@@ -77,19 +77,37 @@ export function inferDomains(intent: { category: string; suggestedTools: string[
 }
 
 /**
- * 基于意图 + 内容评估复杂度
+ * 基于意图 + 语义密度评估复杂度（不再纯靠长度）
+ *
+ * 语义密度 = 技术关键词命中数 / 内容长度
+ * 高密度短文本（如“用Rust写分布式Raft”）→ complex
+ * 低密度长文本（如闲聊扩展）→ simple
  */
 export function assessComplexity(
   content: string,
   intent: { category: string; confidence: number },
 ): 'simple' | 'medium' | 'complex' {
-  if (intent.category === 'complex_task' || content.length > 200) {
-    return 'complex';
-  }
-  if (intent.category !== 'conversation' || content.length > 80) {
-    return 'medium';
-  }
-  return 'simple';
+  // 意图分类直接判定
+  if (intent.category === 'complex_task') return 'complex';
+
+  // 语义密度：技术关键词命中数
+  const techKeywords = [
+    '架构', '系统', '设计', '重构', '优化', '实现', '分布式', '微服务', '并发', '算法',
+    '数据库', '缓存', '消息队列', '负载均衡', '容器', '部署', 'pipeline', 'CI/CD',
+    'architecture', 'system', 'design', 'refactor', 'implement', 'distributed',
+    'microservice', 'concurrency', 'algorithm', 'database', 'cache', 'deploy',
+    '写一个', '实现一个', 'build a', 'create a', 'develop',
+  ];
+  const lower = content.toLowerCase();
+  const hits = techKeywords.filter(k => lower.includes(k)).length;
+  const density = content.length > 0 ? hits / (content.length / 50) : 0; // 每 50 字符命中数
+
+  // 高密度短文本 → complex
+  if (density >= 0.3 || hits >= 3) return 'complex';
+  // 低密度 + 意图是对话 → simple
+  if (intent.category === 'conversation' && density < 0.1) return 'simple';
+  // 其余 → medium
+  return 'medium';
 }
 
 /**

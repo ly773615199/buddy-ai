@@ -339,44 +339,49 @@ export class UnifiedScheduler {
       ]);
     }
 
-    // ── Layer 1: 元认知控制信号 ──
+    // ── Layer 1: 元认知控制信号（连续函数，无硬阈值） ──
     if (intuition?.hit) {
       const quality = intuition.qualityEstimate;
 
-      // 极低信心 → 强制 LLM（跳过所有经验路由）
-      if (quality < this.config.metacognitiveForceLlm) {
+      // Sigmoid 衰减：quality 越低，forceLLM 权重越高
+      const forceLlmWeight = 1 / (1 + Math.exp((quality - this.config.metacognitiveForceLlm) * 15));
+      const verifyWeight = 1 / (1 + Math.exp((quality - this.config.metacognitiveCaution) * 10));
+
+      // forceLLM 权重 > 0.7 → 强制 LLM
+      if (forceLlmWeight > 0.7) {
         return await this.selectViaRouter('metacognitive_override', signal, body,
-          `元认知降级: quality=${quality.toFixed(2)} < ${this.config.metacognitiveForceLlm}`);
+          `元认知降级: quality=${quality.toFixed(2)}, forceWeight=${forceLlmWeight.toFixed(2)}`);
       }
 
-      // 中等信心 → 走经验但要求 LLM 验证
-      if (quality < this.config.metacognitiveCaution) {
-        if (resources.experienceHit && resources.localConfidence >= this.config.mediumConfidenceThreshold) {
-          return this.makePlan('exp_verified', 'cascade',
-            `元认知谨慎: quality=${quality.toFixed(2)}，经验+本地验证`,
-            quality, [
-              { id: 'experience', type: 'experience' },
-              { id: 'local', type: 'local_expert' },
-            ]);
-        }
+      // verify 权重 > 0.5 → 走经验但要求 LLM 验证
+      if (verifyWeight > 0.5 && resources.experienceHit && resources.localConfidence >= 0.4) {
+        return this.makePlan('exp_verified', 'cascade',
+          `元认知谨慎: quality=${quality.toFixed(2)}, verifyWeight=${verifyWeight.toFixed(2)}`,
+          quality, [
+            { id: 'experience', type: 'experience' },
+            { id: 'local', type: 'local_expert' },
+          ]);
       }
     }
 
-    // ── Layer 2: 新颖度分层路由 ──
+    // ── Layer 2: 新颖度分层路由（连续函数） ──
     const novelty = calcNovelty(signal, resources);
 
-    // 极高新颖度 → LLM 为主
-    if (novelty >= this.config.noveltyExtremeThreshold) {
+    // Sigmoid 权重：新颖度越高，LLM 权重越大
+    const llmWeight = 1 / (1 + Math.exp((this.config.noveltyHighThreshold - novelty) * 8));
+    const expWeight = 1 - llmWeight;
+
+    // llmWeight > 0.8 → 极高新颖度，LLM 为主
+    if (llmWeight > 0.8) {
       return await this.selectViaRouter('llm_only', signal, body,
-        `极高新颖度(${novelty.toFixed(2)})`);
+        `高新颖度(${novelty.toFixed(2)}), llmWeight=${llmWeight.toFixed(2)}`);
     }
 
-    // 极低新颖度 + 高置信度经验 → 零 LLM 直接执行
-    // 但如果工具不可靠或能力不匹配，降级到验证路径
+    // expWeight > 0.6 + 高置信度经验 → 经验直连或验证
     if (
-      novelty < this.config.noveltyHighThreshold &&
+      expWeight > 0.6 &&
       resources.experienceHit &&
-      resources.localConfidence >= this.config.highConfidenceThreshold
+      resources.localConfidence >= 0.5
     ) {
       // 新增：能力校验 — 经验推荐的模型是否适合当前任务
       const capabilityIssue = this.validateExperienceCapability(signal, resources);
@@ -411,11 +416,10 @@ export class UnifiedScheduler {
 
     // 中等新颖度 + 中置信度 → 经验执行 + LLM 验证
     if (
-      novelty < this.config.noveltyHighThreshold &&
+      expWeight > 0.3 &&
       resources.experienceHit &&
-      resources.localConfidence >= this.config.mediumConfidenceThreshold
+      resources.localConfidence >= 0.3
     ) {
-      // 新增：能力校验
       const capabilityIssue2 = this.validateExperienceCapability(signal, resources);
       if (capabilityIssue2) {
         return await this.selectViaRouter('llm_with_hint', signal, body,
@@ -423,7 +427,7 @@ export class UnifiedScheduler {
       }
 
       return this.makePlan('exp_verified', 'cascade',
-        `中等新颖度(${novelty.toFixed(2)})，经验+本地验证`,
+        `中等新颖度(${novelty.toFixed(2)}), expWeight=${expWeight.toFixed(2)}，经验+本地验证`,
         resources.localConfidence, [
           { id: 'experience', type: 'experience' },
           { id: 'local', type: 'local_expert' },
@@ -445,24 +449,27 @@ export class UnifiedScheduler {
         `直觉推荐: ${intuition.intent.category} (conf=${intuition.intent.confidence.toFixed(2)})`);
     }
 
-    // ── Layer 5: 小脑稳态注入 ──
+    // ── Layer 5: 小脑稳态注入（渐进调节，无悬崖） ──
     if (body) {
-      // 高负载 → 降级到轻量模型
-      if (body.load > 80) {
+      // 负载越高，越倾向便宜快速模型（线性衰减）
+      const loadPressure = Math.max(0, (body.load - 50) / 50); // load=50→0, load=75→0.5, load=100→1
+      if (loadPressure > 0.5) {
         return await this.selectViaRouter('budget_fallback', signal, body,
-          `高负载降级(load=${body.load})`);
+          `负载压力(load=${body.load}, pressure=${loadPressure.toFixed(2)})`);
       }
 
-      // 低精力 → 简化回复
-      if (body.energy < 30) {
+      // 精力越低，越倾向可靠模型（线性衰减）
+      const energyFactor = body.energy / 100; // energy=0→0, energy=30→0.3, energy=100→1
+      if (energyFactor < 0.3) {
         return await this.selectViaRouter('budget_fallback', signal, body,
-          `低精力(energy=${body.energy})`);
+          `低精力(energy=${body.energy}, factor=${energyFactor.toFixed(2)})`);
       }
 
-      // 高困惑度 → 强模型详细解释
-      if (body.confusionLevel > 70) {
+      // 困惑度越高，越倾向强模型（线性增长）
+      const confusionBoost = Math.max(0, (body.confusionLevel - 40) / 60); // 40→0, 70→0.5, 100→1
+      if (confusionBoost > 0.5) {
         return await this.selectViaRouter('llm_only', signal, body,
-          `高困惑度(confusion=${body.confusionLevel})`);
+          `高困惑度(confusion=${body.confusionLevel}, boost=${confusionBoost.toFixed(2)})`);
       }
     }
 

@@ -106,13 +106,23 @@ export function inferTaskType(content: string, context?: Partial<TaskContext>): 
   if (OCR_KEYWORDS.some(k => lower.includes(k))) return 'ocr';
   if (TRANSLATION_KEYWORDS.some(k => lower.includes(k))) return 'translation';
 
-  // 工具关键词（文本匹配，可能误匹配）
+  // 复杂软件开发任务 → reasoning（不是 tools）
+  const DEV_DESIGN_KEYWORDS = [
+    '架构', '系统设计', '重构', '优化方案', '实现一个', '写一个', '开发一个',
+    'architecture', 'system design', 'refactor', 'implement a', 'build a', 'create a',
+    '分布式', '微服务', '并发', 'distributed', 'microservice',
+  ];
+  const devScore = DEV_DESIGN_KEYWORDS.filter(k => lower.includes(k)).length;
+  if (devScore >= 1 && content.length > 50) return 'reasoning';
+
+  // 工具关键词（文本匹配） — 需要更多命中才判定为 tools
   const toolScore = TOOL_KEYWORDS.filter((k) => lower.includes(k)).length;
-  if (toolScore >= 1) return 'tools';
+  if (toolScore >= 2) return 'tools';
+  if (toolScore >= 1 && content.length < 100) return 'tools'; // 短文本 + 1 个工具词 → tools
 
   // 复杂推理（内容较长 + 推理关键词）
   const reasonScore = REASONING_KEYWORDS.filter((k) => lower.includes(k)).length;
-  if (reasonScore >= 2 || (reasonScore >= 1 && content.length > 200)) return 'reasoning';
+  if (reasonScore >= 2 || (reasonScore >= 1 && content.length > 100)) return 'reasoning';
 
   // 短消息 → 闲聊
   if (content.length < 50) return 'chat';
