@@ -1445,10 +1445,17 @@ export class MessageProcessor {
 
   /**
   /**
-   * 推断任务类型（供环境探测使用）
+   * 推断任务类型（结合对话状态机的意图）
+   *
+   * 核心逻辑：
+   * 1. 先看关键词（快速判断）
+   * 2. 再看对话状态机（上下文判断）
+   * 3. 两者取更高级别
    */
   private inferTaskType(content: string): string {
     const lower = content.toLowerCase();
+
+    // ── 第一层：关键词判断 ──
 
     // 工具/代码任务
     if (/[执行运行读取写入搜索git文件目录部署安装]/.test(content) ||
@@ -1473,6 +1480,31 @@ export class MessageProcessor {
         /draw|image|video|tts|speak/.test(lower)) {
       return 'image-gen';
     }
+
+    // ── 第二层：对话状态机提升 ──
+    // 如果状态机识别到执行意图，即使关键词没命中，也应该提升任务类型
+    try {
+      const smPhase = this.conversationSM.getPhase();
+      const smState = this.conversationSM.getState();
+
+      // discussing + 有执行意图 → 提升为 reasoning（需要推理能力来规划）
+      if (smPhase === 'discussing' && smState.intent) {
+        const intent = smState.intent;
+        if (/做|开发|创建|写|建|搞|build|create|develop|make/i.test(intent)) {
+          return 'reasoning'; // 讨论开发项目需要推理能力
+        }
+      }
+
+      // confirming → 提升为 reasoning（需要总结方案）
+      if (smPhase === 'confirming') {
+        return 'reasoning';
+      }
+
+      // executing → 提升为 tools（需要工具调用）
+      if (smPhase === 'executing') {
+        return 'tools';
+      }
+    } catch { /* 状态机错误不影响分类 */ }
 
     // 默认：聊天
     return 'chat';
