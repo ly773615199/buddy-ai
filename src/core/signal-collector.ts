@@ -12,6 +12,7 @@ import type { TaskSignal, ResourceState } from './agent-types.js';
 import type { OrchestrationNode } from '../types.js';
 import type { BuddyConfig } from '../types.js';
 import type { Subsystems } from './subsystems.js';
+import type { ConversationStateMachine } from './conversation-state-machine.js';
 import {
   type PerceptionState,
   inferDomains,
@@ -123,8 +124,13 @@ export function assessTaskComplexity(sys: Subsystems, content: string): {
  *
  * 替代 detectDomains + assessTaskComplexity 各自独立调用 classifyFromText()
  * Step 4: 集成细粒度意图层 — 当主分类器置信度低时，用 IntentClassifier 补充
+ * Step 5: 集成对话状态机 — 根据对话阶段提升任务类型
  */
-export function collectPerceptionState(sys: Subsystems, content: string): PerceptionState {
+export function collectPerceptionState(
+  sys: Subsystems,
+  content: string,
+  conversationSM?: ConversationStateMachine,
+): PerceptionState {
   const t0 = performance.now();
 
   // 一次调用，获取完整意图信息（关键词 + TextEncoder + 原型匹配）
@@ -163,7 +169,32 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
   const { shouldUseDAG, dagReason } = assessDAG(content);
 
   // 任务类型映射
-  const taskType = mapTaskType(finalCategory);
+  let taskType = mapTaskType(finalCategory);
+
+  // Step 5: 对话状态机提升 — 根据对话阶段提升任务类型
+  if (conversationSM) {
+    try {
+      const smPhase = conversationSM.getPhase();
+      const smState = conversationSM.getState();
+
+      // discussing + 执行意图 → reasoning
+      if (smPhase === 'discussing' && smState.intent) {
+        if (/做|开发|创建|写|建|搞|build|create|develop|make/i.test(smState.intent)) {
+          taskType = 'reasoning';
+        }
+      }
+
+      // confirming → reasoning
+      if (smPhase === 'confirming') {
+        taskType = 'reasoning';
+      }
+
+      // executing → tools
+      if (smPhase === 'executing') {
+        taskType = 'tools';
+      }
+    } catch { /* 状态机错误不影响分类 */ }
+  }
 
   return {
     intent: {
@@ -190,8 +221,8 @@ export function collectPerceptionState(sys: Subsystems, content: string): Percep
  *
  * 使用 collectPerceptionState 统一采集，避免重复调用 classifyFromText
  */
-export function collectSignals(sys: Subsystems, content: string): TaskSignal {
-  const ps = collectPerceptionState(sys, content);
+export function collectSignals(sys: Subsystems, content: string, conversationSM?: ConversationStateMachine): TaskSignal {
+  const ps = collectPerceptionState(sys, content, conversationSM);
   return {
     domains: ps.domains,
     complexity: ps.complexity,

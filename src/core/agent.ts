@@ -595,7 +595,7 @@ export class BuddyAgent {
    */
   // Phase 2: collectSignals / collectResourceState / collectToolHealth 已迁移到 signal-collector.ts
   collectSignals(content: string): TaskSignal {
-    return signalCollector.collectSignals(this.sys, content);
+    return signalCollector.collectSignals(this.sys, content, this.sys.conversationSM ?? undefined);
   }
 
   collectResourceState(content: string, signal: TaskSignal): ResourceState {

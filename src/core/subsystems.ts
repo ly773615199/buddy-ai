@@ -90,6 +90,7 @@ import { GenerationCache } from './generation-cache.js';
 import { CapabilityScheduler } from './capability-scheduler.js';
 import { MultiPathExecutor } from './multi-path-executor.js';
 import { EnvironmentProbe } from './env-probe.js';
+import { ConversationStateMachine } from './conversation-state-machine.js';
 
 /**
  * 所有子系统的容器 — 由工厂函数统一初始化
@@ -216,6 +217,7 @@ export class Subsystems {
   /** P2-7: 跨会话学习器 */
   crossSession: CrossSessionLearner | null = null;
   envProbe: EnvironmentProbe | null = null;
+  conversationSM: ConversationStateMachine | null = null;
 
   constructor(config: BuddyConfig, verbose: boolean) {
     const dbDir = path.join(process.env.HOME ?? '/tmp', '.buddy');
@@ -270,6 +272,7 @@ export class Subsystems {
     // P2-7: 跨会话学习器 — 持久化 Thompson 参数，新 session 自动加载
     this.crossSession = new CrossSessionLearner(dataDir, `session-${Date.now()}`, verbose);
     this.envProbe = new EnvironmentProbe();
+    this.conversationSM = new ConversationStateMachine();
     if (verbose) {
       const stats = this.crossSession.getGlobalStats();
       console.log(`[CrossSession] 已加载 ${stats.totalKeys} 个全局参数 (${stats.totalSamples} 样本)`);

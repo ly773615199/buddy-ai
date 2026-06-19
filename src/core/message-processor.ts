@@ -146,7 +146,7 @@ export class MessageProcessor {
     this.promptInjector = new PromptInjector(sys.stmp, sys.cognitive, undefined, verbose);
     this.reasoningChains = new ReasoningChainStore();
     this.clarifier = new ClarificationEngine();
-    this.conversationSM = new ConversationStateMachine();
+    this.conversationSM = sys.conversationSM ?? new ConversationStateMachine();
     this.innerThoughts = new InnerThoughtsEngine();
   }
 
