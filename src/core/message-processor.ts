@@ -60,6 +60,7 @@ function getDynamicPriorityBoost(category: string): Map<string, number> {
 import { globalToolCache, ToolCache } from '../tools/cache.js';
 import { ReasoningChainStore } from '../memory/reasoning-chain.js';
 import { ClarificationEngine } from './clarifier.js';
+import { ConversationStateMachine } from './conversation-state-machine.js';
 import { InnerThoughtsEngine } from './inner-thoughts.js';
 import { getProjectStore } from '../project/tools.js';
 
@@ -71,6 +72,7 @@ export class MessageProcessor {
   private lastInterviewQuestion: InterviewQuestion | null = null;
   readonly reasoningChains: ReasoningChainStore;
   readonly clarifier: ClarificationEngine;
+  readonly conversationSM: ConversationStateMachine;
   readonly innerThoughts: InnerThoughtsEngine;
 
   // ISSUE-005: Prompt 注入防御 — 清理用户可控内容中的指令性文本
@@ -144,6 +146,7 @@ export class MessageProcessor {
     this.promptInjector = new PromptInjector(sys.stmp, sys.cognitive, undefined, verbose);
     this.reasoningChains = new ReasoningChainStore();
     this.clarifier = new ClarificationEngine();
+    this.conversationSM = new ConversationStateMachine();
     this.innerThoughts = new InnerThoughtsEngine();
   }
 
@@ -284,6 +287,25 @@ export class MessageProcessor {
       }
     } catch (err) {
       if (this.verbose) console.warn('[EnvProbe] 探测失败:', (err as Error).message);
+    }
+
+    // ── 对话状态机（优先级 82 — 略低于环境感知）───
+    try {
+      const smResult = this.conversationSM.processMessage(content);
+      if (smResult.phasePrompt) {
+        budget.add({
+          id: 'conversation-phase',
+          source: 'conversation-sm',
+          priority: 82,
+          content: smResult.phasePrompt,
+          required: false,
+        });
+      }
+      if (smResult.transition && this.verbose) {
+        console.log(`  [ConvSM] ${smResult.transition.from} → ${smResult.transition.to}: ${smResult.transition.reason}`);
+      }
+    } catch (err) {
+      if (this.verbose) console.warn('[ConvSM] 状态机错误:', (err as Error).message);
     }
 
     // 动态优先级：根据意图调整各 segment 优先级
