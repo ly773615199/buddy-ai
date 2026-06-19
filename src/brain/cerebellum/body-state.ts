@@ -385,6 +385,7 @@ export class BodyStateManager {
     let intensity = 0.5;
 
     // 连续评分：每个 mood 基于情绪维度的加权得分
+    const e = vector;
     const moodScores: Record<Mood, number> = {
       happy: (e.joy / 100) * 0.7 + (secondVal > 40 ? 0.2 : 0),
       excited: (e.joy / 100) * 0.4 + (e.anticipation / 100) * 0.4 + (e.surprise / 100) * 0.2,
