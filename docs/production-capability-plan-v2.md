@@ -613,11 +613,46 @@ function buildPhasePrompt(phase: ConversationPhase, state: ConversationState): s
 
 ### 6.7 验收标准
 
-- [ ] "我想做一款游戏" → discussing 阶段，最多问 2 个问题
-- [ ] "roguelike 卡牌，TypeScript" → confirming 阶段，输出方案
-- [ ] "好，开始吧" → executing 阶段，调用工具创建文件
-- [ ] "别问了直接做" → 跳过确认，直接 executing
+- [x] "我想做一款游戏" → discussing 阶段，最多问 2 个问题
+- [x] "roguelike 卡牌，TypeScript" → confirming 阶段，输出方案
+- [x] "好，开始吧" → executing 阶段，调用工具创建文件
+- [x] "别问了直接做" → 跳过确认，直接 executing
 - [ ] 状态机会话级持久化
+
+### 6.8 已知问题与改造方案
+
+> 详细分析见: [conversation-state-machine-analysis.md](./conversation-state-machine-analysis.md)
+
+#### 核心问题
+
+1. **状态机是"盲"的** — 只看正则，不感知资源/复杂度/情绪/执行结果
+2. **executing 阶段资源分配是"空"的** — 不检查资源，不分配能力
+3. **状态机与三脑可能冲突** — 议题阶段/确认阶段的决策冲突
+4. **done 状态没有触发机制** — executing 永远卡住
+5. **需求提取硬编码** — 只对游戏任务有用
+
+#### 改造方案概要
+
+| 改造点 | 内容 | 影响范围 |
+|--------|------|----------|
+| 状态机接收三脑信号 | `receiveBrainSignal()` — 资源耗尽/审议否决时回退 | conversation-state-machine.ts |
+| 执行结果驱动转换 | `onExecutionResult()` — 成功→done，失败→discussing | conversation-state-machine.ts, plan-executor.ts |
+| 三脑接收对话阶段 | `decide()` 接收 `conversationContext` | brain.ts, agent.ts |
+| 需求提取通用化 | `extractRequirements()` 不再硬编码游戏关键词 | conversation-state-machine.ts |
+| 超时检测 | executing 超过 5 分钟自动回退 | conversation-state-machine.ts |
+
+#### 优先级机制
+
+```
+执行结果回调 > 三脑信号 > 状态机正则
+
+执行结果: success=true → 强制 done
+         success=false → 强制 discussing（可重试）或 done（不可重试）
+三脑信号: resourceStatus=exhausted → 强制 discussing
+         deliberationAction=refine → 强制 discussing
+状态机正则: hasExecutionIntent() → discussing
+           isConfirmation() → executing
+```
 
 ---
 

@@ -15,7 +15,7 @@ src/config.ts        — 配置管理（~/.buddy/config.json）
 
 ```
 src/
-├── core/                — 核心引擎（13 文件）
+├── core/                — 核心引擎（15 文件）
 │   ├── agent.ts         — 主类：消息处理、工具拦截、事件分发
 │   ├── llm.ts           — LLM 适配器：多 Provider + 流式 + Function Calling
 │   ├── subsystems.ts    — 子系统容器：统一初始化 30+ 模块
@@ -29,7 +29,9 @@ src/
 │   ├── skill-ops.ts     — 能力包操作（STMP→包重建）
 │   ├── ws-handler.ts    — WebSocket 消息处理
 │   ├── db-manager.ts    — 数据库统一管理（备份/恢复/状态）
-│   └── constants.ts     — 安全规则 + 工具确认逻辑
+│   ├── constants.ts     — 安全规则 + 工具确认逻辑
+│   ├── conversation-state-machine.ts — 对话状态机（idle→discussing→confirming→executing→done）
+│   └── capability-scheduler.ts — 能力协同调度器（五维能力动态组合）
 │
 ├── memory/              — 记忆系统（3 文件）
 │   ├── store.ts         — SQLite + FTS5 全文搜索（对话/记忆/日记/关系）
@@ -350,3 +352,31 @@ frontend/src/
 位于 `skills/` 目录，声明式 JSON 工具定义，启动时自动扫描加载：
 
 `process_list`, `hash_compute`, `dependency_audit`, `image_resize`, `video_cut`, `pdf_extract`, `system_info`, `docker_ps`, `subtitle_extract`, `github_info`, `base64_tool`, `run_tests`, `video_concat`, `audio_info`, `video_info`, `disk_usage`, `json_query`, `weather`, `video_extract_audio`, `image_convert`, `log_tail`, `port_check`, `lint_check`, `video_speed`, `npm_run`, `format_code`, `video_to_gif`
+
+## 对话状态机
+
+**文件**: `src/core/conversation-state-machine.ts`
+
+管理对话生命周期：`idle → discussing → confirming → executing → done`
+
+```
+用户: "我想做一款游戏"
+  → idle → discussing（最多问 2 个问题）
+
+用户: "roguelike 卡牌，TypeScript"
+  → discussing → confirming（输出方案摘要）
+
+用户: "好，开始吧"
+  → confirming → executing（三脑分配资源，调用工具）
+
+执行成功 → executing → done
+执行失败 → executing → discussing（重试）
+```
+
+**集成点**:
+- `MessageProcessor.buildContext()` — 注入阶段 Prompt（priority=82）
+- `SignalCollector.collectPerceptionState()` — taskType 提升
+- `ThreeBrain.decide()` — 对话阶段影响审议/法则决策
+- `PlanExecutor.executeByPlan()` — 执行结果回调状态转换
+
+**详细分析**: [docs/conversation-state-machine-analysis.md](docs/conversation-state-machine-analysis.md)
