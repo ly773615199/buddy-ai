@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import * as fs from 'fs/promises';
+import * as fss from 'fs';
 import * as path from 'path';
 import type { ToolDef } from '../types.js';
 import { WEB_TOOLS } from './web.js';
@@ -54,20 +55,37 @@ const ALLOWED_FILE_ROOTS: string[] = (() => {
 })();
 
 /**
- * 解析文件路径：相对路径基于沙箱工作目录解析
- * 绝对路径直接使用，相对路径优先解析到 SANDBOX_WORKSPACE
+ * 解析文件路径：智能路径解析
+ *
+ * 解析优先级：
+ * 1. 绝对路径直接使用
+ * 2. 项目目录（process.cwd()）下存在 → 使用项目路径
+ * 3. 沙箱目录下存在 → 使用沙箱路径
+ * 4. 默认基于项目目录解析（write_file 场景）
  */
-function resolveFilePath(filePath: string): string {
+function resolveFilePath(filePath: string, preferSandbox = false): string {
   if (path.isAbsolute(filePath)) return filePath;
-  // 相对路径：优先基于沙箱工作目录解析
+
+  const projectResolved = path.resolve(process.cwd(), filePath);
   const sandboxResolved = path.resolve(SANDBOX_WORKSPACE, filePath);
-  // 如果沙箱下存在该路径，使用沙箱路径；否则回退到 process.cwd()
-  try {
-    // 同步检查文件/目录是否存在（仅对 read_file 生效，write_file 总是用沙箱路径）
+
+  // write_file 场景：优先沙箱（保持向后兼容）
+  if (preferSandbox) {
     return sandboxResolved;
-  } catch {
-    return path.resolve(filePath);
   }
+
+  // read_file / list_files 场景：优先项目目录
+  try {
+    if (fss.existsSync(projectResolved)) return projectResolved;
+  } catch { /* 继续 */ }
+
+  // 沙箱目录下存在
+  try {
+    if (fss.existsSync(sandboxResolved)) return sandboxResolved;
+  } catch { /* 继续 */ }
+
+  // 默认：基于项目目录解析
+  return projectResolved;
 }
 
 /**
@@ -150,7 +168,8 @@ export const write_file: ToolDef = {
   permission: 'write_files',
   execute: async (args) => {
     const { path: filePath, content } = args as { path: string; content: string };
-    const resolved = resolveFilePath(filePath);
+    // write_file: 智能路径解析 — 项目目录下已存在的路径优先项目目录
+    const resolved = resolveFilePath(filePath, false);
     const pathCheck = isPathAllowed(filePath);
     if (!pathCheck.allowed) {
       return `[拒绝: ${pathCheck.reason}]`;

@@ -82,6 +82,9 @@ export class LLMAdapter {
   private readonly MAX_RETRIES = 3;
   private readonly BASE_DELAY_MS = 1000;
 
+  // Phase 3: 执行验证器（可选）
+  private executionVerifier: import('../tools/execution-verifier.js').ExecutionVerifier | null = null;
+
   /** 最近一次 API usage（供策略校准） */
   private lastActualUsage: { input: number; output: number } | null = null;
 
@@ -182,6 +185,14 @@ export class LLMAdapter {
 
   setBeforeToolExecute(cb: BeforeToolExecute): void {
     this.beforeToolExecute = cb;
+  }
+
+  /**
+   * Phase 3: 注入执行验证器
+   * 工具执行后自动验证实际效果
+   */
+  setExecutionVerifier(verifier: import('../tools/execution-verifier.js').ExecutionVerifier): void {
+    this.executionVerifier = verifier;
   }
 
   /**
@@ -1056,7 +1067,24 @@ export class LLMAdapter {
         allToolCalls.push(r);
         const resultKey = `${r.name}_${step}_${allToolCalls.length}`;
         this.toolResultMeta.set(resultKey, { toolName: r.name, turn: step, referenced: 0 });
-        currentMessages.push({ role: 'user', content: `工具 ${r.name} 返回: ${r.result}` });
+
+        // Phase 4: 工具被拒后的降级提示
+        let resultContent = r.result;
+        if (r.result.startsWith('[已拦截')) {
+          resultContent += `\n💡 提示: ${r.name} 被用户拒绝。不要重试该工具，而是:\n1. 告诉用户为什么需要这个操作\n2. 询问用户是否愿意手动执行\n3. 尝试用其他方式完成任务（如果可能）`;
+        }
+
+        // Phase 3: 执行验证 — 工具成功后验证实际效果
+        if (this.executionVerifier && !r.result.startsWith('[')) {
+          try {
+            const verification = await this.executionVerifier.verify(r.name, r.args, r.result);
+            if (verification.discrepancy) {
+              resultContent += `\n⚠️ 验证警告: ${verification.discrepancy}`;
+            }
+          } catch { /* 验证失败不阻塞 */ }
+        }
+
+        currentMessages.push({ role: 'user', content: `工具 ${r.name} 返回: ${resultContent}` });
       }
     }
 

@@ -153,9 +153,20 @@ export class UnifiedScheduler {
   // Phase 1.1: 当前调度的资源状态（供 selectViaRouter 读取排除列表）
   private _currentResources: ResourceState | null = null;
 
+  // Phase 5: 资源画像系统（供能力校验使用）
+  private _resourceHub: import('../../brain/hub/resource-hub.js').ResourceHub | null = null;
+
   constructor(config?: Partial<SchedulerConfig>, verbose = false) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.verbose = verbose;
+  }
+
+  /**
+   * Phase 5: 注入资源画像系统
+   * 能力校验需要查询模型的能力标签和亲和度
+   */
+  setResourceHub(hub: import('../../brain/hub/resource-hub.js').ResourceHub): void {
+    this._resourceHub = hub;
   }
 
   /**
@@ -361,12 +372,19 @@ export class UnifiedScheduler {
     }
 
     // 极低新颖度 + 高置信度经验 → 零 LLM 直接执行
-    // 但如果工具不可靠，降级到验证路径
+    // 但如果工具不可靠或能力不匹配，降级到验证路径
     if (
       novelty < this.config.noveltyHighThreshold &&
       resources.experienceHit &&
       resources.localConfidence >= this.config.highConfidenceThreshold
     ) {
+      // 新增：能力校验 — 经验推荐的模型是否适合当前任务
+      const capabilityIssue = this.validateExperienceCapability(signal, resources);
+      if (capabilityIssue) {
+        return await this.selectViaRouter('llm_with_hint', signal, body,
+          `能力校验失败: ${capabilityIssue}，路由器重选`);
+      }
+
       // 工具健康检查：不可靠时跳过直连
       const toolHealth = resources.toolHealth;
       if (toolHealth && toolHealth.unreliableTools.length > 0) {
@@ -397,6 +415,13 @@ export class UnifiedScheduler {
       resources.experienceHit &&
       resources.localConfidence >= this.config.mediumConfidenceThreshold
     ) {
+      // 新增：能力校验
+      const capabilityIssue2 = this.validateExperienceCapability(signal, resources);
+      if (capabilityIssue2) {
+        return await this.selectViaRouter('llm_with_hint', signal, body,
+          `能力校验失败: ${capabilityIssue2}，路由器重选`);
+      }
+
       return this.makePlan('exp_verified', 'cascade',
         `中等新颖度(${novelty.toFixed(2)})，经验+本地验证`,
         resources.localConfidence, [
@@ -747,6 +772,53 @@ export class UnifiedScheduler {
       confidence,
       source: 'scheduler',
     };
+  }
+
+  /**
+   * 经验路由能力校验 — 检查经验推荐的模型是否适合当前任务
+   *
+   * 校验维度：
+   * 1. 亲和度 ≥ 0.3（模型对此类任务的成功率）
+   * 2. 工具任务需要 toolCalling 支持
+   * 3. 推理任务不能选弱推理模型
+   *
+   * @returns null 表示校验通过，否则返回降级原因
+   */
+  private validateExperienceCapability(
+    signal: TaskSignal,
+    resources: ResourceState,
+  ): string | null {
+    const expHit = resources.experienceHit as { skill?: { id?: string }; model?: string } | null;
+    if (!expHit) return null;
+
+    const taskType = signal.taskType;
+    const resourceHub = this._resourceHub;
+    if (!resourceHub) return null;
+
+    // 获取经验推荐的模型画像
+    const recommendedModelId = expHit.model;
+    if (!recommendedModelId) return null;
+
+    const modelProfile = resourceHub.getById(recommendedModelId);
+    if (!modelProfile) return null;
+
+    // 校验 1: 亲和度过低
+    const affinity = modelProfile.affinity[taskType] ?? 0.5;
+    if (affinity < 0.3) {
+      return `经验推荐 ${recommendedModelId} 但亲和度 ${affinity.toFixed(2)} 过低(${taskType})`;
+    }
+
+    // 校验 2: 任务需要工具调用但模型不支持
+    if (taskType === 'tools' && !modelProfile.capabilities.toolCalling) {
+      return `经验推荐 ${recommendedModelId} 但不支持工具调用`;
+    }
+
+    // 校验 3: 任务需要推理但模型推理能力弱
+    if (taskType === 'reasoning' && modelProfile.capabilities.weakAt?.includes('reasoning')) {
+      return `经验推荐 ${recommendedModelId} 但推理能力弱`;
+    }
+
+    return null; // 校验通过
   }
 
   private fingerprint(signal: TaskSignal): string {

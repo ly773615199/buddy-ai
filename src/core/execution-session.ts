@@ -158,6 +158,10 @@ export class ExecutionSession {
 
   // ==================== 步骤管理 ====================
 
+  // Phase 4: 步骤超时定时器
+  private stepTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private readonly STEP_TIMEOUT_MS = 60_000; // 60 秒步骤超时
+
   addStep(tool: string, args: Record<string, unknown>): ExecutionStep {
     if (this.steps.length >= this.maxSteps) {
       throw new Error(`超过最大步骤数 (${this.maxSteps})`);
@@ -173,6 +177,17 @@ export class ExecutionSession {
     this.steps.push(step);
     this.updatedAt = Date.now();
 
+    // Phase 4: 步骤超时定时器
+    const timer = setTimeout(() => {
+      if (!step.completedAt) {
+        step.result = `[步骤超时: ${tool} 执行超过 ${this.STEP_TIMEOUT_MS / 1000} 秒]`;
+        step.success = false;
+        step.completedAt = Date.now();
+        this.updatedAt = Date.now();
+      }
+    }, this.STEP_TIMEOUT_MS);
+    this.stepTimers.set(step.id, timer);
+
     // 自动设置检查点
     if (this.steps.length % this.checkpointInterval === 0) {
       this.addCheckpoint(this.steps.length - 1, `已完成 ${this.steps.length} 步，确认继续？`);
@@ -184,6 +199,13 @@ export class ExecutionSession {
   completeStep(stepId: string, result: string, success: boolean): void {
     const step = this.steps.find(s => s.id === stepId);
     if (!step) return;
+
+    // Phase 4: 清除步骤超时定时器
+    const timer = this.stepTimers.get(stepId);
+    if (timer) {
+      clearTimeout(timer);
+      this.stepTimers.delete(stepId);
+    }
 
     step.result = result;
     step.success = success;

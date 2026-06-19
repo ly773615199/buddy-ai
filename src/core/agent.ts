@@ -783,11 +783,11 @@ export class BuddyAgent {
       brain: {
         law: (decision.plan as any).law ?? null,
         lawName: (decision.plan as any).lawName ?? null,
-        bodyState: {
+        bodyState: decision.bodyState ? {
           energy: decision.bodyState.energy,
           temperature: decision.bodyState.temperature,
           focusLevel: decision.bodyState.focusLevel,
-        },
+        } : { energy: 50, temperature: 50, focusLevel: 50 },
         intuition: decision.intuition ? {
           hit: decision.intuition.hit,
           intentCategory: decision.intuition.intent.category,
@@ -799,7 +799,7 @@ export class BuddyAgent {
           action: decision.deliberationResult.action,
           confidence: decision.deliberationResult.confidence,
         } : null,
-        homeostasisActions: decision.homeostasisActions.map(a => a.type),
+        homeostasisActions: decision.homeostasisActions?.map(a => a.type) ?? [],
       },
     });
     if (this.decisionTrace.length > this.MAX_TRACE) {

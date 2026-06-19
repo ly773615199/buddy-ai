@@ -266,6 +266,24 @@ export class MessageProcessor {
     // E3: 静态段使用预序列化缓存（信任度不变时直接复用）
     budget.add({ id: 'static-cached', source: 'cache', priority: PRIORITY.CORE_INSTRUCTION, content: this.contextCache.static.cachedStaticPrompt, required: true });
 
+    // ── 环境感知（静态层，优先级 85 — 高于人格，低于安全指令）───
+    try {
+      const envProbe = this.sys.envProbe;
+      if (envProbe) {
+        const env = await envProbe.probe(this.config);
+        const envPrompt = envProbe.toPrompt(env);
+        budget.add({
+          id: 'environment',
+          source: 'env-probe',
+          priority: 85,
+          content: envPrompt,
+          required: true,
+        });
+      }
+    } catch (err) {
+      if (this.verbose) console.warn('[EnvProbe] 探测失败:', (err as Error).message);
+    }
+
     // 动态优先级：根据意图调整各 segment 优先级
     let priorityBoost = new Map<string, number>();
     try {

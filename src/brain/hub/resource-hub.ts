@@ -13,6 +13,25 @@
  * - 不做执行（那是 PlanExecutor 的事）
  */
 
+export interface ResourceCapabilities {
+  /** 是否支持工具调用（function calling） */
+  toolCalling: boolean;
+  /** 是否支持流式输出 */
+  streaming: boolean;
+  /** 是否支持视觉输入 */
+  vision: boolean;
+  /** 最大上下文 token 数 */
+  maxContextTokens: number;
+  /** 最大输出 token 数 */
+  maxOutputTokens: number;
+  /** 擅长的任务类型（静态标签） */
+  strongAt: string[];
+  /** 不擅长的任务类型 */
+  weakAt: string[];
+  /** 响应速度等级 */
+  speedTier: 'fast' | 'medium' | 'slow';
+}
+
 export interface ResourceProfile {
   id: string;
   type: 'model' | 'tool' | 'expert' | 'knowledge_source';
@@ -33,6 +52,12 @@ export interface ResourceProfile {
     taskTypes: Record<string, { attempts: number; successes: number }>;
     domains: Record<string, { attempts: number; successes: number }>;
   };
+
+  // 新增：能力标签
+  capabilities: ResourceCapabilities;
+
+  // 新增：任务类型亲和度（从 recordOutcome 学习）
+  affinity: Record<string, number>;  // { 'reasoning': 0.9, 'ocr': 0.3 }
 
   // 状态
   status: 'active' | 'degraded' | 'unavailable' | 'unknown';
@@ -78,6 +103,17 @@ export class ResourceHub {
         taskTypes: {},
         domains: {},
       },
+      capabilities: resource.capabilities ?? {
+        toolCalling: false,
+        streaming: true,
+        vision: false,
+        maxContextTokens: 32000,
+        maxOutputTokens: 4096,
+        strongAt: [],
+        weakAt: [],
+        speedTier: 'medium',
+      },
+      affinity: resource.affinity ?? {},
     });
   }
 
@@ -106,34 +142,52 @@ export class ResourceHub {
   /**
    * 推荐资源 — 按任务类型和领域匹配，按成功率排序
    */
-  recommend(taskType: string, domain?: string): ResourceProfile[] {
+  /**
+   * 推荐资源 — 按任务类型和领域匹配，按亲和度 + 成功率 + 能力匹配排序
+   */
+  recommend(taskType: string, domain?: string, options?: {
+    requireToolCalling?: boolean;
+    minAffinity?: number;
+  }): ResourceProfile[] {
     const candidates = this.getActive();
 
     const scored = candidates.map(p => {
       let score = 0;
 
-      // 任务类型匹配
+      // 1. 亲和度（权重 40）— 新增
+      const affinity = p.affinity[taskType] ?? 0.5;
+      score += affinity * 40;
+
+      // 2. 任务类型成功率（权重 30）
       const typeStats = p.strengths.taskTypes[taskType];
       if (typeStats && typeStats.attempts > 0) {
-        score += (typeStats.successes / typeStats.attempts) * 50;
+        score += (typeStats.successes / typeStats.attempts) * 30;
       }
 
-      // 领域匹配
+      // 3. 领域匹配（权重 20）
       if (domain) {
         const domainStats = p.strengths.domains[domain];
         if (domainStats && domainStats.attempts > 0) {
-          score += (domainStats.successes / domainStats.attempts) * 30;
+          score += (domainStats.successes / domainStats.attempts) * 20;
         }
       }
 
-      // 健康度
-      score += p.healthScore * 0.2;
+      // 4. 健康度（权重 10）
+      score += (p.healthScore / 100) * 10;
+
+      // 5. 能力匹配惩罚 — 新增
+      if (options?.requireToolCalling && !p.capabilities.toolCalling) {
+        score *= 0.1; // 不支持工具调用的模型大幅降权
+      }
 
       return { profile: p, score };
     });
 
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map(s => s.profile);
+    const minScore = (options?.minAffinity ?? 0) * 100;
+    return scored
+      .filter(s => s.score >= minScore)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.profile);
   }
 
   // ==================== 反馈 ====================
@@ -164,6 +218,16 @@ export class ResourceHub {
       dd.attempts++;
       if (outcome.success) dd.successes++;
       p.strengths.domains[outcome.domain] = dd;
+    }
+
+    // 新增：更新亲和度（指数移动平均）
+    if (outcome.taskType) {
+      const current = p.affinity[outcome.taskType] ?? 0.5;
+      // 新结果权重 0.3，历史权重 0.7
+      const newValue = outcome.success
+        ? current * 0.7 + 1.0 * 0.3
+        : current * 0.7 + 0.0 * 0.3;
+      p.affinity[outcome.taskType] = Math.max(0, Math.min(1, newValue));
     }
 
     // 自动更新健康度
