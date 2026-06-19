@@ -470,8 +470,12 @@ export class BuddyAgent {
             toolsUsed: result.toolCalls.map(tc => tc.name),
             costEstimate: 0,
           };
+          // 提取实际使用的意图和工具，供 OnlineLearner 学习
+          // 注意：learnFromOutcome 期望 intent category（如 'code_operations'），不是 taskType（如 'tools'）
+          const actualIntent = signal.domains.length > 0 ? this.mapDomainToIntentCategory(signal.domains[0]) : signal.taskType;
+          const actualTools = result.toolCalls.map(tc => tc.name);
           // 异步调用 feedback，不阻塞主流程
-          threeBrain.feedback(signal, resources, plan as any, outcome, undefined, undefined, undefined, undefined, result.text)
+          threeBrain.feedback(signal, resources, plan as any, outcome, actualIntent, actualTools, undefined, undefined, result.text)
             .catch(err => { if (this.verbose) console.warn('[Agent] feedback 失败:', err.message); });
         } catch (err) {
           if (this.verbose) console.warn('[Agent] feedback 构造失败:', (err as Error).message);
@@ -1341,6 +1345,22 @@ export class BuddyAgent {
       if (error) trace.error = error;
       if (executionMs !== undefined) trace.executionMs = executionMs;
     }
+  }
+
+  /**
+   * 域标签 → 意图分类映射（供 OnlineLearner 学习使用）
+   */
+  private mapDomainToIntentCategory(domain: string): string {
+    const DOMAIN_TO_INTENT: Record<string, string> = {
+      file: 'file_operations',
+      code: 'code_operations',
+      git: 'git_operations',
+      web: 'web_operations',
+      system: 'system_operations',
+      knowledge: 'knowledge_query',
+      conversation: 'conversation',
+    };
+    return DOMAIN_TO_INTENT[domain] ?? 'complex_task';
   }
 
   /**

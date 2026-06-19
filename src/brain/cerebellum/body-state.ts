@@ -300,14 +300,43 @@ export class BodyStateManager {
 
     const e = this.state.emotion;
     const valence = (e.joy + e.trust + e.anticipation) - (e.sadness + e.anger + e.fear);
-    if (this.state.energy > 70 && valence > 20) return 'energetic';
-    if (this.state.energy < 30) return 'tired';
-    if (e.joy > 60) return 'happy';
-    if (e.anger > 50) return 'frustrated';
-    if (this.state.confusionLevel > 60) return 'confused';
-    if (e.anticipation > 50) return 'excited';
-    if (this.state.focusLevel > 60) return 'thinking';
-    return 'calm';
+
+    // 加权评分：每个 mood 有一个连续得分，选最高分
+    // 避免硬阈值悬崖（如 joy=59→不是happy, joy=61→happy）
+    const scores: Record<Mood, number> = {
+      energetic: (this.state.energy / 100) * 0.6 + (Math.max(0, valence) / 100) * 0.4,
+      tired: Math.max(0, (50 - this.state.energy) / 50),
+      happy: (e.joy / 100) * 0.7 + (Math.max(0, valence) / 100) * 0.3,
+      frustrated: (e.anger / 100) * 0.6 + (e.sadness / 100) * 0.2 + (this.state.load / 100) * 0.2,
+      confused: (this.state.confusionLevel / 100) * 0.7 + (e.fear / 100) * 0.3,
+      excited: (e.anticipation / 100) * 0.5 + (e.joy / 100) * 0.3 + (this.state.energy / 100) * 0.2,
+      thinking: (this.state.focusLevel / 100) * 0.7 + (this.state.confusionLevel / 100) * 0.3,
+      calm: 0.3, // 基线
+      sleeping: this.state.energy < 10 ? 0.8 : 0,
+    };
+
+    // 人格调制
+    if (this.personalityStrength > 0.3) {
+      const op = this.personality;
+      if (op) {
+        if (op.extraversion > 70) scores.energetic += 0.15;
+        if (op.extraversion < 30) scores.excited -= 0.1;
+        if (op.agreeableness > 70 && e.anger < 45) scores.frustrated -= 0.15;
+        if (op.neuroticism > 70 && e.fear > 25) scores.confused += 0.1;
+        if (op.conscientiousness > 70 && this.state.energy > 70) scores.energetic += 0.1;
+      }
+    }
+
+    // 选最高分的 mood
+    let bestMood: Mood = 'calm';
+    let bestScore = -1;
+    for (const [mood, score] of Object.entries(scores)) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestMood = mood as Mood;
+      }
+    }
+    return bestMood;
   }
 
   getMoodEmoji(): string {
@@ -355,25 +384,25 @@ export class BodyStateManager {
     let mood: Mood = 'calm';
     let intensity = 0.5;
 
-    if (topKey === 'joy' && topVal > 50) {
-      mood = secondVal > 40 ? 'excited' : 'happy';
-      intensity = topVal / 100;
-    } else if (topKey === 'sadness' && topVal > 40) {
-      mood = 'tired';
-      intensity = topVal / 100;
-    } else if (topKey === 'anger' && topVal > 25) {
-      mood = 'frustrated';
-      intensity = topVal / 100;
-    } else if (topKey === 'fear' && topVal > 35) {
-      mood = 'confused';
-      intensity = topVal / 100;
-    } else if (topKey === 'anticipation' && topVal > 45) {
-      mood = 'thinking';
-      intensity = topVal / 100;
-    } else if (topKey === 'surprise' && topVal > 50) {
-      mood = 'excited';
-      intensity = topVal / 100;
+    // 连续评分：每个 mood 基于情绪维度的加权得分
+    const moodScores: Record<Mood, number> = {
+      happy: (e.joy / 100) * 0.7 + (secondVal > 40 ? 0.2 : 0),
+      excited: (e.joy / 100) * 0.4 + (e.anticipation / 100) * 0.4 + (e.surprise / 100) * 0.2,
+      tired: (e.sadness / 100) * 0.6 + (this.state.energy < 30 ? 0.3 : 0),
+      frustrated: (e.anger / 100) * 0.6 + (e.sadness / 100) * 0.2 + (this.state.load / 100) * 0.2,
+      confused: (e.fear / 100) * 0.5 + (this.state.confusionLevel / 100) * 0.5,
+      thinking: (e.anticipation / 100) * 0.5 + (this.state.focusLevel / 100) * 0.5,
+      energetic: (this.state.energy / 100) * 0.6 + (e.joy / 100) * 0.3 + (e.anticipation / 100) * 0.1,
+      calm: 0.2,
+      sleeping: 0,
+    };
+    let bestMood: Mood = 'calm';
+    let bestScore = -1;
+    for (const [m, s] of Object.entries(moodScores)) {
+      if (s > bestScore) { bestScore = s; bestMood = m as Mood; }
     }
+    mood = bestMood;
+    intensity = Math.min(1, bestScore);
 
     // ── OCEAN 人格调制 ──
     if (this.personality) {
