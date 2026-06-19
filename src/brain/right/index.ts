@@ -188,27 +188,39 @@ export class RightBrain {
       { intent: 7, tools: [4, 12, 13], quality: 0.5, signal: { domains: ['system', 'web'], complexity: 'complex', taskType: 'reasoning', shouldUseDAG: false, dagReason: '', intentConfidence: 0.6, criticality: 'high' } },
     ];
 
-    // 构建训练样本
-    const samples = SYNTHETIC_SAMPLES.map(s => {
+    // 构建训练样本并写入 ReplayBuffer
+    const defaultResources: ResourceState = {
+      budgetRemaining: 100, availableNodeCount: 5,
+      localCoverageRatio: 0.5, localConfidence: 0.5,
+      userCorrectionCount: 0, experienceHit: null,
+    };
+    const defaultOutcome: DecisionOutcome = {
+      success: true, latencyMs: 1000, toolsUsed: [], costEstimate: 0,
+    };
+
+    for (const s of SYNTHETIC_SAMPLES) {
       const toolLabels = new Array(32).fill(0);
       for (const t of s.tools) toolLabels[t] = 1;
-      return {
-        input: '',
-        signal: s.signal,
-        resources: { budgetRemaining: 100, availableNodeCount: 5, localCoverageRatio: 0.5, localConfidence: 0.5, userCorrectionCount: 0, experienceHit: null },
-        intentLabel: s.intent,
-        toolLabels,
-        qualityLabel: s.quality,
-        outcome: { success: s.quality > 0.5, latencyMs: 1000, toolsUsed: [], costEstimate: 0 },
-      };
-    });
+      this.learner.collectSample(
+        '', s.signal, defaultResources,
+        s.intent, toolLabels, s.quality,
+        { ...defaultOutcome, success: s.quality > 0.5 },
+      );
+    }
 
     // 训练 3 轮
     let totalLoss = 0;
     let trainCount = 0;
     for (let epoch = 0; epoch < 3; epoch++) {
-      for (const sample of samples) {
-        this.learner.ingestSample(sample as any);
+      // 每轮重新写入样本（buffer 可能被采样消耗）
+      for (const s of SYNTHETIC_SAMPLES) {
+        const toolLabels = new Array(32).fill(0);
+        for (const t of s.tools) toolLabels[t] = 1;
+        this.learner.collectSample(
+          '', s.signal, defaultResources,
+          s.intent, toolLabels, s.quality,
+          { ...defaultOutcome, success: s.quality > 0.5 },
+        );
       }
       const result = await this.learner.update();
       totalLoss += result.loss;
