@@ -415,6 +415,14 @@ export class BuddyAgent {
           result = await this.processor.processStream(content, (chunk) => {
             process.stdout.write(chunk);
           }, null);
+          // 新增: processStream 路径回调状态机（executeByPlan 路径由 plan-executor 内部回调）
+          if (this.sys.conversationSM) {
+            const allSuccess = result.toolCalls.every(tc => !tc.result?.startsWith('['));
+            this.sys.conversationSM.onExecutionResult(
+              allSuccess,
+              allSuccess ? undefined : '工具执行失败',
+            );
+          }
         }
       }
 
@@ -446,15 +454,6 @@ export class BuddyAgent {
 
       console.log('');
       this.postprocessResult(content, result);
-
-      // 新增: 执行结果回调状态机
-      if (this.sys.conversationSM) {
-        const allSuccess = result.toolCalls.every(tc => !tc.result?.startsWith('['));
-        this.sys.conversationSM.onExecutionResult(
-          allSuccess,
-          allSuccess ? undefined : '工具执行失败',
-        );
-      }
 
       // ── Phase 3: 反思层 — 质量自评 + 经验编译 + 教训提取 + 幻觉检测 ──
       const signal = this.collectSignals(content);

@@ -952,6 +952,15 @@ export class WSHandler {
         if (this.verbose) console.warn('[WS] feedback 构造失败:', (err as Error).message);
       }
 
+      // 新增: 执行结果回调状态机（WS 路径的 processBatch 路径，executeByPlan 由 plan-executor 内部回调）
+      if (this.sys.conversationSM && !planRef) {
+        const allSuccess = result.toolCalls.every(tc => !tc.result?.startsWith('['));
+        this.sys.conversationSM.onExecutionResult(
+          allSuccess,
+          allSuccess ? undefined : '工具执行失败',
+        );
+      }
+
       // Phase 6: 用户纠正检测（FeedbackLearner）
       try {
         if (this.sys.feedback) {
