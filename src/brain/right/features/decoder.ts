@@ -33,13 +33,15 @@ export function decodeDecision(output: ModelOutput): IntuitionDecision {
     }
   }
 
-  // 工具：超过阈值的
+  // 工具：所有工具概率 + 阈值过滤的子集
   const toolMap = getToolIdMap();
-  const tools: Array<{ name: string; probability: number }> = [];
+  const tools: Array<{ name: string; probability: number }> = [];   // 超过阈值的
+  const allTools: Array<{ name: string; probability: number }> = []; // 全部
   for (let i = 0; i < output.toolProbs.length; i++) {
-    if (output.toolProbs[i] > TOOL_THRESHOLD) {
-      const name = toolMap.get(50 + i); // tool IDs start at 50
-      if (name) {
+    const name = toolMap.get(50 + i);
+    if (name) {
+      allTools.push({ name, probability: output.toolProbs[i] });
+      if (output.toolProbs[i] > TOOL_THRESHOLD) {
         tools.push({ name, probability: output.toolProbs[i] });
       }
     }
@@ -50,7 +52,9 @@ export function decodeDecision(output: ModelOutput): IntuitionDecision {
       category: INTENT_LABELS[maxIdx] ?? 'conversation',
       confidence: maxVal,
     },
+    intentDistribution: new Float32Array(output.intentProbs),
     tools,
+    allTools,
     quality: output.qualityScore,
     confidence: maxVal,
     latencyMs: output.latencyMs,

@@ -52,7 +52,11 @@ export interface IntuitionSignal {
 /** 右脑 NN 输出的原始决策 */
 export interface IntuitionDecision {
   intent: { category: string; confidence: number };
+  /** 完整意图概率分布（8 维，供混合意图策略使用） */
+  intentDistribution?: Float32Array;
   tools: Array<{ name: string; probability: number }>;
+  /** 所有工具概率（含低概率的，供概率加权工具链使用） */
+  allTools?: Array<{ name: string; probability: number }>;
   quality: number;
   confidence: number;
   latencyMs: number;
