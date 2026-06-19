@@ -270,8 +270,10 @@ export class MessageProcessor {
     try {
       const envProbe = this.sys.envProbe;
       if (envProbe) {
-        const env = await envProbe.probe(this.config);
-        const envPrompt = envProbe.toPrompt(env);
+        // 按任务类型动态选择探测维度
+        const taskType = this.inferTaskType(content);
+        const env = await envProbe.probe(this.config, taskType);
+        const envPrompt = envProbe.toPrompt(env, taskType);
         budget.add({
           id: 'environment',
           source: 'env-probe',
@@ -1417,6 +1419,41 @@ export class MessageProcessor {
       if (keywords.some(k => lower.includes(k))) return domain;
     }
     return 'general';
+  }
+
+  /**
+  /**
+   * 推断任务类型（供环境探测使用）
+   */
+  private inferTaskType(content: string): string {
+    const lower = content.toLowerCase();
+
+    // 工具/代码任务
+    if (/[执行运行读取写入搜索git文件目录部署安装]/.test(content) ||
+        /exec|run|read|write|search|git|file|deploy|install/.test(lower)) {
+      return 'tools';
+    }
+
+    // 推理/分析任务
+    if (/[分析为什么解释比较设计架构优化重构]/.test(content) ||
+        /analyze|why|explain|compare|design|optimize|refactor/.test(lower)) {
+      return 'reasoning';
+    }
+
+    // 写作任务
+    if (/[写作文档报告总结笔记]/.test(content) ||
+        /write|document|report|summarize|note/.test(lower)) {
+      return 'writing';
+    }
+
+    // 多模态任务
+    if (/[画图图片生成视频语音]/.test(content) ||
+        /draw|image|video|tts|speak/.test(lower)) {
+      return 'image-gen';
+    }
+
+    // 默认：聊天
+    return 'chat';
   }
 
   /**
