@@ -250,29 +250,57 @@ export async function executeByPlan(
     if (ctx.verbose) console.log(`  [Scheduler] ${allocation.reason}`);
   }
 
-  switch (plan.mode) {
-    case 'local_only':
-      return executeLocal(ctx, plan);
-    case 'single':
-      return executeSingle(ctx, plan);
-    case 'parallel':
-      return executeParallel(ctx, plan);
-    case 'cascade':
-      return executeCascade(ctx, plan);
-    case 'sequential':
-      return executeSequential(ctx, plan);
-    case 'debate':
-      return executeDebate(ctx, plan);
-    case 'deliberate':
-      return executeSingle(ctx, plan);
-    case 'clarify':
-      return { text: plan.reason, source: 'deliberation', toolCalls: [] };
-    case 'brainstorm':
-      return { text: plan.reason, source: 'deliberation', toolCalls: [] };
-    case 'direct':
-      return executeDirect(ctx, plan);
-    default:
-      return executeSingle(ctx, plan);
+  // 新增: 包装执行，捕获结果回调状态机
+  try {
+    let result: ExecutionResult;
+
+    switch (plan.mode) {
+      case 'local_only':
+        result = await executeLocal(ctx, plan);
+        break;
+      case 'single':
+        result = await executeSingle(ctx, plan);
+        break;
+      case 'parallel':
+        result = await executeParallel(ctx, plan);
+        break;
+      case 'cascade':
+        result = await executeCascade(ctx, plan);
+        break;
+      case 'sequential':
+        result = await executeSequential(ctx, plan);
+        break;
+      case 'debate':
+        result = await executeDebate(ctx, plan);
+        break;
+      case 'deliberate':
+        result = await executeSingle(ctx, plan);
+        break;
+      case 'clarify':
+        result = { text: plan.reason, source: 'deliberation', toolCalls: [] };
+        break;
+      case 'brainstorm':
+        result = { text: plan.reason, source: 'deliberation', toolCalls: [] };
+        break;
+      case 'direct':
+        result = await executeDirect(ctx, plan);
+        break;
+      default:
+        result = await executeSingle(ctx, plan);
+    }
+
+    // 新增: 执行成功回调状态机
+    if (ctx.sys.conversationSM) {
+      ctx.sys.conversationSM.onExecutionResult(true);
+    }
+
+    return result;
+  } catch (err) {
+    // 新增: 执行失败回调状态机
+    if (ctx.sys.conversationSM) {
+      ctx.sys.conversationSM.onExecutionResult(false, (err as Error).message);
+    }
+    throw err;
   }
 }
 

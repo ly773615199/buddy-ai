@@ -172,10 +172,14 @@ export function collectPerceptionState(
   let taskType = mapTaskType(finalCategory);
 
   // Step 5: 对话状态机提升 — 根据对话阶段提升任务类型
+  let conversationContext: import('./conversation-state-machine.js').ConversationContext | undefined;
   if (conversationSM) {
     try {
       const smPhase = conversationSM.getPhase();
       const smState = conversationSM.getState();
+
+      // 获取对话上下文供三脑使用
+      conversationContext = conversationSM.getContextForBrain();
 
       // discussing + 执行意图 → reasoning
       if (smPhase === 'discussing' && smState.intent) {
@@ -213,6 +217,7 @@ export function collectPerceptionState(
     embedding: intent.embedding,
     timestamp: Date.now(),
     computeMs: performance.now() - t0,
+    conversationContext,
   };
 }
 

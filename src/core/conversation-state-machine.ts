@@ -12,6 +12,32 @@
 
 export type ConversationPhase = 'idle' | 'discussing' | 'confirming' | 'executing' | 'done';
 
+// ==================== 新增类型 ====================
+
+/** 三脑信号 — 状态机接收的外部决策信号 */
+export interface BrainSignal {
+  /** 资源状态 */
+  resourceStatus: 'sufficient' | 'degraded' | 'exhausted';
+  /** 任务复杂度 */
+  complexity: 'simple' | 'medium' | 'complex';
+  /** 三脑置信度 */
+  confidence: number;
+  /** 审议委员会建议 */
+  deliberationAction?: 'proceed' | 'refine' | 'brainstorm' | 'concede';
+}
+
+/** 对话上下文 — 导出给三脑使用 */
+export interface ConversationContext {
+  phase: ConversationPhase;
+  intent: string;
+  requirements: Record<string, string>;
+  questionsAsked: number;
+  maxQuestions: number;
+  timeInPhase: number;
+  totalTransitions: number;
+  retryCount: number;
+}
+
 export interface ConversationState {
   phase: ConversationPhase;
   /** 用户的原始意图 */
@@ -28,6 +54,12 @@ export interface ConversationState {
   phaseStartedAt: number;
   /** 最后活跃时间 */
   lastActiveAt: number;
+  /** 执行重试次数 */
+  retryCount: number;
+  /** 最大重试次数 */
+  maxRetries: number;
+  /** 最近一次三脑信号 */
+  lastBrainSignal: BrainSignal | null;
 }
 
 export interface PhaseTransition {
@@ -101,6 +133,87 @@ export class ConversationStateMachine {
    */
   setPhase(phase: ConversationPhase, reason: string): void {
     this.transitionTo(phase, reason);
+  }
+
+  /**
+   * 接收三脑信号 — 影响状态转换
+   *
+   * 调用时机: orchestrate() 决策完成后
+   * 调用方: agent.ts orchestrateWithThreeBrain()
+   */
+  receiveBrainSignal(signal: BrainSignal): void {
+    this.state.lastBrainSignal = signal;
+
+    // 资源耗尽: executing → discussing
+    if (signal.resourceStatus === 'exhausted' && this.state.phase === 'executing') {
+      this.transitionTo('discussing', '资源耗尽，需要重新规划');
+      return;
+    }
+
+    // 审议要求澄清: executing → confirming
+    if (signal.deliberationAction === 'refine' && this.state.phase === 'executing') {
+      this.transitionTo('confirming', '审议委员会要求重新确认方案');
+      return;
+    }
+
+    // 置信度低: 延长讨论（不增加 questionsAsked）
+    if (signal.confidence < 0.4 && this.state.phase === 'discussing') {
+      this.state.maxQuestions = Math.min(this.state.maxQuestions + 1, 5);
+    }
+  }
+
+  /**
+   * 执行结果回调 — 驱动 executing → done 或 executing → discussing
+   *
+   * 调用时机: PlanExecutor 执行完成（成功或失败）
+   * 调用方: plan-executor.ts executeByPlan()
+   */
+  onExecutionResult(success: boolean, detail?: string): void {
+    if (this.state.phase !== 'executing') return;
+
+    if (success) {
+      this.transitionTo('done', '执行成功');
+    } else {
+      if (this.state.retryCount < this.state.maxRetries) {
+        this.state.retryCount++;
+        this.transitionTo('discussing', `执行失败(第${this.state.retryCount}次): ${detail ?? '未知原因'}，重新讨论方案`);
+      } else {
+        this.transitionTo('done', `执行失败，重试次数用尽: ${detail ?? '未知原因'}`);
+      }
+    }
+  }
+
+  /**
+   * 超时检查 — executing 阶段超过 5 分钟自动回退
+   *
+   * 调用时机: buildContext() 每次调用时
+   * 调用方: message-processor.ts buildContext()
+   */
+  checkTimeout(): void {
+    if (this.state.phase !== 'executing') return;
+    const EXECUTING_TIMEOUT_MS = 5 * 60 * 1000;
+    if (Date.now() - this.state.phaseStartedAt > EXECUTING_TIMEOUT_MS) {
+      this.onExecutionResult(false, '执行超时(5分钟)');
+    }
+  }
+
+  /**
+   * 导出对话上下文 — 供三脑决策使用
+   *
+   * 调用时机: orchestrate() 决策前
+   * 调用方: agent.ts orchestrate()
+   */
+  getContextForBrain(): ConversationContext {
+    return {
+      phase: this.state.phase,
+      intent: this.state.intent,
+      requirements: { ...this.state.requirements },
+      questionsAsked: this.state.questionsAsked,
+      maxQuestions: this.state.maxQuestions,
+      timeInPhase: Date.now() - this.state.phaseStartedAt,
+      totalTransitions: this.transitions.length,
+      retryCount: this.state.retryCount,
+    };
   }
 
   /**
@@ -186,44 +299,30 @@ export class ConversationStateMachine {
   }
 
   /**
-   * 从用户消息中提取需求信息
+   * 从用户消息中提取需求信息（通用化，不再硬编码游戏相关）
    */
   private extractRequirements(message: string): void {
     const lower = message.toLowerCase();
 
-    // 游戏类型
-    const gameTypes = ['roguelike', 'rpg', 'fps', 'moba', '卡牌', '策略', '动作', '冒险', '解谜', '平台跳跃'];
-    for (const t of gameTypes) {
-      if (lower.includes(t)) {
-        this.state.requirements.gameType = t;
-        break;
-      }
-    }
+    const patterns: Array<{ key: string; regex: RegExp }> = [
+      // 技术栈
+      { key: 'techStack', regex: /(?:typescript|javascript|python|java|go|rust|c\+\+|swift|kotlin|react|vue|angular|node|django|flask|spring|unity|unreal|godot|phaser)/i },
+      // 平台
+      { key: 'platform', regex: /(?:pc|mobile|web|网页|手机|主机|桌面|ios|android|windows|mac|linux)/i },
+      // 框架/工具
+      { key: 'framework', regex: /(?:docker|kubernetes|nginx|redis|mysql|postgres|mongodb|elasticsearch)/i },
+      // 参考/风格
+      { key: 'reference', regex: /(?:类似|参考|风格|像|模仿).*?([\u4e00-\u9fa5a-zA-Z0-9]+)/ },
+      // 数量/规模
+      { key: 'scale', regex: /(?:小型|中型|大型|简单|复杂|完整|最小|MVP|原型)/ },
+      // 时间要求
+      { key: 'timeline', regex: /(?:尽快|今天|这周|这个月|不急|慢慢来)/ },
+    ];
 
-    // 技术栈
-    const techStacks = ['typescript', 'javascript', 'python', 'unity', 'unreal', 'godot', 'phaser', 'react', 'vue'];
-    for (const t of techStacks) {
-      if (lower.includes(t)) {
-        this.state.requirements.techStack = t;
-        break;
-      }
-    }
-
-    // 平台
-    const platforms = ['pc', 'mobile', 'web', '网页', '手机', '主机', '桌面'];
-    for (const p of platforms) {
-      if (lower.includes(p)) {
-        this.state.requirements.platform = p;
-        break;
-      }
-    }
-
-    // 参考游戏
-    const refs = ['杀戮尖塔', '哈迪斯', '以撒的结合', '空洞骑士', '蔚蓝', '死亡细胞'];
-    for (const r of refs) {
-      if (lower.includes(r)) {
-        this.state.requirements.reference = r;
-        break;
+    for (const { key, regex } of patterns) {
+      const match = lower.match(regex);
+      if (match) {
+        this.state.requirements[key] = match[1] ?? match[0];
       }
     }
   }
@@ -374,8 +473,8 @@ export class ConversationStateMachine {
         ].filter(Boolean).join('\n');
       }
 
-      case 'executing':
-        return [
+      case 'executing': {
+        const parts = [
           '',
           '## 当前阶段: 执行',
           `- 用户意图: ${intent}`,
@@ -383,7 +482,12 @@ export class ConversationStateMachine {
           '- 不要再问问题',
           '- 不要只给方案，要实际执行工具调用',
           '- 先创建项目结构，再创建核心文件',
-        ].join('\n');
+        ];
+        if (this.state.retryCount > 0) {
+          parts.splice(2, 0, `- ⚠️ 这是第 ${this.state.retryCount} 次重试，之前失败了。请检查失败原因，调整方案`);
+        }
+        return parts.join('\n');
+      }
 
       case 'done':
         return '';
@@ -424,6 +528,9 @@ export class ConversationStateMachine {
     if (from === 'discussing' && to === 'executing') return '用户要求直接执行';
     if (from === 'confirming' && to === 'executing') return '用户确认方案';
     if (from === 'confirming' && to === 'discussing') return '用户提出修改';
+    if (from === 'executing' && to === 'discussing') return '执行失败，重新规划';
+    if (from === 'executing' && to === 'confirming') return '三脑要求重新确认';
+    if (from === 'executing' && to === 'done') return '执行完成';
     if (to === 'idle') return '回到空闲';
     return `${from} → ${to}`;
   }
@@ -438,6 +545,9 @@ export class ConversationStateMachine {
       maxQuestions: 2, // 最多问 2 个问题
       phaseStartedAt: Date.now(),
       lastActiveAt: Date.now(),
+      retryCount: 0,
+      maxRetries: 2,
+      lastBrainSignal: null,
     };
   }
 }

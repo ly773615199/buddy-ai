@@ -447,6 +447,15 @@ export class BuddyAgent {
       console.log('');
       this.postprocessResult(content, result);
 
+      // 新增: 执行结果回调状态机
+      if (this.sys.conversationSM) {
+        const allSuccess = result.toolCalls.every(tc => !tc.result?.startsWith('['));
+        this.sys.conversationSM.onExecutionResult(
+          allSuccess,
+          allSuccess ? undefined : '工具执行失败',
+        );
+      }
+
       // ── Phase 3: 反思层 — 质量自评 + 经验编译 + 教训提取 + 幻觉检测 ──
       const signal = this.collectSignals(content);
       await this.reflect(plan, result, signal);
@@ -635,6 +644,9 @@ export class BuddyAgent {
     // Stage 1.5: 资源状态
     const resources = this.collectResourceState(content, signal);
 
+    // 新增: 获取对话上下文，供三脑决策使用
+    const conversationContext = this.sys.conversationSM?.getContextForBrain() ?? null;
+
     // Phase 2: 生成预追踪 ID，供 signalObserver 关联整条链路
     const preTraceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -725,14 +737,14 @@ export class BuddyAgent {
     if (threeBrain && this.abTestEnabled) {
       const useThreeBrain = Math.random() < this.abTestRatio;
       if (useThreeBrain) {
-        return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext);
+        return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext, conversationContext);
       }
       return this.orchestrateLegacy(content, signal, resources, 'legacy', failureContext);
     }
 
     // ── 三脑决策路径（优先） ──
     if (threeBrain) {
-      return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext);
+      return this.orchestrateWithThreeBrain(content, signal, resources, threeBrain, 'threeBrain', failureContext, conversationContext);
     }
 
     // ── 旧决策路径（兜底） ──
@@ -751,14 +763,15 @@ export class BuddyAgent {
     threeBrain: import('../brain/brain.js').ThreeBrain,
     path: 'threeBrain' | 'legacy' = 'threeBrain',
     failureContext?: FailureAnalysis,
+    conversationContext?: import('./conversation-state-machine.js').ConversationContext | null,
   ): Promise<OrchestrationPlan> {
     const t0 = performance.now();
 
     // 注入用户消息到感知融合
     threeBrain.cerebellum.ingestPerception('user', content, signal.domains);
 
-    // 三脑协作决策（Phase 1.1: 传入失败上下文）
-    const decision = await threeBrain.decide(content, signal, resources, failureContext);
+    // 三脑协作决策 — 传递对话上下文
+    const decision = await threeBrain.decide(content, signal, resources, failureContext, conversationContext ?? undefined);
 
     const latencyMs = performance.now() - t0;
 
@@ -804,6 +817,18 @@ export class BuddyAgent {
     });
     if (this.decisionTrace.length > this.MAX_TRACE) {
       this.decisionTrace.shift();
+    }
+
+    // 新增: 将三脑信号回传状态机
+    if (this.sys.conversationSM && conversationContext) {
+      this.sys.conversationSM.receiveBrainSignal({
+        resourceStatus: resources.budgetRemaining <= 0 ? 'exhausted'
+          : resources.budgetRemaining < 0.2 ? 'degraded'
+          : 'sufficient',
+        complexity: signal.complexity,
+        confidence: decision.plan.confidence,
+        deliberationAction: decision.deliberationResult?.action,
+      });
     }
 
     // ── 审议结果处理（Phase 1: 右脑审议环）──

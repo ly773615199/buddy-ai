@@ -214,6 +214,7 @@ export class ThreeBrain {
     signal: TaskSignal,
     resources: ResourceState,
     failureContext?: FailureAnalysis,
+    conversationContext?: import('../core/conversation-state-machine.js').ConversationContext,
   ): Promise<DecisionResult> {
     const t0 = performance.now();
 
@@ -245,6 +246,37 @@ export class ThreeBrain {
     const deliberationResult = await this.deliberation.deliberate(
       input, signal.domains, bodyState, intuition,
     );
+
+    // 新增: 对话阶段影响审议结果
+    if (conversationContext) {
+      // discussing 阶段: 审议不能直接 proceed（还在收集需求）
+      if (conversationContext.phase === 'discussing' &&
+          deliberationResult.action === 'proceed' &&
+          conversationContext.questionsAsked < conversationContext.maxQuestions) {
+        // 不强制覆盖，但记录日志
+        if (this.verbose) {
+          console.log(`[ThreeBrain] 讨论阶段: 审议 proceed 但仍在收集需求 (${conversationContext.questionsAsked}/${conversationContext.maxQuestions})`);
+        }
+      }
+
+      // confirming 阶段: 审议不能 refine（用户已确认方案）
+      if (conversationContext.phase === 'confirming' &&
+          deliberationResult.action === 'refine') {
+        deliberationResult.action = 'proceed';
+        deliberationResult.reasoning = '对话阶段: 用户已确认方案，跳过审议';
+        if (this.verbose) {
+          console.log(`[ThreeBrain] 确认阶段: 覆盖审议 refine → proceed`);
+        }
+      }
+
+      // executing 阶段: 重试时更保守
+      if (conversationContext.phase === 'executing' &&
+          conversationContext.retryCount > 0) {
+        if (this.verbose) {
+          console.log(`[ThreeBrain] 执行重试第 ${conversationContext.retryCount} 次: 更保守的决策`);
+        }
+      }
+    }
 
     if (deliberationResult.action !== 'proceed') {
       const plan: ExecutionPlan = {

@@ -28,6 +28,9 @@ export interface PerceptionState {
   // === 语义向量（可选） ===
   embedding?: Float32Array;     // TextEncoder 输出的池化向量（供下游复用）
 
+  // === 对话上下文（来自状态机） ===
+  conversationContext?: import('./conversation-state-machine.js').ConversationContext;
+
   // === 元信息 ===
   timestamp: number;
   computeMs: number;            // 计算耗时

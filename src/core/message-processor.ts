@@ -162,6 +162,9 @@ export class MessageProcessor {
     messages: Message[];
     recentMessages: Array<{ role: string; content: string; timestamp: number }>;
   }> {
+    // 新增: 超时检查 — executing 阶段超过 5 分钟自动回退
+    this.conversationSM.checkTimeout();
+
     // P0: 投机预执行 — 不等 LLM 决策，立即预取高置信度经验中的只读工具
     this.speculativePrefetch(content).catch((err) => { if (this.verbose) console.debug('[DEBUG] 静默错误:', err?.message ?? err); });
 
@@ -283,6 +286,16 @@ export class MessageProcessor {
       }
       if (smResult.transition && this.verbose) {
         console.log(`  [ConvSM] ${smResult.transition.from} → ${smResult.transition.to}: ${smResult.transition.reason}`);
+      }
+      // 新增: executing 阶段注入重试提示
+      if (smResult.state.phase === 'executing' && smResult.state.retryCount > 0) {
+        budget.add({
+          id: 'retry-hint',
+          source: 'conversation-sm',
+          priority: 83,
+          content: `\n⚠️ 这是第 ${smResult.state.retryCount} 次重试，之前失败了。请检查失败原因，调整方案。`,
+          required: false,
+        });
       }
     } catch (err) {
       if (this.verbose) console.warn('[ConvSM] 状态机错误:', (err as Error).message);
