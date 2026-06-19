@@ -269,27 +269,7 @@ export class MessageProcessor {
     // E3: 静态段使用预序列化缓存（信任度不变时直接复用）
     budget.add({ id: 'static-cached', source: 'cache', priority: PRIORITY.CORE_INSTRUCTION, content: this.contextCache.static.cachedStaticPrompt, required: true });
 
-    // ── 环境感知（静态层，优先级 85 — 高于人格，低于安全指令）───
-    try {
-      const envProbe = this.sys.envProbe;
-      if (envProbe) {
-        // 按任务类型动态选择探测维度
-        const taskType = this.inferTaskType(content);
-        const env = await envProbe.probe(this.config, taskType);
-        const envPrompt = envProbe.toPrompt(env, taskType);
-        budget.add({
-          id: 'environment',
-          source: 'env-probe',
-          priority: 85,
-          content: envPrompt,
-          required: true,
-        });
-      }
-    } catch (err) {
-      if (this.verbose) console.warn('[EnvProbe] 探测失败:', (err as Error).message);
-    }
-
-    // ── 对话状态机（优先级 82 — 略低于环境感知）───
+    // ── 对话状态机（先处理，供 inferTaskType 使用）───
     try {
       const smResult = this.conversationSM.processMessage(content);
       if (smResult.phasePrompt) {
@@ -306,6 +286,26 @@ export class MessageProcessor {
       }
     } catch (err) {
       if (this.verbose) console.warn('[ConvSM] 状态机错误:', (err as Error).message);
+    }
+
+    // ── 环境感知（静态层，优先级 85 — 高于人格，低于安全指令）───
+    try {
+      const envProbe = this.sys.envProbe;
+      if (envProbe) {
+        // 按任务类型动态选择探测维度（此时状态机已更新）
+        const taskType = this.inferTaskType(content);
+        const env = await envProbe.probe(this.config, taskType);
+        const envPrompt = envProbe.toPrompt(env, taskType);
+        budget.add({
+          id: 'environment',
+          source: 'env-probe',
+          priority: 85,
+          content: envPrompt,
+          required: true,
+        });
+      }
+    } catch (err) {
+      if (this.verbose) console.warn('[EnvProbe] 探测失败:', (err as Error).message);
     }
 
     // 动态优先级：根据意图调整各 segment 优先级
