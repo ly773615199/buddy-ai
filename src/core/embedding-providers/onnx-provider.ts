@@ -29,10 +29,12 @@ export class ONNXEmbeddingProvider implements EmbeddingProvider {
   // 模型配置
   private readonly modelId: string;
   private readonly modelDir: string;
+  private readonly verbose: boolean;
 
-  constructor(options?: { modelId?: string; modelDir?: string }) {
+  constructor(options?: { modelId?: string; modelDir?: string; verbose?: boolean }) {
     this.modelId = options?.modelId ?? 'BAAI/bge-small-zh-v1.5';
     this.modelDir = options?.modelDir ?? '';
+    this.verbose = options?.verbose ?? false;
   }
 
   /**
@@ -57,6 +59,16 @@ export class ONNXEmbeddingProvider implements EmbeddingProvider {
       // 配置模型缓存目录
       if (this.modelDir) {
         env.cacheDir = this.modelDir;
+      }
+
+      // 国内镜像支持：优先用 HF_ENDPOINT 环境变量，否则默认 hf-mirror.com
+      if (!env.HF_ENDPOINT && !process.env.HF_ENDPOINT) {
+        // 检测是否需要镜像（简单策略：国内环境默认用镜像）
+        const useMirror = process.env.HF_MIRROR !== '0'; // 默认启用，HF_MIRROR=0 关闭
+        if (useMirror) {
+          env.HF_ENDPOINT = 'https://hf-mirror.com';
+          if (this.verbose) console.log('[ONNXEmbedding] 使用 HuggingFace 国内镜像');
+        }
       }
 
       // 禁用远程模型检查（离线友好）

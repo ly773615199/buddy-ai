@@ -505,7 +505,7 @@ export class Subsystems {
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
     // 注入 embedding 调用器（用于记忆向量检索）
     // 优先级：本地 ONNX → API → TF-IDF 降级
-    const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models') });
+    const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models'), verbose });
     const enhancedTfidf = new EnhancedTfIdf();
 
     // 异步初始化 ONNX（不阻塞启动）
