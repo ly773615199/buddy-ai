@@ -7,6 +7,7 @@
  */
 
 export { ONNXEmbeddingProvider, type EmbeddingProvider } from './onnx-provider.js';
+export { EnhancedTfIdf } from './enhanced-tfidf.js';
 
 /**
  * TF-IDF Embedding 降级方案

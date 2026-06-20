@@ -18,7 +18,7 @@ import { EdgeTTSBackend } from '../voice/edge-tts.js';
 import { STMPStore } from '../memory/stmp.js';
 import { DreamEngine } from '../memory/dream.js';
 import { CognitiveEngine } from '../cognitive/engine.js';
-import { ONNXEmbeddingProvider, TfIdfEmbedding } from './embedding-providers/index.js';
+import { ONNXEmbeddingProvider, EnhancedTfIdf } from './embedding-providers/index.js';
 
 // ==================== TF-IDF Embedding 降级方案 ====================
 // 当无 embedding 模型可用时，使用简单的字符级 TF-IDF 向量作为后备
@@ -506,7 +506,7 @@ export class Subsystems {
     // 注入 embedding 调用器（用于记忆向量检索）
     // 优先级：本地 ONNX → API → TF-IDF 降级
     const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models') });
-    const tfidfFallback = new TfIdfEmbedding(128);
+    const enhancedTfidf = new EnhancedTfIdf();
 
     // 异步初始化 ONNX（不阻塞启动）
     ONNXEmbeddingProvider.canInit().then(canInit => {
@@ -536,9 +536,9 @@ export class Subsystems {
         }
       } catch { /* 降级到下一步 */ }
 
-      // 3. TF-IDF 降级（始终可用）
-      const vector = await tfidfFallback.embed(text);
-      return { vector, dimensions: tfidfFallback.dimensions, model: tfidfFallback.name };
+      // 3. 增强 TF-IDF 降级（始终可用）
+      const vector = enhancedTfidf.embed(text, 512);
+      return { vector, dimensions: 512, model: enhancedTfidf.name };
     });
     // 异步补全缺失的 embedding（不阻塞启动）
     this.memory.embedBatch(50).catch(() => {});
