@@ -129,8 +129,26 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
 
   // 消息内容去重：防止重放消息（无 id）重复追加
   const recentContentRef = useRef<Set<string>>(new Set());
+  // seq 去重：防止同 seq 消息重复处理
+  const seenSeqsRef = useRef<Set<number>>(new Set());
 
   const handleMessage = useCallback((event: BuddyEvent) => {
+    // seq 去重：同一条消息只处理一次
+    const eventSeq = typeof (event as Record<string, unknown>)._replaySeq === 'number'
+      ? (event as Record<string, unknown>)._replaySeq as number
+      : event.seq;
+    if (typeof eventSeq === 'number') {
+      if (seenSeqsRef.current.has(eventSeq)) {
+        return; // 已处理过，跳过
+      }
+      seenSeqsRef.current.add(eventSeq);
+      // 限制集合大小
+      if (seenSeqsRef.current.size > 500) {
+        const seqs = [...seenSeqsRef.current];
+        seenSeqsRef.current = new Set(seqs.slice(-250));
+      }
+    }
+
     // 追踪消息序列号（用于断连恢复）
     if (typeof event.seq === 'number' && event.seq > lastSeqRef.current) {
       lastSeqRef.current = event.seq;
@@ -948,6 +966,10 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
 
       // 连接建立后发送 resume（恢复断连期间的消息）
       if (isConnected && !wasConnected) {
+        // 重连时清空去重集合，避免旧指纹干扰重放消息
+        recentContentRef.current.clear();
+        recentMsgIdsRef.current.clear();
+
         const lastSeq = lastSeqRef.current;
         if (lastSeq > 0 && !hasResumedRef.current) {
           link.send(JSON.stringify({ type: 'resume', lastSeq }), Priority.HIGH);

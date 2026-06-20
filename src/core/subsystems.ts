@@ -18,6 +18,58 @@ import { EdgeTTSBackend } from '../voice/edge-tts.js';
 import { STMPStore } from '../memory/stmp.js';
 import { DreamEngine } from '../memory/dream.js';
 import { CognitiveEngine } from '../cognitive/engine.js';
+
+// ==================== TF-IDF Embedding 降级方案 ====================
+// 当无 embedding 模型可用时，使用简单的字符级 TF-IDF 向量作为后备
+// 不追求语义精度，只保证向量检索不完全失效
+
+const TFIDF_DIM = 128;
+const TFIDF_SEED = 42;
+
+function simpleHash(str: string, seed: number): number {
+  let h = seed;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
+function simpleTfIdfEmbed(text: string, dim: number = TFIDF_DIM): number[] {
+  const vec = new Array<number>(dim).fill(0);
+  // 分词：按字符 bigram + 空格分词
+  const tokens: string[] = [];
+  const chars = text.toLowerCase().split('');
+  for (let i = 0; i < chars.length - 1; i++) {
+    tokens.push(chars[i] + chars[i + 1]);
+  }
+  // 空格分词
+  for (const word of text.toLowerCase().split(/\s+/)) {
+    if (word.length > 1) tokens.push(word);
+  }
+  if (tokens.length === 0) return vec;
+
+  // TF 统计
+  const tf = new Map<string, number>();
+  for (const t of tokens) {
+    tf.set(t, (tf.get(t) ?? 0) + 1);
+  }
+
+  // 哈希到向量
+  for (const [token, count] of tf) {
+    const hash = Math.abs(simpleHash(token, TFIDF_SEED));
+    const idx = hash % dim;
+    const weight = Math.log(1 + count); // log TF
+    vec[idx] += weight;
+  }
+
+  // L2 归一化
+ let norm = 0;
+  for (const v of vec) norm += v * v;
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < dim; i++) vec[i] /= norm;
+
+  return vec;
+}
 import { KnowledgeExtractor } from '../knowledge/extractor.js';
 import { ExperienceEngine, type ToolExecutor } from '../intelligence/index.js';
 import { CrossSessionLearner } from './cross-session-learner.js';
@@ -413,12 +465,23 @@ export class Subsystems {
     // --- 记忆 ---
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
     // 注入 embedding 调用器（用于记忆向量检索）
+    // 优先使用 embedding 模型，失败时降级到 FTS5
     this.memory.setEmbedCaller(async (text: string) => {
-      const result = await this._llm.executeMultimodal('embedding', text);
-      if (result.type !== 'embedding' || !result.embeddings[0]) {
-        throw new Error('Embedding failed');
+      try {
+        const result = await this._llm.executeMultimodal('embedding', text);
+        if (result.type !== 'embedding' || !result.embeddings[0]) {
+          throw new Error('Embedding result empty');
+        }
+        return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
+      } catch (err) {
+        // 降级：使用简单的 TF-IDF 向量（128维）作为后备
+        const msg = (err as Error).message;
+        if (msg.includes('无可用模型') || msg.includes('No available model')) {
+          const vector = simpleTfIdfEmbed(text, 128);
+          return { vector, dimensions: 128, model: 'tfidf-fallback' };
+        }
+        throw err;
       }
-      return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
     });
     // 异步补全缺失的 embedding（不阻塞启动）
     this.memory.embedBatch(50).catch(() => {});
