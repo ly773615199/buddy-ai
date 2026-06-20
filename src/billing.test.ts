@@ -4,20 +4,18 @@ import { PaymentManager } from './billing/payment.js';
 import { EntitlementChecker } from './billing/entitlements.js';
 
 describe('订阅管理', () => {
-  it('Free 计划限制正确', () => {
-    expect(PLAN_LIMITS.free.maxPets).toBe(3);
-    expect(PLAN_LIMITS.free.dailyMessages).toBe(20);
-    expect(PLAN_LIMITS.free.knowledgeExtractionsPerMonth).toBe(50);
-    expect(PLAN_LIMITS.free.canSharePackages).toBe(false);
-    expect(PLAN_LIMITS.free.canUseCloudRetrieval).toBe(false);
-  });
-
-  it('Pro 计划限制正确', () => {
-    expect(PLAN_LIMITS.pro.maxPets).toBe(20);
-    expect(PLAN_LIMITS.pro.dailyMessages).toBe(-1);
-    expect(PLAN_LIMITS.pro.knowledgeExtractionsPerMonth).toBe(-1);
-    expect(PLAN_LIMITS.pro.canSharePackages).toBe(true);
-    expect(PLAN_LIMITS.pro.canUseCloudRetrieval).toBe(true);
+  it('所有计划核心能力全开（不限制）', () => {
+    for (const tier of ['free', 'pro', 'team'] as const) {
+      expect(PLAN_LIMITS[tier].maxPets).toBe(-1);
+      expect(PLAN_LIMITS[tier].dailyMessages).toBe(-1);
+      expect(PLAN_LIMITS[tier].dailyGenerations).toBe(-1);
+      expect(PLAN_LIMITS[tier].maxSkillPackages).toBe(-1);
+      expect(PLAN_LIMITS[tier].knowledgeExtractionsPerMonth).toBe(-1);
+      expect(PLAN_LIMITS[tier].canSharePackages).toBe(true);
+      expect(PLAN_LIMITS[tier].canUseCloudRetrieval).toBe(true);
+      expect(PLAN_LIMITS[tier].availableStyles).toContain('*');
+      expect(PLAN_LIMITS[tier].customVoices).toBe(true);
+    }
   });
 });
 
@@ -81,26 +79,23 @@ describe('权益检查', () => {
     checker = new EntitlementChecker(subManager);
   });
 
-  it('Free 用户不能使用云检索', () => {
-    const result = checker.check('new-user', 'cloud.retrieval');
-    expect(result.allowed).toBe(false);
-  });
-
-  it('Pro 用户可以使用云检索', () => {
-    subManager.createSubscription('pro-user', 'pro');
-    const result = checker.check('pro-user', 'cloud.retrieval');
+  it('所有用户均可使用云检索（不限制）', () => {
+    const result = checker.check('any-user', 'cloud.retrieval');
     expect(result.allowed).toBe(true);
   });
 
-  it('Pro 用户可以使用技能分享', () => {
-    subManager.createSubscription('pro-user', 'pro');
-    const result = checker.check('pro-user', 'skills.share');
+  it('所有用户均可使用技能分享（不限制）', () => {
+    const result = checker.check('any-user', 'skills.share');
     expect(result.allowed).toBe(true);
   });
 
-  it('Free 用户不能使用技能分享', () => {
-    const result = checker.check('free-user', 'skills.share');
-    expect(result.allowed).toBe(false);
+  it('所有功能检查均放行', () => {
+    const features = ['pets.create', 'chat.unlimited', 'generation.unlimited',
+      'skills.share', 'skills.unlimited', 'knowledge.unlimited',
+      'cloud.retrieval', 'styles.all', 'voice.custom'] as const;
+    for (const f of features) {
+      expect(checker.check('any-user', f).allowed).toBe(true);
+    }
   });
 });
 
@@ -187,25 +182,21 @@ describe('订阅生命周期', () => {
     expect(sm.getSubscription('no-such-user')).toBeNull();
   });
 
-  it('消息计数器追踪', () => {
+  it('消息计数器追踪（无限制）', () => {
     sm.createSubscription('u9', 'free');
     const r1 = sm.recordMessage('u9');
     expect(r1.allowed).toBe(true);
-    expect(r1.remaining).toBe(19);
-
-    const r2 = sm.recordMessage('u9');
-    expect(r2.remaining).toBe(18);
+    expect(r1.remaining).toBe(-1);
   });
 
-  it('Free 用户消息超限返回不允许', () => {
+  it('Free 用户消息无限制', () => {
     sm.createSubscription('u10', 'free');
-    // 发送 20 条消息（Free 上限）
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 25; i++) {
       sm.recordMessage('u10');
     }
     const over = sm.recordMessage('u10');
-    expect(over.allowed).toBe(false);
-    expect(over.remaining).toBe(0);
+    expect(over.allowed).toBe(true);
+    expect(over.remaining).toBe(-1);
   });
 
   it('Pro 用户消息无限制', () => {

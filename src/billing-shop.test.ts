@@ -10,16 +10,16 @@ import { ShopCatalog } from './shop/catalog.js';
 import { DEFAULT_LORA_CONFIG, DEFAULT_HYPERPARAMETERS } from './billing/lora-interface.js';
 
 describe('订阅管理', () => {
-  it('Free 计划限制正确', () => {
-    expect(PLAN_LIMITS.free.maxPets).toBe(3);
-    expect(PLAN_LIMITS.free.dailyMessages).toBe(20);
-    expect(PLAN_LIMITS.free.knowledgeExtractionsPerMonth).toBe(50);
-    expect(PLAN_LIMITS.free.canSharePackages).toBe(false);
-    expect(PLAN_LIMITS.free.canUseCloudRetrieval).toBe(false);
+  it('所有计划核心能力全开', () => {
+    expect(PLAN_LIMITS.free.maxPets).toBe(-1);
+    expect(PLAN_LIMITS.free.dailyMessages).toBe(-1);
+    expect(PLAN_LIMITS.free.knowledgeExtractionsPerMonth).toBe(-1);
+    expect(PLAN_LIMITS.free.canSharePackages).toBe(true);
+    expect(PLAN_LIMITS.free.canUseCloudRetrieval).toBe(true);
   });
 
-  it('Pro 计划限制正确', () => {
-    expect(PLAN_LIMITS.pro.maxPets).toBe(20);
+  it('Pro 计划核心能力全开', () => {
+    expect(PLAN_LIMITS.pro.maxPets).toBe(-1);
     expect(PLAN_LIMITS.pro.dailyMessages).toBe(-1);
     expect(PLAN_LIMITS.pro.knowledgeExtractionsPerMonth).toBe(-1);
     expect(PLAN_LIMITS.pro.canSharePackages).toBe(true);
@@ -54,20 +54,17 @@ describe('订阅管理', () => {
     expect(mgr.getUserTier('u1')).toBe('pro'); // 到期前仍为 Pro
   });
 
-  it('消息使用量追踪', () => {
+  it('消息使用量追踪（无限制）', () => {
     const mgr = new SubscriptionManager();
     mgr.createSubscription('u2', 'free');
     const r1 = mgr.recordMessage('u2');
     expect(r1.allowed).toBe(true);
-    expect(r1.remaining).toBe(19);
+    expect(r1.remaining).toBe(-1);
 
-    for (let i = 0; i < 18; i++) mgr.recordMessage('u2');
-    const r20 = mgr.recordMessage('u2');
-    expect(r20.allowed).toBe(true);
-    expect(r20.remaining).toBe(0);
-
-    const r21 = mgr.recordMessage('u2');
-    expect(r21.allowed).toBe(false);
+    for (let i = 0; i < 25; i++) mgr.recordMessage('u2');
+    const r2 = mgr.recordMessage('u2');
+    expect(r2.allowed).toBe(true);
+    expect(r2.remaining).toBe(-1);
   });
 
   it('试用期状态', () => {
@@ -139,21 +136,20 @@ describe('支付集成', () => {
 });
 
 describe('权益检查', () => {
-  it('Free 用户功能限制', () => {
+  it('所有用户功能全开', () => {
     const mgr = new SubscriptionManager();
     const checker = new EntitlementChecker(mgr);
     mgr.createSubscription('free', 'free');
 
     const chat = checker.check('free', 'chat.unlimited');
     expect(chat.allowed).toBe(true);
-    expect(chat.remaining).toBe(20);
+    expect(chat.remaining).toBe(-1);
 
     const share = checker.check('free', 'skills.share');
-    expect(share.allowed).toBe(false);
-    expect(share.upgradeRequired).toBe('pro');
+    expect(share.allowed).toBe(true);
 
     const cloud = checker.check('free', 'cloud.retrieval');
-    expect(cloud.allowed).toBe(false);
+    expect(cloud.allowed).toBe(true);
   });
 
   it('Pro 用户功能解锁', () => {
@@ -184,13 +180,12 @@ describe('权益检查', () => {
     expect(quotas[0].feature).toBe('messages');
   });
 
-  it('升级提示', () => {
+  it('升级提示（全开后为空）', () => {
     const mgr = new SubscriptionManager();
     const checker = new EntitlementChecker(mgr);
     mgr.createSubscription('free', 'free');
     const prompt = checker.getUpgradePrompt('free', 'skills.share');
-    expect(prompt.length).toBeGreaterThan(0);
-    expect(prompt).toContain('Pro');
+    expect(prompt).toBe(''); // 全开后无需升级提示
   });
 });
 

@@ -625,15 +625,9 @@ export class WSHandler {
     this.syncPersonalityToEmotion();
     this.broadcastEmotion();
 
-    // 订阅限制
+    // 记录用量（不限制）
     const userId = 'local';
-    const msgQuota = this.sys.subscriptionManager.recordMessage(userId);
-    if (!msgQuota.allowed) {
-      const prompt = this.sys.entitlementChecker.getUpgradePrompt(userId, 'chat.unlimited');
-      this.eventBus?.emit({ type: 'bubble', text: prompt || '今日消息数已用完' });
-      this.taskQueue.release(taskId);
-      return;
-    }
+    this.sys.subscriptionManager.recordMessage(userId);
 
     let promptTokens = 0;
     try {

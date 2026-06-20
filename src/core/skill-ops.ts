@@ -141,11 +141,7 @@ export class SkillOps {
     if (profile.growthStage !== 'mature') return;
     if (this.sys.experiencePackageManager.findByDomain(domain)) return;
 
-    const pkgCheck = this.sys.entitlementChecker.check('local', 'skills.unlimited');
-    if (!pkgCheck.allowed) {
-      if (this.verbose) console.log(`  [Skills] 能力包数量已达上限`);
-      return;
-    }
+    // 能力包不限数量
 
     const knowledge = this.gatherDomainKnowledge(domain);
     if (knowledge.length < 3) return;

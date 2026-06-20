@@ -79,40 +79,23 @@ export interface PaymentMethodInfo {
 
 // ── 计划定义 ──
 
+// 能力全开 — 核心功能不设限，变现走商城/皮肤/赛季
+const UNLIMITED_LIMITS: PlanLimits = {
+  maxPets: -1,
+  dailyMessages: -1,
+  dailyGenerations: -1,
+  maxSkillPackages: -1,
+  knowledgeExtractionsPerMonth: -1,
+  canSharePackages: true,
+  canUseCloudRetrieval: true,
+  availableStyles: ['*'],
+  customVoices: true,
+};
+
 export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
-  free: {
-    maxPets: 3,
-    dailyMessages: 20,
-    dailyGenerations: 3,
-    maxSkillPackages: 3,
-    knowledgeExtractionsPerMonth: 50,
-    canSharePackages: false,
-    canUseCloudRetrieval: false,
-    availableStyles: ['pixel', 'cartoon', 'watercolor', 'chibi'],
-    customVoices: false,
-  },
-  pro: {
-    maxPets: 20,
-    dailyMessages: -1,
-    dailyGenerations: -1,
-    maxSkillPackages: -1,
-    knowledgeExtractionsPerMonth: -1,
-    canSharePackages: true,
-    canUseCloudRetrieval: true,
-    availableStyles: ['*'],
-    customVoices: true,
-  },
-  team: {
-    maxPets: 50,
-    dailyMessages: -1,
-    dailyGenerations: -1,
-    maxSkillPackages: -1,
-    knowledgeExtractionsPerMonth: -1,
-    canSharePackages: true,
-    canUseCloudRetrieval: true,
-    availableStyles: ['*'],
-    customVoices: true,
-  },
+  free: { ...UNLIMITED_LIMITS },
+  pro: { ...UNLIMITED_LIMITS },
+  team: { ...UNLIMITED_LIMITS },
 };
 
 export const PLAN_PRICING: Record<PlanTier, { monthly: number; yearly: number; currency: string }> = {

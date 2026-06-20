@@ -45,33 +45,9 @@ export class EntitlementChecker {
     this.subManager = subManager;
   }
 
-  /** 检查功能权限 */
-  check(userId: string, feature: FeatureKey): EntitlementCheck {
-    const tier = this.subManager.getUserTier(userId);
-    const limits = this.subManager.getUserLimits(userId);
-
-    switch (feature) {
-      case 'pets.create':
-        return this.checkPetCreate(userId, limits, tier);
-      case 'chat.unlimited':
-        return this.checkChat(userId, limits, tier);
-      case 'generation.unlimited':
-        return this.checkGeneration(userId, limits, tier);
-      case 'skills.share':
-        return { allowed: limits.canSharePackages, reason: limits.canSharePackages ? undefined : 'Pro 订阅可分享能力包', upgradeRequired: 'pro' };
-      case 'skills.unlimited':
-        return this.checkSkillPackages(userId, limits, tier);
-      case 'knowledge.unlimited':
-        return this.checkExtraction(userId, limits, tier);
-      case 'cloud.retrieval':
-        return { allowed: limits.canUseCloudRetrieval, reason: limits.canUseCloudRetrieval ? undefined : 'Pro 订阅可用云端增强检索', upgradeRequired: 'pro' };
-      case 'styles.all':
-        return { allowed: limits.availableStyles.includes('*'), reason: 'Pro 订阅解锁全部风格', upgradeRequired: 'pro' };
-      case 'voice.custom':
-        return { allowed: limits.customVoices, reason: limits.customVoices ? undefined : 'Pro 订阅可自定义音色', upgradeRequired: 'pro' };
-      default:
-        return { allowed: true };
-    }
+  /** 检查功能权限 — 核心能力全开，不限制 */
+  check(_userId: string, _feature: FeatureKey): EntitlementCheck {
+    return { allowed: true, remaining: -1 };
   }
 
   /** 检查多个功能 */

@@ -14,19 +14,19 @@ describe('SubscriptionManager 补充', () => {
   });
 
   describe('recordExtraction() 知识提取计数', () => {
-    it('Free 用户有月度提取限制', () => {
+    it('所有用户提取无限制', () => {
       sm.createSubscription('u1', 'free');
       const r = sm.recordExtraction('u1');
       expect(r.allowed).toBe(true);
-      expect(r.remaining).toBe(49); // 50 - 1
+      expect(r.remaining).toBe(-1);
     });
 
-    it('Free 用户提取超限返回不允许', () => {
+    it('Free 用户提取永不限制', () => {
       sm.createSubscription('u2', 'free');
-      for (let i = 0; i < 50; i++) sm.recordExtraction('u2');
+      for (let i = 0; i < 100; i++) sm.recordExtraction('u2');
       const over = sm.recordExtraction('u2');
-      expect(over.allowed).toBe(false);
-      expect(over.remaining).toBe(0);
+      expect(over.allowed).toBe(true);
+      expect(over.remaining).toBe(-1);
     });
 
     it('Pro 用户提取无限制', () => {
@@ -38,9 +38,9 @@ describe('SubscriptionManager 补充', () => {
   });
 
   describe('checkFeature() 功能权限检查', () => {
-    it('布尔类型功能：Free canSharePackages = false', () => {
+    it('布尔类型功能：Free canSharePackages = true（全开）', () => {
       sm.createSubscription('u1', 'free');
-      expect(sm.checkFeature('u1', 'canSharePackages')).toBe(false);
+      expect(sm.checkFeature('u1', 'canSharePackages')).toBe(true);
     });
 
     it('布尔类型功能：Pro canSharePackages = true', () => {
@@ -58,8 +58,8 @@ describe('SubscriptionManager 补充', () => {
       expect(sm.checkFeature('u4', 'dailyMessages')).toBe(true);
     });
 
-    it('不存在的用户返回 free 默认值', () => {
-      expect(sm.checkFeature('ghost', 'canSharePackages')).toBe(false);
+    it('不存在的用户也全开', () => {
+      expect(sm.checkFeature('ghost', 'canSharePackages')).toBe(true);
     });
   });
 
