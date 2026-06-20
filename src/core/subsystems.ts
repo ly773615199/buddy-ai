@@ -497,7 +497,12 @@ export class Subsystems {
       } catch (err) {
         // 降级：使用简单的 TF-IDF 向量（128维）作为后备
         const msg = (err as Error).message;
-        if (msg.includes('无可用模型') || msg.includes('No available model')) {
+        // 所有 embedding 失败都降级到 TF-IDF，不只是“无可用模型”
+        const isEmbedFail = msg.includes('无可用模型') || msg.includes('No available model')
+          || msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('401')
+          || msg.includes('403') || msg.includes('404') || msg.includes('timeout')
+          || msg.includes('aborted') || msg.includes('Embedding result empty');
+        if (isEmbedFail) {
           const vector = simpleTfIdfEmbed(text, 128);
           return { vector, dimensions: 128, model: 'tfidf-fallback' };
         }
