@@ -143,7 +143,7 @@ describe('LLMAdapter', () => {
 
     it('write_file 类型提取路径和字节数', () => {
       const compress = getCompressor();
-      const content = '已写入 /tmp/test.txt，1234 字节';
+      const content = '✅ 已写入 /tmp/test.txt（1234 字节）';
       const result = compress(content, 'write_file');
       expect(result).toContain('/tmp/test.txt');
       expect(result).toContain('1234');

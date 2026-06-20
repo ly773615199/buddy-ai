@@ -11,7 +11,7 @@ import { createHash } from 'crypto';
 
 const EVENT_BUFFER_SIZE = 100;
 const PROCESSED_MSG_MAX_AGE_MS = 300_000; // 5 分钟清理已处理消息
-const REPLAY_BUFFER_SIZE = 50;            // 重放缓冲区最大消息数
+const REPLAY_BUFFER_SIZE = 20;            // 重放缓冲区最大消息数（从 50 降到 20，减少重放风暴）
 const REPLAY_BUFFER_MAX_AGE_MS = 300_000; // 重放缓冲区消息最大存活 5 分钟
 
 // ==================== 重放缓冲区项 ====================

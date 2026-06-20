@@ -181,10 +181,10 @@ export const write_file: ToolDef = {
       // Task 7.1: 写入后清除该文件的 read_file 缓存
       globalToolCache.invalidate('read_file', { path: filePath });
       globalToolCache.invalidate('read_file', { path: resolved });
-      return `[已写入 ${resolved}，${content.length} 字节]`;
+      return `✅ 已写入 ${resolved}（${content.length} 字节）`;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      return `[写入失败: ${msg}]`;
+      return `❌ 写入失败: ${msg}`;
     }
   },
 };

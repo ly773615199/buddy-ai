@@ -149,6 +149,7 @@ import { ConversationStateMachine } from './conversation-state-machine.js';
  */
 export class Subsystems {
   private _llm: LLMAdapter;
+  private _staticEmbedProfile: Record<string, unknown> | null = null;
   get llm(): LLMAdapter { return this._llm; }
   /** Phase 5: 直接暴露 ModelRouter，避免上层通过 llm 间接访问 */
   get router() { return this._llm.getRouter(); }
@@ -303,6 +304,26 @@ export class Subsystems {
 
     // 统一模型池 — 始终创建，确保首次配置 API 端点时 getUnifiedPool() 不返回 null
     const pool = new ModelPool(null, dataDir, decisionRecorder);
+
+    // 注册静态 embedding 模型（不依赖 API 发现）
+    // 当 SiliconFlow API 未返回 embedding 模型时，手动注入
+    this._staticEmbedProfile = {
+      id: 'siliconflow/BAAI/bge-small-zh-v1.5',
+      displayName: 'BGE Small ZH (SF)',
+      platform: 'siliconflow',
+      category: 'embedding',
+      pipelineTag: 'feature-extraction',
+      tier: 'free',
+      capabilities: { embedding: true, chinese: 0.95, streaming: false },
+      costPer1kInput: 0,
+      costPer1kOutput: 0,
+      pricingSource: 'static' as const,
+      maxContextTokens: 512,
+      maxOutputTokens: 0,
+      derived: { chatCapable: false, toolCapable: false, embedCapable: true, visionCapable: false },
+      lastSeen: Date.now(),
+    };
+    pool.addProfile(this._staticEmbedProfile as any);
     if (config.models?.preferences) {
       const prefs = config.models.preferences;
       pool.updatePreferences({

@@ -295,6 +295,24 @@ const MODEL_KNOWLEDGE: ModelKnowledgeEntry[] = [
     capabilities: { reasoning: 0.85, code: 0.88, chinese: 0.90, english: 0.80, math: 0.85, creative: 0.78, toolCalling: true, toolCallingMode: 'native', vision: true, streaming: true },
   },
 
+  // ── Embedding 模型 ──
+  {
+    id: 'siliconflow/BAAI/bge-small-zh-v1.5',
+    displayName: 'BGE Small ZH (SF)',
+    tier: 'free',
+    capabilities: { embedding: true, chinese: 0.95, dimensions: 512 },
+    category: 'embedding',
+    pipelineTag: 'feature-extraction',
+  },
+  {
+    id: 'BAAI/bge-small-zh-v1.5',
+    displayName: 'BGE Small ZH (Local)',
+    tier: 'free',
+    capabilities: { embedding: true, chinese: 0.95, dimensions: 512 },
+    category: 'embedding',
+    pipelineTag: 'feature-extraction',
+  },
+
   // ── 硅基流动免费模型 ──
   {
     id: 'siliconflow/Qwen2.5-7B-Instruct',
