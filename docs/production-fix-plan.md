@@ -210,9 +210,11 @@ private scheduleReconnect(): void {
 
 当前状态:FTS5 + TF-IDF 在工作(40%),embedding 通道空转(60% 失效)。
 
-#### 架构原则:三脑统一掌控
+#### 设计原则
 
-Embedding 不是独立的决策层。它和 LLM 选择、工具调度一样,是**左脑调度器的执行节点**:
+**原则 1:三脑统一掌控**
+
+Embedding 不是独立的决策层,是左脑调度器的执行节点:
 
 ```
 外部输入 → 小脑(感知融合) → 右脑(直觉预测) → 左脑(规则+调度) → 执行
@@ -222,11 +224,30 @@ Embedding 不是独立的决策层。它和 LLM 选择、工具调度一样,是*
                                               └─ Embedding 选择(新增)
 ```
 
-三脑根据当前状态(资源可用性、质量、延迟、成本)决定用哪个 embedding provider,就像决定用哪个 LLM 一样。
+**原则 2:混合检索永久双互补**
 
-#### 方案:embedding 作为模型池的一部分
+不追求"用 embedding 淘汰 TF-IDF"。两路永久共存,各有所长:
 
-不新建独立的 EmbeddingEngine,而是将 embedding 模型纳入现有**模型池 + 模型路由**体系:
+```
+Embedding(稠密向量)  → 语义理解: "开心" ↔ "快乐", "bug" ↔ "错误"
+TF-IDF(稀疏向量)    → 精确匹配: "ws-handler.ts", "632", "v2.5", 文件名, 编号
+```
+
+Buddy 的使用场景中,用户既有自然语言(需要语义),也有代码/文件名/技术术语(需要精确)。两路互补,永久保留。
+
+**原则 3:渐进式落地,不追求一步到位**
+
+```
+阶段一(当前): 用预训练模型直接落地 → 够用
+阶段二(未来): 积累数据后评估是否需要微调 → 单用户数据量不够 LoRA,暂不做
+阶段三(远期): 如有跨语言/垂直领域需求再考虑 → 当前无需求
+```
+
+Buddy 是单用户个人助手,不是企业知识库。记忆条目是短文本(50-200 字),不需要 8K 长文本支持。预训练模型完全够用。
+
+#### 架构:embedding 纳入模型池
+
+不新建独立的 EmbeddingEngine,复用现有模型池 + 路由体系:
 
 ```
 ModelPool
@@ -236,28 +257,25 @@ ModelPool
 └─ embedding 模型(bge-small-zh, ...)← 新增
 ```
 
-**优势**:
-- 复用现有的模型池过滤、Thompson Sampling 选择、失败降级机制
-- 三脑的 NN 决策可以学习哪个 embedding provider 在什么场景下最优
-- 不引入新的架构层,保持统一控制
-
 #### Provider 清单
 
 | Provider | 类型 | 质量 | 延迟 | 成本 | 条件 |
 |----------|------|------|------|------|------|
 | SiliconFlow BAAI/bge-small-zh-v1.5 | API | ★★★★ | ~100ms | 免费 | 需 API Key |
-| 本地 ONNX bge-small-zh | 本地 | ★★★★ | ~50ms | 免费 | 需 ~200MB 内存 |
-| TF-IDF 降级 | 本地 | ★★ | ~1ms | 免费 | 始终可用 |
+| 本地 ONNX bge-small-zh | 本地 | ★★★★ | ~50ms | 免费 | 需 ~50MB 模型 + ~200MB 内存 |
+| TF-IDF 降级(永久保留) | 本地 | ★★ | ~1ms | 免费 | 始终可用,精确匹配兜底 |
+
+注:选用 bge-small-zh-v1.5 而非 BGE-M3。原因:单用户桌面场景,50MB 模型比 500MB 更合适;无跨语言需求。
 
 #### 实施步骤
 
-**Step 1:注册 embedding 模型到模型池**
+**Step 1:注册 embedding 模型到模型池(2h)**
 
 | 改动 | 文件 |
 |------|------|
 | 在模型知识中添加 bge-small-zh 条目 | `src/core/model-knowledge.ts` |
 | 在模型发现中支持 embedding 类型识别 | `src/core/model-discovery.ts` |
-| 模型池 Layer 0 的 `embedCapable` 过滤保留,但确保 embedding 模型能通过 | `src/core/model-pool.ts` |
+| 模型池 Layer 0 确保 embedding 模型能通过 `embedCapable` 过滤 | `src/core/model-pool.ts` |
 
 ```typescript
 // model-knowledge.ts
@@ -269,28 +287,22 @@ ModelPool
 }
 ```
 
-**Step 2:embedding 调用走统一的模型路由**
+**Step 2:embedding 调用走统一的模型路由(2h)**
 
 | 改动 | 文件 |
 |------|------|
-| `executeMultimodal('embedding', text)` 走模型池选择,而非直接调 embedCaller | `src/core/llm.ts` |
-| 模型路由对 embedding 任务做 fallback:API → 本地 ONNX → TF-IDF | `src/core/model-router.ts` |
+| `executeMultimodal('embedding', text)` 走模型池选择 | `src/core/llm.ts` |
+| 模型路由 fallback:API → 本地 ONNX → TF-IDF | `src/core/model-router.ts` |
 
 ```typescript
-// 当前:subsystems.ts 直接注入 embedCaller
+// subsystems.ts — 路由自动选择最优 provider
 this.memory.setEmbedCaller(async (text) => {
-  return this._llm.executeMultimodal('embedding', text);
-});
-
-// 改为:路由自动选择最优 provider
-this.memory.setEmbedCaller(async (text) => {
-  // 模型池已按 taskType=embedding 过滤,路由自动选最优
   const result = await this._llm.executeMultimodal('embedding', text);
   return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model };
 });
 ```
 
-**Step 3:本地 ONNX provider(可选,后续增强)**
+**Step 3:本地 ONNX provider — 可选后续增强(3h)**
 
 ```bash
 npm install @huggingface/transformers
@@ -306,10 +318,8 @@ export class ONNXEmbeddingProvider {
   private pipe: any;
 
   async init() {
-    // 首次运行自动下载模型到 ~/.buddy/models/
     this.pipe = await pipeline('feature-extraction', 'BAAI/bge-small-zh-v1.5', {
-      device: 'cpu',
-      dtype: 'fp32',
+      device: 'cpu', dtype: 'fp32',
     });
   }
 
@@ -320,27 +330,27 @@ export class ONNXEmbeddingProvider {
 }
 ```
 
-注册到模型池后,三脑路由会自动在 API provider 和本地 provider 之间选择。
+注册到模型池后,三脑路由自动在 API 和本地 provider 之间选择。
 
-**Step 4:用户配置**
+**Step 4:用户配置 + 前端界面(1h)**
 
 - 有 SiliconFlow Key → 自动发现 bge-small-zh,走 API
 - 无 Key 但安装了 ONNX → 走本地模型
-- 都没有 → 降级 TF-IDF(当前状态)
+- 都没有 → 降级 TF-IDF(当前状态,永久保留)
 
 #### 决策流(三脑视角)
 
 ```
-记忆写入请求
+记忆写入/检索请求
   ↓
 小脑:感知当前资源状态(API 可用?本地模型已加载?)
   ↓
-右脑:直觉预测(哪种 provider 质量更好?历史成功率?)
+右脑:直觉预测(哪种 provider 历史成功率高?)
   ↓
 左脑:规则调度
   ├─ 规则 1:有 API Key 且可用 → 用 API provider
   ├─ 规则 2:无 API 但有本地模型 → 用 ONNX provider
-  ├─ 规则 3:都不可用 → 用 TF-IDF 降级
+  ├─ 规则 3:都不可用 → 用 TF-IDF 降级(永久兜底)
   └─ Thompson Sampling:同级 provider 中选最优
   ↓
 执行 → 结果反馈给三脑(更新成功率、延迟统计)
@@ -352,7 +362,7 @@ export class ONNXEmbeddingProvider {
 |------|------|--------|------|
 | 1 | 模型池注册 embedding 模型 | 2h | 低 |
 | 2 | 调用走统一路由 | 2h | 低 |
-| 3 | 本地 ONNX provider | 3h | 中(依赖安装) |
+| 3 | 本地 ONNX provider(可选) | 3h | 中(依赖安装) |
 | 4 | 前端配置界面 | 1h | 低 |
 | **合计** | | **8h** | |
 
