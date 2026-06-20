@@ -150,7 +150,7 @@ import { ConversationStateMachine } from './conversation-state-machine.js';
  */
 export class Subsystems {
   private _llm: LLMAdapter;
-  private _staticEmbedProfile: Record<string, unknown> | null = null;
+  private _embedModels: string[] = [];
   get llm(): LLMAdapter { return this._llm; }
   /** Phase 5: 直接暴露 ModelRouter，避免上层通过 llm 间接访问 */
   get router() { return this._llm.getRouter(); }
@@ -306,25 +306,42 @@ export class Subsystems {
     // 统一模型池 — 始终创建，确保首次配置 API 端点时 getUnifiedPool() 不返回 null
     const pool = new ModelPool(null, dataDir, decisionRecorder);
 
-    // 注册静态 embedding 模型（不依赖 API 发现）
-    // 当 SiliconFlow API 未返回 embedding 模型时，手动注入
-    this._staticEmbedProfile = {
-      id: 'siliconflow/BAAI/bge-small-zh-v1.5',
-      displayName: 'BGE Small ZH (SF)',
-      platform: 'siliconflow',
-      category: 'embedding',
-      pipelineTag: 'feature-extraction',
-      tier: 'free',
-      capabilities: { embedding: true, chinese: 0.95, streaming: false },
-      costPer1kInput: 0,
-      costPer1kOutput: 0,
-      pricingSource: 'static' as const,
-      maxContextTokens: 512,
-      maxOutputTokens: 0,
-      derived: { chatCapable: false, toolCapable: false, embedCapable: true, visionCapable: false },
-      lastSeen: Date.now(),
+    // 动态注册 embedding 模型到模型池
+    // 根据用户已配置的 provider 自动注册对应 embedding 模型
+    // 不绑定特定平台，任何支持 /v1/embeddings 的 provider 都行
+    this._embedModels = [];
+    const providers = config.models?.providers ?? [];
+    const EMBED_MODEL_MAP: Record<string, { id: string; displayName: string }> = {
+      siliconflow: { id: 'BAAI/bge-small-zh-v1.5', displayName: 'BGE Small ZH (SF)' },
+      openai: { id: 'text-embedding-3-small', displayName: 'Embedding 3 Small' },
+      deepseek: { id: 'deepseek-embedding', displayName: 'DeepSeek Embedding' },
+      custom: { id: 'text-embedding-3-small', displayName: 'Embedding (Custom)' },
     };
-    pool.addProfile(this._staticEmbedProfile as any);
+    for (const p of providers) {
+      const embedInfo = EMBED_MODEL_MAP[p.type] ?? EMBED_MODEL_MAP['custom'];
+      if (embedInfo) {
+        const fullId = `${p.id}/${embedInfo.id}`;
+        const profile = {
+          id: fullId,
+          displayName: embedInfo.displayName,
+          platform: p.id,
+          category: 'embedding',
+          pipelineTag: 'feature-extraction',
+          tier: 'free' as const,
+          capabilities: { embedding: true, chinese: 0.95, streaming: false },
+          costPer1kInput: 0,
+          costPer1kOutput: 0,
+          pricingSource: 'static' as const,
+          maxContextTokens: 512,
+          maxOutputTokens: 0,
+          derived: { chatCapable: false, toolCapable: false, embedCapable: true, visionCapable: false },
+          lastSeen: Date.now(),
+        };
+        pool.addProfile(profile as any);
+        this._embedModels.push(fullId);
+        if (verbose) console.log(`[Embedding] 注册模型: ${fullId} (${p.type})`);
+      }
+    }
     if (config.models?.preferences) {
       const prefs = config.models.preferences;
       pool.updatePreferences({
