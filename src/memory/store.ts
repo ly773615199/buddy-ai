@@ -71,6 +71,22 @@ const MEMORY_MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    description: '对话摘要表',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL DEFAULT 'default',
+          summary TEXT NOT NULL,
+          message_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_session ON conversation_summaries(session_id);
+      `);
+    },
+  },
 ];
 
 /**

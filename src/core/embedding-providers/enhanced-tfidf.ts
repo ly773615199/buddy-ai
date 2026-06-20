@@ -320,6 +320,11 @@ export class EnhancedTfIdf {
   private stats: BM25Stats = { avgDocLen: 0, docCount: 0, docFreq: new Map() };
   private dirty = true;
 
+  // 自动同义词发现：动态学习的同义词表
+  private learnedSynonyms = new Map<string, string[]>();
+  // 共现计数：token 对在同一文档中出现的次数
+  private cooccurrence = new Map<string, Map<string, number>>();
+
   /**
    * 添加或更新文档
    */
@@ -332,6 +337,13 @@ export class EnhancedTfIdf {
       this.documents.push({ key, value, tokens });
     }
     this.dirty = true;
+
+    // 自动同义词学习
+    this.learnFromDocument(value);
+    // 每 100 个文档触发一次同义词发现
+    if (this.documents.length % 100 === 0) {
+      this.discoverSynonyms();
+    }
   }
 
   /**
@@ -369,7 +381,7 @@ export class EnhancedTfIdf {
     if (queryTokens.length === 0) return [];
 
     // 同义词扩展查询
-    const expandedQuery = expandSynonyms(queryTokens);
+    const expandedQuery = expandSynonyms(queryTokens, this.learnedSynonyms);
 
     const results: SearchResult[] = [];
 
@@ -441,6 +453,97 @@ export class EnhancedTfIdf {
     return this.documents.length;
   }
 
+  // ==================== 自动同义词发现 ====================
+
+  /**
+   * 从新文档中学习同义词
+   *
+   * 策略：频繁共现的 token 对可能是同义词。
+   * 如果两个 token 在同一文档中出现次数 > 阈值，
+   * 且它们不在停用词表中，则认为可能是同义词。
+   */
+  learnFromDocument(text: string): void {
+    const tokens = enhancedTokenize(text);
+    const uniqueTokens = [...new Set(tokens.map(t => t.token))].filter(
+      t => !STOP_WORDS.has(t) && t.length >= 2
+    );
+
+    // 更新共现计数
+    for (let i = 0; i < uniqueTokens.length; i++) {
+      for (let j = i + 1; j < uniqueTokens.length; j++) {
+        const t1 = uniqueTokens[i];
+        const t2 = uniqueTokens[j];
+
+        if (!this.cooccurrence.has(t1)) this.cooccurrence.set(t1, new Map());
+        if (!this.cooccurrence.has(t2)) this.cooccurrence.set(t2, new Map());
+
+        const map1 = this.cooccurrence.get(t1)!;
+        map1.set(t2, (map1.get(t2) ?? 0) + 1);
+
+        const map2 = this.cooccurrence.get(t2)!;
+        map2.set(t1, (map2.get(t1) ?? 0) + 1);
+      }
+    }
+  }
+
+  /**
+   * 从共现模式中发现同义词
+   *
+   * 触发条件：每 100 个文档调用一次
+   * 规则：如果 token A 和 token B 共现次数 > 5，
+   *       且 A 和 B 在相似上下文中（共现邻居重叠率 > 0.3），
+   *       则认为 A 和 B 可能是同义词。
+   */
+  discoverSynonyms(): Map<string, string[]> {
+    const THRESHOLD = 5;
+    const OVERLAP_THRESHOLD = 0.3;
+    const discovered = new Map<string, string[]>();
+
+    for (const [token, neighbors] of this.cooccurrence) {
+      for (const [candidate, count] of neighbors) {
+        if (count < THRESHOLD) continue;
+        if (token === candidate) continue;
+
+        // 检查共现邻居重叠率
+        const tokenNeighbors = this.cooccurrence.get(token)!;
+        const candidateNeighbors = this.cooccurrence.get(candidate)!;
+
+        let overlap = 0;
+        let total = 0;
+        for (const [n, _] of tokenNeighbors) {
+          if (n === candidate) continue;
+          total++;
+          if (candidateNeighbors.has(n)) overlap++;
+        }
+
+        const overlapRate = total > 0 ? overlap / total : 0;
+        if (overlapRate >= OVERLAP_THRESHOLD) {
+          // 发现同义词
+          if (!discovered.has(token)) discovered.set(token, []);
+          discovered.get(token)!.push(candidate);
+
+          // 同时加入静态同义词表
+          if (!this.learnedSynonyms.has(token)) this.learnedSynonyms.set(token, []);
+          const existing = this.learnedSynonyms.get(token)!;
+          if (!existing.includes(candidate)) existing.push(candidate);
+        }
+      }
+    }
+
+    if (discovered.size > 0) {
+      this.dirty = true; // 触发统计重建
+    }
+
+    return discovered;
+  }
+
+  /**
+   * 获取已学习的同义词
+   */
+  getLearnedSynonyms(): Map<string, string[]> {
+    return new Map(this.learnedSynonyms);
+  }
+
   // ==================== 内部方法 ====================
 
   private rebuildStats(): void {
@@ -452,13 +555,23 @@ export class EnhancedTfIdf {
 
 // ==================== 辅助函数 ====================
 
-function expandSynonyms(tokens: TokenInfo[]): TokenInfo[] {
+function expandSynonyms(tokens: TokenInfo[], learnedSynonyms?: Map<string, string[]>): TokenInfo[] {
   const result = [...tokens];
   for (const t of tokens) {
+    // 静态同义词
     const synonyms = SYNONYM_MAP[t.token];
     if (synonyms) {
       for (const syn of synonyms) {
         result.push({ token: syn, isTech: false, isSynonym: true, sourceToken: t.token });
+      }
+    }
+    // 动态学习的同义词
+    if (learnedSynonyms) {
+      const learned = learnedSynonyms.get(t.token);
+      if (learned) {
+        for (const syn of learned) {
+          result.push({ token: syn, isTech: false, isSynonym: true, sourceToken: t.token });
+        }
       }
     }
   }

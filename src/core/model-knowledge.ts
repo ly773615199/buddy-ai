@@ -34,10 +34,18 @@ interface ModelKnowledgeEntry {
     toolCallingMode: 'native' | 'prompt' | 'none';
     vision: boolean;
     streaming: boolean;
+    /** 是否为 embedding 模型 */
+    embedding?: boolean;
+    /** embedding 维度 */
+    dimensions?: number;
   };
   /** Task 8.2: 上下文窗口大小（token 数），供 provider-adapter 动态查询 */
   contextWindow?: number;
   notes?: string;
+  /** 模型类别 */
+  category?: string;
+  /** HuggingFace pipeline tag */
+  pipelineTag?: string;
 }
 
 // ==================== 静态知识表 ====================
@@ -300,7 +308,7 @@ const MODEL_KNOWLEDGE: ModelKnowledgeEntry[] = [
     id: 'siliconflow/BAAI/bge-small-zh-v1.5',
     displayName: 'BGE Small ZH (SF)',
     tier: 'free',
-    capabilities: { embedding: true, chinese: 0.95, dimensions: 512 },
+    capabilities: { reasoning: 0, code: 0, chinese: 0.95, english: 0, math: 0, creative: 0, toolCalling: false, toolCallingMode: 'none', vision: false, streaming: false, embedding: true, dimensions: 512 },
     category: 'embedding',
     pipelineTag: 'feature-extraction',
   },
@@ -308,7 +316,7 @@ const MODEL_KNOWLEDGE: ModelKnowledgeEntry[] = [
     id: 'BAAI/bge-small-zh-v1.5',
     displayName: 'BGE Small ZH (Local)',
     tier: 'free',
-    capabilities: { embedding: true, chinese: 0.95, dimensions: 512 },
+    capabilities: { reasoning: 0, code: 0, chinese: 0.95, english: 0, math: 0, creative: 0, toolCalling: false, toolCallingMode: 'none', vision: false, streaming: false, embedding: true, dimensions: 512 },
     category: 'embedding',
     pipelineTag: 'feature-extraction',
   },

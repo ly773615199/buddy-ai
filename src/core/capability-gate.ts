@@ -24,6 +24,10 @@ export interface CapabilityDef {
   sensory?: boolean;
   /** 能力描述（用于确认对话框） */
   description?: string;
+  /** 发现阶段 */
+  stage?: string;
+  /** 前置条件 */
+  requires?: string[];
 }
 
 // ==================== 功能开放表（全量可用，风险分级） ====================

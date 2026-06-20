@@ -18,7 +18,7 @@ import { EdgeTTSBackend } from '../voice/edge-tts.js';
 import { STMPStore } from '../memory/stmp.js';
 import { DreamEngine } from '../memory/dream.js';
 import { CognitiveEngine } from '../cognitive/engine.js';
-import { ONNXEmbeddingProvider, EnhancedTfIdf } from './embedding-providers/index.js';
+import { ONNXEmbeddingProvider, ByteEncoderEmbeddingProvider, EnhancedTfIdf } from './embedding-providers/index.js';
 
 // ==================== TF-IDF Embedding 降级方案 ====================
 // 当无 embedding 模型可用时，使用简单的字符级 TF-IDF 向量作为后备
@@ -504,8 +504,9 @@ export class Subsystems {
     // --- 记忆 ---
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
     // 注入 embedding 调用器（用于记忆向量检索）
-    // 优先级：本地 ONNX → API → TF-IDF 降级
+    // 优先级：本地 ONNX → ByteEncoder → API → TF-IDF 降级
     const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models'), verbose });
+    const byteEncoderProvider = new ByteEncoderEmbeddingProvider();
     const enhancedTfidf = new EnhancedTfIdf();
 
     // 异步初始化 ONNX（不阻塞启动）
@@ -521,7 +522,7 @@ export class Subsystems {
       }
       // 打印降级链状态
       const apiModels = this._embedModels.length;
-      console.log(`[Embedding] 降级链: ONNX(${canInit ? '可用' : '未安装'}) → API(${apiModels}个模型) → TF-IDF(始终可用)`);
+      console.log(`[Embedding] 降级链: ONNX(${canInit ? '可用' : '未安装'}) → ByteEncoder(始终可用) → API(${apiModels}个模型) → TF-IDF(始终可用)`);
     }).catch(() => {});
 
     this.memory.setEmbedCaller(async (text: string) => {
@@ -533,7 +534,13 @@ export class Subsystems {
         } catch { /* 降级到下一步 */ }
       }
 
-      // 2. 尝试 API（通过模型池路由）
+      // 2. 尝试 ByteEncoder（本地零依赖）
+      try {
+        const vector = await byteEncoderProvider.embed(text);
+        return { vector, dimensions: byteEncoderProvider.dimensions, model: byteEncoderProvider.name };
+      } catch { /* 降级到下一步 */ }
+
+      // 3. 尝试 API（通过模型池路由）
       try {
         const result = await this._llm.executeMultimodal('embedding', text);
         if (result.type === 'embedding' && result.embeddings[0]) {

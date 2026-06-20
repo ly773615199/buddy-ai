@@ -333,9 +333,30 @@ export class ExperienceGraph {
     const union = new Set([...kwA, ...kwB]).size;
     if (union === 0) return 0;
 
-    let score = intersection / union;
-    if (a.trigger.intent === b.trigger.intent) score += 0.2;
-    return Math.min(1, score);
+    let keywordScore = intersection / union;
+    if (a.trigger.intent === b.trigger.intent) keywordScore += 0.2;
+
+    // 语义相似度（使用 ByteEncoder）
+    let semanticScore = 0;
+    try {
+      // 懒加载 TextEncoder 单例
+      const { getGlobalTextEncoder } = require('../brain/right/features/text-encoder-singleton.js');
+      const encoder = getGlobalTextEncoder();
+      const textA = `${a.name} ${a.trigger.keywords.join(' ')} ${a.trigger.intent}`;
+      const textB = `${b.name} ${b.trigger.keywords.join(' ')} ${b.trigger.intent}`;
+      const vecA = encoder.forwardPooled(textA);
+      const vecB = encoder.forwardPooled(textB);
+      let dot = 0, na = 0, nb = 0;
+      for (let i = 0; i < vecA.data.length; i++) {
+        dot += vecA.data[i] * vecB.data[i];
+        na += vecA.data[i] * vecA.data[i];
+        nb += vecB.data[i] * vecB.data[i];
+      }
+      semanticScore = dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+    } catch { /* 降级到纯关键词 */ }
+
+    // 融合：关键词(0.4) + 语义(0.6)
+    return Math.min(1, keywordScore * 0.4 + semanticScore * 0.6);
   }
 
   // ── 序列化（SQLite） ──

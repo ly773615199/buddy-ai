@@ -288,8 +288,9 @@ export class PrototypeMemory {
   hitPrototype(proto: Prototype, hidden: Float32Array): void {
     const normed = l2Normalize(hidden);
     const lr = this.config.emaLR / Math.sqrt(proto.count + 1);
+    const dim = Math.min(this.config.hiddenDim, normed.length, proto.centroid.length);
 
-    for (let i = 0; i < this.config.hiddenDim; i++) {
+    for (let i = 0; i < dim; i++) {
       proto.centroid[i] = (1 - lr) * proto.centroid[i] + lr * normed[i];
     }
 
@@ -503,7 +504,8 @@ export class PrototypeMemory {
     if (totalWeight > 0) {
       const tWeight = target.count / totalWeight;
       const sWeight = source.count / totalWeight;
-      for (let i = 0; i < this.config.hiddenDim; i++) {
+      const dim = Math.min(this.config.hiddenDim, target.centroid.length, source.centroid.length);
+      for (let i = 0; i < dim; i++) {
         target.centroid[i] = target.centroid[i] * tWeight + source.centroid[i] * sWeight;
       }
       l2NormalizeInPlace(target.centroid);
@@ -631,7 +633,7 @@ export class PrototypeMemory {
     this.digestForCapacity();
 
     // 计算样本均值作为 centroid
-    const dim = this.config.hiddenDim;
+    const dim = bucket.samples.length > 0 ? bucket.samples[0].length : this.config.hiddenDim;
     const centroid = new Float32Array(dim);
     for (const sample of bucket.samples) {
       for (let i = 0; i < dim; i++) {

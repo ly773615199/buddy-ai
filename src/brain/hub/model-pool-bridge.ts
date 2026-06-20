@@ -74,6 +74,17 @@ export class ModelPoolResourceBridge {
         status,
         healthScore,
         lastHealthCheck: Date.now(),
+        capabilities: {
+          toolCalling: profile.capabilities?.toolCalling ?? profile.derived?.toolCapable ?? false,
+          streaming: profile.capabilities?.streaming ?? false,
+          vision: profile.capabilities?.vision ?? profile.derived?.visionCapable ?? false,
+          maxContextTokens: 32000,
+          maxOutputTokens: 4096,
+          strongAt: [],
+          weakAt: [],
+          speedTier: 'medium' as const,
+        },
+        affinity: {},
       });
       synced++;
     }
@@ -106,6 +117,17 @@ export class ModelPoolResourceBridge {
       status: 'active',
       healthScore: 100,
       lastHealthCheck: Date.now(),
+      capabilities: {
+        toolCalling: false,
+        streaming: false,
+        vision: false,
+        maxContextTokens: 32000,
+        maxOutputTokens: 4096,
+        strongAt: [],
+        weakAt: [],
+        speedTier: 'medium' as const,
+      },
+      affinity: {},
     });
   }
 

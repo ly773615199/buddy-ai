@@ -207,7 +207,8 @@ export type WSEvent =
   | { type: 'perception_event'; id: string; category: string; source: string; data: Record<string, unknown>; timestamp: number }
   // 知识面板数据
   | { type: 'knowledge_panel_data'; data: Record<string, unknown> }
-  | { type: 'narration'; narrationType: string; content: string; urgency: number; visual: { expression?: string; particleBurst: boolean; action?: string }; timestamp: number };
+  | { type: 'narration'; narrationType: string; content: string; urgency: number; visual: { expression?: string; particleBurst: boolean; action?: string }; timestamp: number }
+  | { type: 'clear_chat' };
 
 // ==================== 工具定义 ====================
 

@@ -158,6 +158,8 @@ export interface TaskSignal {
   shouldUseDAG: boolean;
   dagReason: string;
   intentConfidence: number;
+  /** 关键性等级 */
+  criticality?: 'low' | 'normal' | 'high';
   /** 用户原始输入（供 ModelRouter 构建需求） */
   content?: string;
 }

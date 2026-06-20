@@ -369,7 +369,7 @@ export class LLMAdapter {
           const stepToolResults = step.toolResults ?? [];
           for (const tc of stepToolCalls) {
             const tr = stepToolResults.find(
-              (r) => 'toolCallId' in r && r.toolCallId === tc.toolCallId,
+              (r: any) => 'toolCallId' in r && r.toolCallId === tc.toolCallId,
             );
             toolCalls.push({
               name: tc.toolName,
@@ -891,7 +891,7 @@ export class LLMAdapter {
       messages: aiMessages,
       tools: Object.keys(toolSet).length > 0 ? toolSet : undefined,
       stopWhen: stepCountIs(maxSteps),
-      experimental_repairToolCall: async ({ toolCall, tools, error }) => {
+      experimental_repairToolCall: async ({ toolCall, tools, error }: { toolCall: any; tools: any; error: any }) => {
         console.log(`🔧 修复工具调用: ${toolCall.toolName} — ${error.message}`);
         const toolDef = (tools as Record<string, { description?: string }>)[toolCall.toolName];
         if (!toolDef) return null;

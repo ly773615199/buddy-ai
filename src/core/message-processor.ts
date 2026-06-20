@@ -12,6 +12,9 @@ import type { STMPStore, MemoryNode as STMPNode } from '../memory/stmp.js';
 import { PromptInjector } from '../intelligence/prompt-injector.js';
 import type { UnifiedInterviewer, InterviewQuestion } from '../intelligence/unified-interviewer.js';
 import { PromptBudgetManager, PRIORITY } from './prompt-budget.js';
+import { ContextScheduler } from './context-scheduler.js';
+import { MemoryIntegrator } from './memory-integrator.js';
+import { ConversationSummarizer } from './conversation-summarizer.js';
 
 /**
  * 意图驱动的动态优先级调整
@@ -74,6 +77,12 @@ export class MessageProcessor {
   readonly clarifier: ClarificationEngine;
   readonly conversationSM: ConversationStateMachine;
   readonly innerThoughts: InnerThoughtsEngine;
+  /** 三脑上下文调度器 */
+  private contextScheduler: ContextScheduler;
+  /** 记忆整合器 */
+  private memoryIntegrator: MemoryIntegrator;
+  /** 对话摘要器 */
+  private conversationSummarizer: ConversationSummarizer;
 
   // ISSUE-005: Prompt 注入防御 — 清理用户可控内容中的指令性文本
   private static readonly INJECTION_PATTERNS = [
@@ -148,6 +157,18 @@ export class MessageProcessor {
     this.clarifier = new ClarificationEngine();
     this.conversationSM = sys.conversationSM ?? new ConversationStateMachine();
     this.innerThoughts = new InnerThoughtsEngine();
+
+    // 初始化三脑上下文调度器
+    this.conversationSummarizer = new ConversationSummarizer();
+    this.contextScheduler = new ContextScheduler({
+      summarizer: this.conversationSummarizer,
+      verbose,
+    });
+    this.memoryIntegrator = new MemoryIntegrator({
+      memory: sys.memory,
+      stmp: sys.stmp,
+      verbose,
+    });
   }
 
   /** 获取主动提问引擎（供外部调用） */
@@ -533,11 +554,73 @@ export class MessageProcessor {
       console.log(`  [Budget] ${report.estimatedTokens}/${report.budgetTokens} tokens (${(report.utilization * 100).toFixed(1)}%) | 包含: ${report.includedSegments.join(', ')}${report.droppedSegments.length ? ' | 丢弃: ' + report.droppedSegments.join(', ') : ''}`);
     }
 
-    const recentMessages = this.sys.memory.getRecentMessages(20);
-    const compressed = MessageProcessor.compressMessages(recentMessages, 5, content);
-    const messages = buildMessages(finalPrompt, compressed, relevantMemories);
+    // ── 无限上下文：三脑调度 + 动态消息数 ──
+    const maxTokens = this.estimateContextWindow();
+    const systemPromptTokens = this.contextScheduler.estimateTokens(finalPrompt);
 
-    return { availableTools, finalPrompt, messages, recentMessages };
+    // 获取优化后的最近消息（动态数量 + 早期压缩）
+    let recentMessages = this.memoryIntegrator.getOptimizedRecentMessages(
+      maxTokens,
+      systemPromptTokens,
+    );
+
+    // 三脑上下文调度
+    const cerebellum = this.sys.cerebellum;
+    const l1Usage = this.contextScheduler.calculateL1Usage(recentMessages, maxTokens - systemPromptTokens);
+    const contextState = {
+      messageCount: recentMessages.length,
+      l1Usage,
+      taskType: this.inferTaskType(content),
+      emotionIntensity: cerebellum ? (cerebellum.bodyState?.getSatisfaction?.() ?? 50) / 100 : 0.3,
+      recentMessages,
+    };
+
+    const schedule = this.contextScheduler.schedule(contextState);
+
+    // 执行调度计划
+    const { keptMessages, summary } = await this.contextScheduler.executePlan(
+      schedule,
+      recentMessages,
+      (sum) => {
+        // 摘要生成回调：保存到数据库
+        this.conversationSummarizer.saveSummary('default', sum, recentMessages.length);
+        if (this.verbose) console.log(`  [Summary] 生成摘要: ${sum.slice(0, 80)}...`);
+      },
+    );
+
+    // 如果有摘要，注入到 prompt
+    if (summary) {
+      budget.add({
+        id: 'conversation-summary',
+        source: 'summarizer',
+        priority: PRIORITY.MEMORY + 5,
+        content: `\n## 对话摘要（早期上下文）\n${summary}`,
+        required: false,
+      });
+    }
+
+    // 统一记忆检索增强
+    if (schedule.shouldRetrieve) {
+      const unifiedResults = await this.memoryIntegrator.unifiedSearch(schedule.retrieveQuery, 3);
+      if (unifiedResults.length > 0) {
+        const retrievalPrompt = unifiedResults.map(r => `[${r.source}] ${r.value.slice(0, 150)}`).join('\n');
+        budget.add({
+          id: 'memory-retrieval-enhanced',
+          source: 'memory-integrator',
+          priority: PRIORITY.MEMORY + 3,
+          content: `\n## 相关记忆检索\n${retrievalPrompt}`,
+          required: false,
+        });
+      }
+    }
+
+    // 重新组装 prompt（可能包含新注入的摘要和检索结果）
+    const updatedFinalPrompt = budget.assemble();
+
+    const compressed = keptMessages;
+    const messages = buildMessages(updatedFinalPrompt, compressed, relevantMemories);
+
+    return { availableTools, finalPrompt: updatedFinalPrompt, messages, recentMessages };
   }
 
   // ──────────────────────────────────────────────────────────

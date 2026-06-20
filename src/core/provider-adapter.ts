@@ -433,7 +433,7 @@ export class MockProviderAdapter implements ProviderAdapter {
     return new MockLanguageModelV3({
       provider: 'mock',
       modelId: 'mock-model',
-      doGenerate: async ({ prompt }) => {
+      doGenerate: async ({ prompt }: { prompt: any }) => {
         const lastUserMsg = [...prompt].reverse().find((m: any) => m.role === 'user');
         const input = Array.isArray(lastUserMsg?.content)
           ? lastUserMsg.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('')
@@ -447,7 +447,7 @@ export class MockProviderAdapter implements ProviderAdapter {
           content: [{ type: 'text' as const, text }],
         } as any;
       },
-      doStream: async ({ prompt }) => {
+      doStream: async ({ prompt }: { prompt: any }) => {
         const lastUserMsg = [...prompt].reverse().find((m: any) => m.role === 'user');
         const input = Array.isArray(lastUserMsg?.content)
           ? lastUserMsg.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('')

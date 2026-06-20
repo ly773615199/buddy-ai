@@ -176,27 +176,27 @@ describe('TextEncoder', () => {
     const enc = new TextEncoder();
     const out = enc.forward('hello world');
     expect(out.shape.length).toBe(2);
-    expect(out.shape[1]).toBe(128); // outputDim
+    expect(out.shape[1]).toBe(384); // V2: outputDim=384
     expect(out.shape[0]).toBeGreaterThan(0); // 至少有 1 个 patch
   });
 
-  it('forwardPooled 输出 [1, 128]', () => {
+  it('forwardPooled 输出 [1, 384]', () => {
     const enc = new TextEncoder();
     const out = enc.forwardPooled('测试文本');
-    expect(out.shape).toEqual([1, 128]);
+    expect(out.shape).toEqual([1, 384]);
   });
 
   it('中文输入正常工作', () => {
     const enc = new TextEncoder();
     const out = enc.forward('帮我写个快排');
-    expect(out.shape[1]).toBe(128);
+    expect(out.shape[1]).toBe(384); // V2
     expect(out.shape[0]).toBeGreaterThan(0);
   });
 
   it('中英混合输入', () => {
     const enc = new TextEncoder();
     const out = enc.forward('帮我写个 quicksort');
-    expect(out.shape[1]).toBe(128);
+    expect(out.shape[1]).toBe(384); // V2
   });
 
   it('空字符串不崩溃', () => {
@@ -205,12 +205,13 @@ describe('TextEncoder', () => {
     expect(out.shape[0]).toBeGreaterThanOrEqual(0);
   });
 
-  it('参数量约 277K（2 层 d=128 attention + FFN）', () => {
+  it('参数量约 5M（V2: 4层 d=384 attention + FFN + RoPE + AttentionPooling + LearnedMerge）', () => {
     const enc = new TextEncoder();
     const params = enc.countParams();
-    // ByteEmbedding(256,32)=8192 + Projection(32→128)=4096 + 2×(MHA+FFN) + LayerNorm
-    expect(params).toBeGreaterThan(200_000);
-    expect(params).toBeLessThan(350_000);
+    // V2: ByteEmbedding(256,64) + Projection + 4×(MHA 4×d×d + FFN 2×d×ffn) + LayerNorm + LearnedMerge + AttentionPooling
+    // 实际约 4.9M
+    expect(params).toBeGreaterThan(4_000_000);
+    expect(params).toBeLessThan(6_000_000);
   });
 
   it('序列化/反序列化后输出一致', () => {
@@ -228,7 +229,7 @@ describe('TextEncoder', () => {
     }
   });
 
-  it('推理延迟 < 10ms（宽松，CI 环境）', () => {
+  it('推理延迟 < 500ms（V2 更大模型，CI 环境）', () => {
     const enc = new TextEncoder();
     // 预热
     enc.forward('warmup');
@@ -239,7 +240,7 @@ describe('TextEncoder', () => {
     }
     const elapsed = performance.now() - t0;
     const perCall = elapsed / 10;
-    // 宽松阈值，CI 环境可能较慢
-    expect(perCall).toBeLessThan(50);
+    // V2 模型更大（2M params），CI 环境较慢
+    expect(perCall).toBeLessThan(500);
   });
 });

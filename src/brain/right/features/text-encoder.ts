@@ -1,22 +1,24 @@
 /**
- * ByteEncoder — 字节级文本编码器
+ * ByteEncoder V2 — 字节级文本编码器（升级版）
  *
  * 纯 TypeScript，零 npm 依赖
- * 将自然语言文本映射到 128 维语义向量
+ * 将自然语言文本映射到 384 维语义向量
  *
- * 组件：
- * - ByteEmbedding(256, 32): 字节查表嵌入
- * - EntropyEstimator: 基于字节频率的局部熵估算
- * - DynamicMerge: 熵驱动动态合并（高熵保留，低熵合并）
- * - Projection(32→128): 线性投影
- * - EncoderBlock×2: 复用 attention.ts + ffn.ts (d=128, h=4, ffn=256)
- *
- * 参数量: ~145K
+ * V2 升级：
+ * - 参数量: 145K → ~2M
+ * - 输出维度: 128 → 384
+ * - Encoder 层数: 2 → 4
+ * - 注意力头数: 4 → 6
+ * - FFN 维度: 256 → 768
+ * - 字节嵌入: 32 → 64
+ * - 新增: RoPE 位置编码
+ * - 新增: AttentionPooling（替代 mean pooling）
+ * - 新增: LearnedMerge（可训练合并门控）
  */
 
 import {
   Tensor, zeros, randn, xavierUniform,
-  matmul, add, layerNorm, softmax, reshape,
+  matmul, add, layerNorm, softmax, reshape, sigmoid,
   isInferenceMode,
 } from '../nn/tensor.js';
 import { MultiHeadAttention } from '../nn/attention.js';
@@ -25,23 +27,23 @@ import { FeedForward } from '../nn/ffn.js';
 // ==================== 配置 ====================
 
 export interface TextEncoderConfig {
-  byteEmbedDim: number;           // 默认 32
-  outputDim: number;              // 默认 128
-  numLayers: number;              // 默认 2
-  numHeads: number;               // 默认 4
-  ffnDim: number;                 // 默认 256
+  byteEmbedDim: number;           // 默认 64
+  outputDim: number;              // 默认 384
+  numLayers: number;              // 默认 4
+  numHeads: number;               // 默认 6
+  ffnDim: number;                 // 默认 768
   mergeEntropyThreshold: number;  // 默认 1.5
-  maxSeqLen: number;              // 默认 512
+  maxSeqLen: number;              // 默认 1024
 }
 
 const DEFAULT_CONFIG: TextEncoderConfig = {
-  byteEmbedDim: 32,
-  outputDim: 128,
-  numLayers: 2,
-  numHeads: 4,
-  ffnDim: 256,
+  byteEmbedDim: 64,
+  outputDim: 384,
+  numLayers: 4,
+  numHeads: 6,
+  ffnDim: 768,
   mergeEntropyThreshold: 1.5,
-  maxSeqLen: 512,
+  maxSeqLen: 1024,
 };
 
 // ==================== ByteEmbedding ====================
@@ -99,13 +101,6 @@ export class ByteEmbedding {
 
 // ==================== EntropyEstimator ====================
 
-/**
- * 基于字节频率的局部熵估算
- * 在滑动窗口内计算 Shannon 熵，用于驱动动态合并
- *
- * 纯计算，无参数
- */
-
 /** 计算单个窗口的 Shannon 熵 */
 function windowEntropy(bytes: Uint8Array | number[], start: number, end: number): number {
   const freq = new Float32Array(256);
@@ -128,9 +123,6 @@ function windowEntropy(bytes: Uint8Array | number[], start: number, end: number)
 
 /**
  * 估算每个字节位置的局部熵
- * 使用左右各 windowRadius 字节的滑动窗口
- *
- * @returns Float32Array[S] 每个位置的熵值
  */
 export function estimateEntropy(bytes: Uint8Array | number[], windowRadius = 2): Float32Array {
   const S = bytes.length;
@@ -145,19 +137,203 @@ export function estimateEntropy(bytes: Uint8Array | number[], windowRadius = 2):
   return entropy;
 }
 
-// ==================== DynamicMerge ====================
+// ==================== RoPE 位置编码 ====================
 
 /**
- * 熵驱动的动态合并
+ * Rotary Position Embedding (RoPE)
  *
- * 高熵位置（信息量大，如"部署"、"deploy"）→ 保留独立 token
- * 低熵位置（信息量小，如"的"、"the"）→ 与相邻合并为 1 个 patch
+ * 对 Q/K 向量施加旋转位置编码，使注意力感知 token 位置关系。
+ * 每对相邻维度 (2i, 2i+1) 使用不同频率旋转。
  *
- * 受 BLT (Meta 2024) + MrT5 (Stanford 2024) 启发
- * 不是固定窗口 Conv1D，是逐字节判断
+ * @param x [S, D] 输入张量
+ * @param positions [S] 位置索引
+ * @returns [S, D] 旋转后的张量
+ */
+export function applyRoPE(x: Tensor, positions: number[]): Tensor {
+  const S = x.shape[0];
+  const D = x.shape[1];
+  const out = new Float32Array(S * D);
+  const src = x.data;
+  const halfD = D / 2;
+
+  for (let s = 0; s < S; s++) {
+    const pos = positions[s];
+    const rowOff = s * D;
+
+    for (let i = 0; i < halfD; i++) {
+      const theta = pos / Math.pow(10000, (2 * i) / D);
+      const cosVal = Math.cos(theta);
+      const sinVal = Math.sin(theta);
+
+      const x1 = src[rowOff + 2 * i];
+      const x2 = src[rowOff + 2 * i + 1];
+
+      out[rowOff + 2 * i] = x1 * cosVal - x2 * sinVal;
+      out[rowOff + 2 * i + 1] = x1 * sinVal + x2 * cosVal;
+    }
+  }
+
+  return new Tensor(out, [S, D]);
+}
+
+/**
+ * 批量 RoPE：[B, S, D] 输入
+ */
+export function applyRoPEBatch(x: Tensor, positions: number[]): Tensor {
+  if (x.shape.length === 2) return applyRoPE(x, positions);
+
+  const [B, S, D] = x.shape;
+  const out = new Float32Array(B * S * D);
+  const src = x.data;
+  const halfD = D / 2;
+
+  for (let b = 0; b < B; b++) {
+    for (let s = 0; s < S; s++) {
+      const pos = positions[s];
+      const rowOff = (b * S + s) * D;
+
+      for (let i = 0; i < halfD; i++) {
+        const theta = pos / Math.pow(10000, (2 * i) / D);
+        const cosVal = Math.cos(theta);
+        const sinVal = Math.sin(theta);
+
+        const x1 = src[rowOff + 2 * i];
+        const x2 = src[rowOff + 2 * i + 1];
+
+        out[rowOff + 2 * i] = x1 * cosVal - x2 * sinVal;
+        out[rowOff + 2 * i + 1] = x1 * sinVal + x2 * cosVal;
+      }
+    }
+  }
+
+  return new Tensor(out, [B, S, D]);
+}
+
+// ==================== LearnedMerge ====================
+
+/**
+ * 可训练的动态合并门控
  *
- * @returns 合并后的 patch 边界索引数组
- *   例: [0, 3, 5] 表示 bytes[0:3] 为 patch 0, bytes[3:5] 为 patch 1
+ * 结合字节嵌入和局部熵，学习哪些字节应该合并、哪些应该保留。
+ * 门控分数 = sigmoid(W · embed + b) + entropy_weight
+ *
+ * 比固定熵阈值更灵活：高信息量但低熵的字节（如中文单字）也能被保留。
+ */
+export class LearnedMerge {
+  /** 门控权重 [byteEmbedDim, 1] */
+  gateWeight: Tensor;
+  /** 门控偏置 [1] */
+  gateBias: Tensor;
+  /** 熵混合权重（可学习标量） */
+  entropyWeight: Tensor;
+  /** 熵偏移（可学习标量） */
+  entropyBias: Tensor;
+  embedDim: number;
+
+  constructor(embedDim: number) {
+    this.embedDim = embedDim;
+    // 初始化：gateWeight 用小随机值
+    const wData = new Float32Array(embedDim);
+    for (let i = 0; i < embedDim; i++) {
+      wData[i] = (Math.random() - 0.5) * 0.02;
+    }
+    this.gateWeight = new Tensor(wData, [embedDim, 1]);
+    this.gateBias = new Tensor(new Float32Array([0.5]), [1]); // 初始偏置 0.5，倾向保留
+    this.entropyWeight = new Tensor(new Float32Array([0.3]), [1]); // 初始熵权重
+    this.entropyBias = new Tensor(new Float32Array([0.0]), [1]);
+  }
+
+  /**
+   * 判断每个字节位置是否应该保留（不合并）
+   *
+   * @param embeddings [S, byteEmbedDim] 字节嵌入
+   * @param entropy [S] 局部熵值
+   * @returns boolean[] true=保留，false=合并
+   */
+  shouldKeep(embeddings: Tensor, entropy: Float32Array): boolean[] {
+    const S = embeddings.shape[0];
+    const D = this.embedDim;
+    const result = new Array<boolean>(S);
+    const w = this.gateWeight.data;
+    const b = this.gateBias.data[0];
+    const ew = this.entropyWeight.data[0];
+    const eb = this.entropyBias.data[0];
+
+    for (let s = 0; s < S; s++) {
+      // 门控分数 = sigmoid(w · embed + b)
+      let dot = 0;
+      const off = s * D;
+      for (let d = 0; d < D; d++) {
+        dot += embeddings.data[off + d] * w[d];
+      }
+      const gateScore = 1 / (1 + Math.exp(-(dot + b)));
+
+      // 混合信号 = gateScore + ew * entropy + eb
+      const mixed = gateScore + ew * entropy[s] + eb;
+      const finalScore = 1 / (1 + Math.exp(-mixed));
+
+      result[s] = finalScore > 0.5;
+    }
+
+    return result;
+  }
+
+  /**
+   * 计算合并边界（与 dynamicMerge 兼容的接口）
+   */
+  computeMergeBoundaries(
+    embeddings: Tensor,
+    entropy: Float32Array,
+    maxPatches: number,
+  ): number[] {
+    const S = embeddings.shape[0];
+    if (S === 0) return [0];
+
+    const keepFlags = this.shouldKeep(embeddings, entropy);
+    const boundaries: number[] = [0];
+
+    let i = 0;
+    while (i < S) {
+      if (keepFlags[i]) {
+        // 保留为独立 patch
+        boundaries.push(i + 1);
+        i++;
+      } else {
+        // 向后合并，直到遇到保留标记或结束
+        let j = i + 1;
+        while (j < S && !keepFlags[j] && (j - i) < 8) {
+          j++;
+        }
+        boundaries.push(j);
+        i = j;
+      }
+
+      if (boundaries.length - 1 >= maxPatches) {
+        boundaries[boundaries.length - 1] = S;
+        break;
+      }
+    }
+
+    if (boundaries[boundaries.length - 1] !== S) {
+      boundaries.push(S);
+    }
+
+    return boundaries;
+  }
+
+  parameters(): Tensor[] {
+    return [this.gateWeight, this.gateBias, this.entropyWeight, this.entropyBias];
+  }
+
+  countParams(): number {
+    return this.embedDim + 3; // gateWeight + 3 scalars
+  }
+}
+
+// ==================== DynamicMerge (保留兼容) ====================
+
+/**
+ * 熵驱动的动态合并（静态版本，LearnedMerge 的降级方案）
  */
 export function dynamicMerge(
   bytes: Uint8Array | number[],
@@ -173,11 +349,9 @@ export function dynamicMerge(
 
   while (i < S) {
     if (entropy[i] >= threshold) {
-      // 高熵：保留为独立 patch
       boundaries.push(i + 1);
       i++;
     } else {
-      // 低熵：向后合并，直到遇到高熵或结束
       let j = i + 1;
       while (j < S && entropy[j] < threshold && (j - i) < 8) {
         j++;
@@ -186,15 +360,12 @@ export function dynamicMerge(
       i = j;
     }
 
-    // 限制 patch 数量
     if (boundaries.length - 1 >= maxPatches) {
-      // 剩余全部合并为最后一个 patch
       boundaries[boundaries.length - 1] = S;
       break;
     }
   }
 
-  // 确保最后一个边界是 S
   if (boundaries[boundaries.length - 1] !== S) {
     boundaries.push(S);
   }
@@ -204,10 +375,6 @@ export function dynamicMerge(
 
 /**
  * 对合并后的 patches 做平均池化
- *
- * @param embedded [S, D] 嵌入后的字节序列
- * @param boundaries patch 边界索引
- * @returns [numPatches, D] 池化后的 patch 表示
  */
 export function poolPatches(embedded: Tensor, boundaries: number[]): Tensor {
   const S = embedded.shape[0];
@@ -229,13 +396,108 @@ export function poolPatches(embedded: Tensor, boundaries: number[]): Tensor {
         data[dstOff + d] += src[srcOff + d];
       }
     }
-    // 平均
     for (let d = 0; d < D; d++) {
       data[dstOff + d] /= len;
     }
   }
 
   return new Tensor(data, [numPatches, D]);
+}
+
+// ==================== AttentionPooling ====================
+
+/**
+ * 注意力池化 — 替代 mean pooling
+ *
+ * 学习哪些 token 更重要，用可学习的 query 向量做注意力加权。
+ * 比 mean pooling 更智能：能区分关键信息和噪声。
+ *
+ * [S, D] → [1, D]
+ */
+export class AttentionPooling {
+  /** 可学习的查询向量 [1, D] */
+  query: Tensor;
+  /** Key 投影 [D, D] */
+  keyWeight: Tensor;
+  /** Key 偏置 [D] */
+  keyBias: Tensor;
+  /** 温度参数（可学习） */
+  temperature: Tensor;
+  dModel: number;
+
+  constructor(dModel: number) {
+    this.dModel = dModel;
+
+    // query 初始化为小随机值
+    const qData = new Float32Array(dModel);
+    for (let i = 0; i < dModel; i++) {
+      qData[i] = (Math.random() - 0.5) * 0.02;
+    }
+    this.query = new Tensor(qData, [1, dModel]);
+    this.keyWeight = xavierUniform(dModel, dModel);
+    this.keyBias = zeros([dModel]);
+    // 温度 = sqrt(dModel)，类似 scaled dot-product
+    this.temperature = new Tensor(new Float32Array([Math.sqrt(dModel)]), [1]);
+  }
+
+  /**
+   * 前向：[S, D] → [1, D]
+   */
+  forward(x: Tensor): Tensor {
+    const S = x.shape[0];
+    const D = this.dModel;
+
+    // keys = x @ keyWeight + keyBias: [S, D]
+    const keys = matmul(x, this.keyWeight);
+    const keysWithBias = add(keys, this.keyBias);
+
+    // scores = query @ keys^T / temperature: [1, S]
+    const qData = this.query.data;
+    const scores = new Float32Array(S);
+    const temp = this.temperature.data[0];
+
+    for (let s = 0; s < S; s++) {
+      let dot = 0;
+      const off = s * D;
+      for (let d = 0; d < D; d++) {
+        dot += qData[d] * keysWithBias.data[off + d];
+      }
+      scores[s] = dot / temp;
+    }
+
+    // softmax
+    let max = -Infinity;
+    for (let s = 0; s < S; s++) {
+      if (scores[s] > max) max = scores[s];
+    }
+    let sum = 0;
+    for (let s = 0; s < S; s++) {
+      scores[s] = Math.exp(scores[s] - max);
+      sum += scores[s];
+    }
+    for (let s = 0; s < S; s++) {
+      scores[s] /= sum;
+    }
+
+    // 加权求和: [1, D]
+    const outData = new Float32Array(D);
+    for (let s = 0; s < S; s++) {
+      const off = s * D;
+      for (let d = 0; d < D; d++) {
+        outData[d] += scores[s] * x.data[off + d];
+      }
+    }
+
+    return new Tensor(outData, [1, D]);
+  }
+
+  parameters(): Tensor[] {
+    return [this.query, this.keyWeight, this.keyBias, this.temperature];
+  }
+
+  countParams(): number {
+    return this.dModel + this.dModel * this.dModel + this.dModel + 1;
+  }
 }
 
 // ==================== TextEncoder ====================
@@ -246,6 +508,10 @@ export class TextEncoder {
   private projection: { w: Tensor; b: Tensor };
   private encoderBlocks: Array<{ attn: MultiHeadAttention; ffn: FeedForward }> = [];
   private layerNorm: { weight: Tensor; bias: Tensor };
+  /** V2: 可训练合并门控 */
+  private learnedMerge: LearnedMerge;
+  /** V2: 注意力池化（替代 mean pooling） */
+  private attentionPooling: AttentionPooling;
 
   constructor(config?: Partial<TextEncoderConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -273,21 +539,27 @@ export class TextEncoder {
       weight: zeros([outputDim]),
       bias: zeros([outputDim]),
     };
-    // fill weight with 1
     for (let i = 0; i < outputDim; i++) this.layerNorm.weight.data[i] = 1;
+
+    // 5. V2: 可训练合并门控
+    this.learnedMerge = new LearnedMerge(byteEmbedDim);
+
+    // 6. V2: 注意力池化
+    this.attentionPooling = new AttentionPooling(outputDim);
   }
 
   /**
    * 前向：文本 → 合并后的 patch 序列 [S', outputDim]
    *
-   * 流程：
+   * V2 流程：
    * 1. 文本 → UTF-8 字节
    * 2. 字节嵌入 [S, byteEmbedDim]
-   * 3. 熵估算 + 动态合并 → boundaries
+   * 3. 熵估算 + LearnedMerge 合并 → boundaries
    * 4. 池化 patches [S', byteEmbedDim]
    * 5. 投影 [S', outputDim]
-   * 6. EncoderBlock×2 (self-attention + FFN)
-   * 7. LayerNorm
+   * 6. RoPE 位置编码
+   * 7. EncoderBlock×4 (self-attention + FFN)
+   * 8. LayerNorm
    */
   forward(text: string): Tensor {
     // 1. UTF-8 字节
@@ -297,9 +569,11 @@ export class TextEncoder {
     // 2. 字节嵌入
     const embedded = this.byteEmbedding.forward(bytes);
 
-    // 3. 熵估算 + 动态合并
+    // 3. 熵估算 + LearnedMerge（可训练合并）
     const entropy = estimateEntropy(bytes, 2);
-    const boundaries = dynamicMerge(bytes, entropy, this.config.mergeEntropyThreshold, this.config.maxSeqLen);
+    const boundaries = this.learnedMerge.computeMergeBoundaries(
+      embedded, entropy, this.config.maxSeqLen,
+    );
 
     // 4. 池化 patches
     let patches = poolPatches(embedded, boundaries);
@@ -307,13 +581,18 @@ export class TextEncoder {
     // 5. 投影: [S', byteEmbedDim] → [S', outputDim]
     patches = this.project(patches);
 
-    // 6. Encoder blocks
+    // 6. RoPE 位置编码
+    const seqLen = patches.shape[0];
+    const positions = Array.from({ length: seqLen }, (_, i) => i);
+    patches = applyRoPE(patches, positions);
+
+    // 7. Encoder blocks
     for (const block of this.encoderBlocks) {
       patches = block.attn.forward(patches);
       patches = block.ffn.forward(patches);
     }
 
-    // 7. 最终 LayerNorm
+    // 8. 最终 LayerNorm
     patches = layerNorm(patches, this.layerNorm.weight, this.layerNorm.bias);
 
     return patches;
@@ -321,20 +600,18 @@ export class TextEncoder {
 
   /**
    * 前向 + 池化：文本 → 单向量 [1, outputDim]
-   * 对 forward() 输出做 mean pooling
+   * V2: 使用 AttentionPooling 替代 mean pooling
    */
   forwardPooled(text: string): Tensor {
     const seq = this.forward(text);
-    return this.meanPool(seq);
+    return this.attentionPooling.forward(seq);
   }
 
   /**
    * 投影层前向: [S, byteEmbedDim] → [S, outputDim]
    */
   private project(x: Tensor): Tensor {
-    // matmul: [S, byteEmbedDim] × [byteEmbedDim, outputDim] = [S, outputDim]
     const out = matmul(x, this.projection.w);
-    // 加偏置
     const S = out.shape[0];
     const D = out.shape[1];
     for (let s = 0; s < S; s++) {
@@ -344,27 +621,6 @@ export class TextEncoder {
       }
     }
     return out;
-  }
-
-  /**
-   * Mean pooling: [S, D] → [1, D]
-   */
-  private meanPool(x: Tensor): Tensor {
-    const S = x.shape[0];
-    const D = x.shape[1];
-    const data = new Float32Array(D);
-
-    for (let s = 0; s < S; s++) {
-      const off = s * D;
-      for (let d = 0; d < D; d++) {
-        data[d] += x.data[off + d];
-      }
-    }
-    for (let d = 0; d < D; d++) {
-      data[d] /= S || 1;
-    }
-
-    return new Tensor(data, [1, D]);
   }
 
   /** 获取所有可训练参数 */
@@ -379,6 +635,9 @@ export class TextEncoder {
       params.push(...block.ffn.parameters());
     }
     params.push(this.layerNorm.weight, this.layerNorm.bias);
+    // V2 新增参数
+    params.push(...this.learnedMerge.parameters());
+    params.push(...this.attentionPooling.parameters());
     return params;
   }
 
@@ -393,14 +652,12 @@ export class TextEncoder {
     let totalFloats = 0;
     for (const p of params) totalFloats += p.size;
 
-    // 使用 Uint8Array 作为底层 buffer，避免 Float32/Int32 偏移冲突
     // Header: 7 floats (config) + 1 int (paramCount) + per-param: 1 int (rank) + rank ints (dims)
     const headerFloats = 7;
     const headerInts = 1 + params.length + params.reduce((s, p) => s + p.shape.length, 0);
     const headerBytes = headerFloats * 4 + headerInts * 4;
     const weightBytes = totalFloats * 4;
     const buf = new ArrayBuffer(headerBytes + weightBytes);
-    const u8 = new Uint8Array(buf);
 
     // 写入 config (7 floats)
     const f32 = new Float32Array(buf);

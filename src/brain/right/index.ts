@@ -13,6 +13,7 @@ import type {
 import { IntuitionNet } from './nn/model.js';
 import { encodeFeatures, encodeFeaturesFast, type EncodeInput } from './features/encoder.js';
 import { decodeDecision, decodeSignal } from './features/decoder.js';
+import { OnlineContrastiveLearner } from './training/online-contrastive-learner.js';
 import { saveModel, loadModel, saveModelQuantized } from './nn/serialize.js';
 import { OnlineLearner } from './training/online-learner.js';
 import { Distiller, type DistillResult } from './training/distiller.js';
@@ -63,6 +64,8 @@ export class RightBrain {
   readonly prototypeMemory: PrototypeMemory;
   /** 字节级文本编码器（可选，有则走 NN 路径） */
   private textEncoder: TextEncoder | null = null;
+  /** 持续在线学习器 — ByteEncoder 微调 */
+  private contrastiveLearner: OnlineContrastiveLearner | null = null;
   private modelVersion = 0;
   private predictCount = 0;
 
@@ -506,7 +509,7 @@ export class RightBrain {
 
     if (this.textEncoder) {
       try {
-        const textEmb = this.textEncoder.forwardPooled(input); // [1, 128]
+        const textEmb = this.textEncoder.forwardPooled(input); // [1, 384]
         embedding = new Float32Array(textEmb.data);
 
         // 原型匹配
@@ -628,14 +631,59 @@ export class RightBrain {
    */
   setTextEncoder(encoder: TextEncoder): void {
     this.textEncoder = encoder;
+    // 初始化持续在线学习器
+    this.contrastiveLearner = new OnlineContrastiveLearner(encoder, {
+      bufferSize: 500,
+      trainInterval: 20,
+      batchSize: 8,
+      learningRate: 1e-5,
+    });
     if (this.verbose) {
-      console.log(`[RightBrain] TextEncoder 已注入: ${encoder.countParams()} 参数`);
+      console.log(`[RightBrain] TextEncoder 已注入: ${encoder.countParams()} 参数, 在线学习器已初始化`);
     }
   }
 
   /** 获取 TextEncoder 实例（可为 null） */
   getTextEncoder(): TextEncoder | null {
     return this.textEncoder;
+  }
+
+  /**
+   * 从对话交互中学习（持续在线学习）
+   *
+   * 用户问 → Buddy 答 → 自动构造训练样本
+   */
+  learnFromInteraction(userMessage: string, assistantReply: string, success: boolean): void {
+    if (!this.contrastiveLearner) return;
+    const sample = OnlineContrastiveLearner.fromConversation(userMessage, assistantReply, success);
+    if (sample) {
+      this.contrastiveLearner.addSample(sample);
+    }
+  }
+
+  /**
+   * 从工具执行结果中学习
+   */
+  learnFromToolResult(task: string, toolName: string, result: string, success: boolean): void {
+    if (!this.contrastiveLearner) return;
+    const sample = OnlineContrastiveLearner.fromToolResult(task, toolName, result, success);
+    if (sample) {
+      this.contrastiveLearner.addSample(sample);
+    }
+  }
+
+  /**
+   * 获取在线学习统计
+   */
+  getOnlineLearningStats(): { totalSamples: number; bufferSize: number; trainSteps: number; avgLoss: number } | null {
+    if (!this.contrastiveLearner) return null;
+    const stats = this.contrastiveLearner.getStats();
+    return {
+      totalSamples: stats.totalSamples,
+      bufferSize: stats.bufferSize,
+      trainSteps: stats.trainSteps,
+      avgLoss: stats.avgLoss,
+    };
   }
 
   // ── 影子大脑数据接口 ──

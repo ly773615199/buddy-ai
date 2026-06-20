@@ -3,10 +3,12 @@
  *
  * 可用 provider：
  * - ONNXEmbeddingProvider: 本地 ONNX 推理（需 @huggingface/transformers）
+ * - ByteEncoderEmbeddingProvider: 本地 ByteEncoder（零依赖，持续学习）
  * - TfIdfEmbedding: 始终可用的降级方案（字符级 TF-IDF）
  */
 
 export { ONNXEmbeddingProvider, type EmbeddingProvider } from './onnx-provider.js';
+export { ByteEncoderEmbeddingProvider } from './byte-encoder-provider.js';
 export { EnhancedTfIdf } from './enhanced-tfidf.js';
 
 /**

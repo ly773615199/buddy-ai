@@ -216,7 +216,7 @@ export class UnifiedInterviewer extends KnowledgeInterviewer {
       priority: 0.7,
       generatedAt: Date.now(),
       targetCapability: matched.id,
-      discoveryPhase: matched.stage,
+      discoveryPhase: (matched.stage ?? 'curious') as IntimacyStageName,
     };
 
     return question;
@@ -342,7 +342,7 @@ ${recentUserMsgs.map((m, i) => `${i + 1}. ${m}`).join('\n') || '(无)'}
       priority: 0.7,
       generatedAt: Date.now(),
       targetCapability: matched.id,
-      discoveryPhase: matched.stage,
+      discoveryPhase: (matched.stage ?? 'curious') as IntimacyStageName,
     };
 
     return question;
