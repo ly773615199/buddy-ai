@@ -56,16 +56,23 @@
     },
     "win": {
       "icon": "electron/icon.ico",
-      "signingHashAlgorithms": ["sha256"],
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
       "sign": "electron/sign-config.js",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "publisherName": "Buddy AI",
@@ -85,7 +92,10 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "license": "LICENSE",
-      "installerLanguages": ["SimpChinese", "English"],
+      "installerLanguages": [
+        "SimpChinese",
+        "English"
+      ],
       "language": "2052"
     },
     "publish": {
@@ -133,5 +143,8 @@
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^4.0.0"
   }
 }

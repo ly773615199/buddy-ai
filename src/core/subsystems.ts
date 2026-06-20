@@ -511,12 +511,17 @@ export class Subsystems {
     // 异步初始化 ONNX（不阻塞启动）
     ONNXEmbeddingProvider.canInit().then(canInit => {
       if (canInit) {
-        onnxProvider.init().catch(err => {
-          if (verbose) console.warn('[Embedding] ONNX 初始化失败，将使用 API 或 TF-IDF:', err.message);
+        onnxProvider.init().then(() => {
+          console.log('[Embedding] ✅ ONNX 本地模型就绪（优先级最高）');
+        }).catch(err => {
+          if (verbose) console.warn('[Embedding] ONNX 初始化失败:', err.message);
         });
-      } else if (verbose) {
-        console.log('[Embedding] @huggingface/transformers 未安装，跳过 ONNX provider');
+      } else {
+        console.log('[Embedding] @huggingface/transformers 未安装，跳过 ONNX');
       }
+      // 打印降级链状态
+      const apiModels = this._embedModels.length;
+      console.log(`[Embedding] 降级链: ONNX(${canInit ? '可用' : '未安装'}) → API(${apiModels}个模型) → TF-IDF(始终可用)`);
     }).catch(() => {});
 
     this.memory.setEmbedCaller(async (text: string) => {
