@@ -9,7 +9,8 @@
  * 训练后 TextEncoder 能输出有语义区分度的向量。
  */
 
-import { TextEncoder, type TextEncoderConfig } from '../features/text-encoder.js';
+import { TextEncoder, type TextEncoderConfig, type TextEncoderCache } from '../features/text-encoder.js';
+import type { Tensor } from '../nn/tensor.js';
 import { AdamW, type AdamWConfig } from './adamw.js';
 import { infoNCELoss, infoNCEGradient, cosineSimilarity } from './contrastive-loss.js';
 import type { TrainingSample, Dataset } from './dataloader.js';
@@ -112,45 +113,39 @@ export class SimCSETrainer {
     const texts = batch.map(s => s.text);
     const N = texts.length;
 
-    // 1. 两次前向（模拟不同 dropout mask → 用不同随机扰动）
+    // SimCSE: 同一文本两次前向，每次 forward+backward 立即配对
+    // 避免 _cached 被后续 forward 覆盖
     const z1: Float32Array[] = [];
     const z2: Float32Array[] = [];
+    const seqCache1: Array<{ seq: Tensor; cache: TextEncoderCache }> = [];
+    const seqCache2: Array<{ seq: Tensor; cache: TextEncoderCache }> = [];
 
     for (const text of texts) {
-      // 第一次前向
-      const t1 = this.encoder.forwardPooled(text);
-      z1.push(new Float32Array(t1.data));
+      // 第一次前向（独立缓存）
+      const { result: s1, cache: c1 } = this.encoder.forwardWithCache(text);
+      const p1 = this.encoder.attentionPoolingForward(s1);
+      z1.push(new Float32Array(p1.data));
+      seqCache1.push({ seq: s1, cache: c1 });
 
-      // 第二次前向（添加微小扰动模拟 dropout 效果）
-      const t2 = this.encoder.forwardPooled(text);
-      // 添加高斯噪声模拟 dropout
-      const noise = 0.01;
-      for (let i = 0; i < t2.data.length; i++) {
-        t2.data[i] += (Math.random() - 0.5) * 2 * noise;
-      }
-      z2.push(new Float32Array(t2.data));
+      // 第二次前向（独立缓存）
+      const { result: s2, cache: c2 } = this.encoder.forwardWithCache(text);
+      const p2 = this.encoder.attentionPoolingForward(s2);
+      z2.push(new Float32Array(p2.data));
+      seqCache2.push({ seq: s2, cache: c2 });
     }
 
-    // 2. 计算 InfoNCE 损失
+    // InfoNCE 损失和梯度
     const loss = infoNCELoss(z1, z2, this.config.training.temperature);
-
-    // 3. 计算梯度
     const [gradZ1, gradZ2] = infoNCEGradient(z1, z2, this.config.training.temperature);
 
-    // 4. 反向传播：将梯度注入到编码器参数
-    // 简化版本：直接用梯度更新参数（不走 autograd）
-    const params = this.encoder.parameters();
-
-    // 为每个参数计算近似梯度
-    for (const param of params) {
-      if (!param.grad) param.grad = new Float32Array(param.size);
-      // 添加小随机梯度（模拟反向传播）
-      for (let i = 0; i < param.size; i++) {
-        param.grad[i] += (Math.random() - 0.5) * 0.001 * loss;
-      }
+    // 反向传播：逐样本 backward
+    for (let i = 0; i < N; i++) {
+      this.encoder.backward(gradZ1[i], seqCache1[i].seq, seqCache1[i].cache);
+      this.encoder.backward(gradZ2[i], seqCache2[i].seq, seqCache2[i].cache);
     }
 
-    // 5. AdamW 更新
+    // AdamW 更新
+    const params = this.encoder.parameters();
     this.optimizer.step_(params);
 
     // 清零梯度

@@ -19,7 +19,7 @@
 import {
   Tensor, zeros, randn, xavierUniform,
   matmul, add, layerNorm, softmax, reshape, sigmoid,
-  isInferenceMode,
+  isInferenceMode, backward as autogradBackward,
 } from '../nn/tensor.js';
 import { MultiHeadAttention } from '../nn/attention.js';
 import { FeedForward } from '../nn/ffn.js';
@@ -373,6 +373,409 @@ export function dynamicMerge(
   return boundaries;
 }
 
+// ==================== 反向传播函数 ====================
+
+/**
+ * ByteEmbedding 反向：梯度 scatter 到 weight
+ * gradOutput: [S, embedDim]
+ * byteIds: [S] 原始字节值
+ */
+export function byteEmbeddingBackward(
+  gradOutput: Float32Array,
+  byteIds: number[],
+  weight: Tensor,
+  embedDim: number,
+): void {
+  if (!weight.grad) weight.grad = new Float32Array(weight.size);
+  for (let s = 0; s < byteIds.length; s++) {
+    const byteVal = byteIds[s] & 0xFF;
+    const srcOff = s * embedDim;
+    const dstOff = byteVal * embedDim;
+    for (let d = 0; d < embedDim; d++) {
+      weight.grad[dstOff + d] += gradOutput[srcOff + d];
+    }
+  }
+}
+
+/**
+ * poolPatches 反向：梯度均分回原始位置
+ * gradOutput: [numPatches, D]
+ * boundaries: patch 边界
+ * originalLen: 原始序列长度
+ * D: 嵌入维度
+ */
+export function poolPatchesBackward(
+  gradOutput: Float32Array,
+  boundaries: number[],
+  originalLen: number,
+  D: number,
+): Float32Array {
+  const grad = new Float32Array(originalLen * D);
+  const numPatches = boundaries.length - 1;
+  for (let p = 0; p < numPatches; p++) {
+    const start = boundaries[p];
+    const end = boundaries[p + 1];
+    const len = end - start;
+    if (len <= 0) continue;
+    const gradOff = p * D;
+    for (let s = start; s < end; s++) {
+      const gOff = s * D;
+      for (let d = 0; d < D; d++) {
+        grad[gOff + d] += gradOutput[gradOff + d] / len;
+      }
+    }
+  }
+  return grad;
+}
+
+/**
+ * applyRoPE 反向：逆旋转
+ * gradOutput: [S, D]
+ * positions: [S]
+ * D: 维度
+ */
+export function applyRoPEBackward(
+  gradOutput: Float32Array,
+  positions: number[],
+  D: number,
+): Float32Array {
+  const S = positions.length;
+  const grad = new Float32Array(S * D);
+  const halfD = D / 2;
+  for (let s = 0; s < S; s++) {
+    const pos = positions[s];
+    const rowOff = s * D;
+    for (let i = 0; i < halfD; i++) {
+      const theta = pos / Math.pow(10000, (2 * i) / D);
+      const cosVal = Math.cos(theta);
+      const sinVal = Math.sin(theta);
+      const g1 = gradOutput[rowOff + 2 * i];
+      const g2 = gradOutput[rowOff + 2 * i + 1];
+      grad[rowOff + 2 * i] = g1 * cosVal + g2 * sinVal;
+      grad[rowOff + 2 * i + 1] = -g1 * sinVal + g2 * cosVal;
+    }
+  }
+  return grad;
+}
+
+/**
+ * AttentionPooling 反向
+ * gradOutput: [1, dModel] 来自下游
+ * x: [S, dModel] 原始输入
+ * 返回: gradX [S, dModel]
+ * 同时更新 query, keyWeight, keyBias, temperature 的梯度
+ */
+export function attentionPoolingBackward(
+  gradOutput: Float32Array,
+  x: Tensor,
+  queryData: Float32Array,
+  keyWeightData: Float32Array,
+  keyBiasData: Float32Array,
+  tempValue: number,
+  dModel: number,
+  query: Tensor,
+  keyWeight: Tensor,
+  keyBias: Tensor,
+  temperature: Tensor,
+): Float32Array {
+  const S = x.shape[0];
+
+  // 重算 attention weights
+  const scores = new Float32Array(S);
+  for (let s = 0; s < S; s++) {
+    let dot = 0;
+    const off = s * dModel;
+    for (let d = 0; d < dModel; d++) {
+      let kv = keyBiasData[d];
+      for (let k = 0; k < dModel; k++) {
+        kv += x.data[off + k] * keyWeightData[k * dModel + d];
+      }
+      dot += queryData[d] * kv;
+    }
+    scores[s] = dot / tempValue;
+  }
+  let maxS = -Infinity;
+  for (let s = 0; s < S; s++) { if (scores[s] > maxS) maxS = scores[s]; }
+  let sumS = 0;
+  for (let s = 0; s < S; s++) { scores[s] = Math.exp(scores[s] - maxS); sumS += scores[s]; }
+  for (let s = 0; s < S; s++) { scores[s] /= sumS; }
+  const weights = scores;
+
+  // gradX = weights^T @ gradOutput (broadcast)
+  const gradX = new Float32Array(S * dModel);
+  for (let s = 0; s < S; s++) {
+    const off = s * dModel;
+    for (let d = 0; d < dModel; d++) {
+      gradX[off + d] = weights[s] * gradOutput[d];
+    }
+  }
+
+  // gradScores = sum_d(gradOutput[d] * x[s,d])
+  const gradScores = new Float32Array(S);
+  for (let s = 0; s < S; s++) {
+    let dot = 0;
+    const off = s * dModel;
+    for (let d = 0; d < dModel; d++) {
+      dot += gradOutput[d] * x.data[off + d];
+    }
+    gradScores[s] = dot / tempValue;
+  }
+
+  // softmax backward → gradRawScores
+  const gradRawScores = new Float32Array(S);
+  let sumGradWeights = 0;
+  for (let s = 0; s < S; s++) { sumGradWeights += gradScores[s] * weights[s]; }
+  for (let s = 0; s < S; s++) {
+    gradRawScores[s] = weights[s] * (gradScores[s] - sumGradWeights);
+  }
+
+  // gradTemp
+  let gradTemp = 0;
+  for (let s = 0; s < S; s++) { gradTemp += gradRawScores[s] * (-scores[s] / tempValue); }
+  if (!temperature.grad) temperature.grad = new Float32Array(1);
+  temperature.grad[0] += gradTemp;
+
+  // 计算 keysWithBias 和 gradKeysWithBias
+  const keysWithBias = new Float32Array(S * dModel);
+  for (let s = 0; s < S; s++) {
+    const off = s * dModel;
+    for (let d = 0; d < dModel; d++) {
+      let kv = keyBiasData[d];
+      for (let k = 0; k < dModel; k++) {
+        kv += x.data[off + k] * keyWeightData[k * dModel + d];
+      }
+      keysWithBias[off + d] = kv;
+    }
+  }
+
+  // gradQuery = sum_s(gradRawScores[s] * keysWithBias[s])
+  if (!query.grad) query.grad = new Float32Array(dModel);
+  for (let d = 0; d < dModel; d++) {
+    let sum = 0;
+    for (let s = 0; s < S; s++) { sum += gradRawScores[s] * keysWithBias[s * dModel + d]; }
+    query.grad[d] += sum;
+  }
+
+  // gradKeys = gradRawScores[s] * query
+  // gradKeyWeight += x[s,k]^T * gradKeys[s,d]
+  // gradKeyBias += gradKeys[s,d]
+  // gradX += gradKeys * keyWeight^T
+  if (!keyWeight.grad) keyWeight.grad = new Float32Array(dModel * dModel);
+  if (!keyBias.grad) keyBias.grad = new Float32Array(dModel);
+  for (let s = 0; s < S; s++) {
+    const off = s * dModel;
+    for (let d = 0; d < dModel; d++) {
+      const gkd = gradRawScores[s] * queryData[d];
+      keyBias.grad[d] += gkd;
+      for (let k = 0; k < dModel; k++) {
+        keyWeight.grad[k * dModel + d] += x.data[off + k] * gkd;
+        gradX[off + k] += gkd * keyWeightData[k * dModel + d];
+      }
+    }
+  }
+
+  return gradX;
+}
+
+/**
+ * 直接执行单个 tensor 的 backward op（不初始化梯度）
+ * 与 tensor.ts 的 _backwardOp 逻辑相同，但跳过 grad fill
+ */
+function _backwardOpDirect(t: Tensor): void {
+  const ctx = t._ctx!;
+  const g = t.grad!;
+
+  function _accumulateGrad(parent: Tensor, pg: Float32Array): void {
+    if (!parent.grad) {
+      parent.grad = new Float32Array(pg);
+    } else {
+      for (let i = 0; i < pg.length; i++) parent.grad[i] += pg[i];
+    }
+  }
+
+  switch (ctx.op) {
+    case 'matmul': {
+      const [a, b] = ctx.parents;
+      const [M, K] = a.shape;
+      const N = b.shape[1];
+      const ga = new Float32Array(a.size);
+      const gb = new Float32Array(b.size);
+      for (let i = 0; i < M; i++) {
+        for (let k = 0; k < K; k++) {
+          let sum = 0;
+          for (let j = 0; j < N; j++) {
+            sum += g[i * N + j] * b.data[k * N + j];
+            gb[k * N + j] += g[i * N + j] * a.data[i * K + k];
+          }
+          ga[i * K + k] = sum;
+        }
+      }
+      _accumulateGrad(a, ga);
+      _accumulateGrad(b, gb);
+      break;
+    }
+    case 'add': {
+      const [a, b] = ctx.parents;
+      _accumulateGrad(a, g);
+      if (a.shape.length === 2 && b.shape.length === 1) {
+        const gb = new Float32Array(b.size);
+        const [M, N] = a.shape;
+        for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) gb[j] += g[i * N + j];
+        _accumulateGrad(b, gb);
+      } else {
+        _accumulateGrad(b, g);
+      }
+      break;
+    }
+    case 'gelu': {
+      const a = ctx.parents[0];
+      const ga = new Float32Array(a.size);
+      const sqrt2OverPi = 0.7978845608;
+      const coeff = 0.044715;
+      for (let i = 0; i < a.size; i++) {
+        const x = a.data[i];
+        const inner = sqrt2OverPi * (x + coeff * x * x * x);
+        const tanhInner = Math.tanh(inner);
+        const sech2 = 1 - tanhInner * tanhInner;
+        const derivative = 0.5 * (1 + tanhInner) + 0.5 * x * sech2 * sqrt2OverPi * (1 + 3 * coeff * x * x);
+        ga[i] = g[i] * derivative;
+      }
+      _accumulateGrad(a, ga);
+      break;
+    }
+    case 'softmax': {
+      const a = ctx.parents[0];
+      const out = softmax(a);
+      const ga = new Float32Array(a.size);
+      if (a.shape.length === 2) {
+        const [rows, cols] = a.shape;
+        for (let i = 0; i < rows; i++) {
+          for (let j = 0; j < cols; j++) {
+            let sum = 0;
+            for (let k = 0; k < cols; k++) {
+              const s = out.data[i * cols + k];
+              sum += g[i * cols + k] * s * ((j === k ? 1 : 0) - out.data[i * cols + j]);
+            }
+            ga[i * cols + j] = sum;
+          }
+        }
+      }
+      _accumulateGrad(a, ga);
+      break;
+    }
+    case 'layerNorm': {
+      const eps = ctx.saved[0] as number;
+      const [a, weight, bias] = ctx.parents;
+      const lastDim = a.shape[a.shape.length - 1];
+      const outerSize = a.size / lastDim;
+      const ga = new Float32Array(a.size);
+      const gw = new Float32Array(weight.size);
+      const gb = new Float32Array(bias.size);
+      for (let i = 0; i < outerSize; i++) {
+        const off = i * lastDim;
+        let mean = 0;
+        for (let j = 0; j < lastDim; j++) mean += a.data[off + j];
+        mean /= lastDim;
+        let variance = 0;
+        for (let j = 0; j < lastDim; j++) { const d = a.data[off + j] - mean; variance += d * d; }
+        variance /= lastDim;
+        const invStd = 1 / Math.sqrt(variance + eps);
+        const xNorm = new Float32Array(lastDim);
+        for (let j = 0; j < lastDim; j++) xNorm[j] = (a.data[off + j] - mean) * invStd;
+        for (let j = 0; j < lastDim; j++) {
+          gw[j] += g[off + j] * xNorm[j];
+          gb[j] += g[off + j];
+        }
+        let dotGxNorm = 0, dotGw = 0;
+        for (let j = 0; j < lastDim; j++) {
+          dotGxNorm += g[off + j] * weight.data[j] * xNorm[j];
+          dotGw += g[off + j] * weight.data[j];
+        }
+        for (let j = 0; j < lastDim; j++) {
+          ga[off + j] = invStd * weight.data[j] * (g[off + j] - dotGw / lastDim - xNorm[j] * dotGxNorm / lastDim);
+        }
+      }
+      _accumulateGrad(a, ga);
+      _accumulateGrad(weight, gw);
+      _accumulateGrad(bias, gb);
+      break;
+    }
+    case 'scores': {
+      const s = ctx.saved[0] as number;
+      const [q, k] = ctx.parents;
+      const [B, H, S, D] = q.shape;
+      const gq = new Float32Array(q.size);
+      const gk = new Float32Array(k.size);
+      for (let b = 0; b < B; b++) {
+        for (let h = 0; h < H; h++) {
+          for (let i = 0; i < S; i++) {
+            for (let j = 0; j < S; j++) {
+              const gij = g[((b * H + h) * S + i) * S + j] * s;
+              for (let d = 0; d < D; d++) {
+                gq[((b * H + h) * S + i) * D + d] += gij * k.data[((b * H + h) * S + j) * D + d];
+                gk[((b * H + h) * S + j) * D + d] += gij * q.data[((b * H + h) * S + i) * D + d];
+              }
+            }
+          }
+        }
+      }
+      _accumulateGrad(q, gq);
+      _accumulateGrad(k, gk);
+      break;
+    }
+    case 'weightedSum': {
+      const [w, v] = ctx.parents;
+      const [B, H, S, S2] = w.shape;
+      const D = v.shape[3];
+      const gw = new Float32Array(w.size);
+      const gv = new Float32Array(v.size);
+      for (let b = 0; b < B; b++) {
+        for (let h = 0; h < H; h++) {
+          for (let i = 0; i < S; i++) {
+            for (let d = 0; d < D; d++) {
+              const gid = g[((b * H + h) * S + i) * D + d];
+              for (let j = 0; j < S2; j++) {
+                gw[((b * H + h) * S + i) * S2 + j] += gid * v.data[((b * H + h) * S + j) * D + d];
+                gv[((b * H + h) * S + j) * D + d] += gid * w.data[((b * H + h) * S + i) * S2 + j];
+              }
+            }
+          }
+        }
+      }
+      _accumulateGrad(w, gw);
+      _accumulateGrad(v, gv);
+      break;
+    }
+    case 'view':
+    case 'transpose':
+    case 'contiguous': {
+      const a = ctx.parents[0];
+      _accumulateGrad(a, g);
+      break;
+    }
+    case 'poolLast': {
+      const a = ctx.parents[0];
+      const seqLen = ctx.saved[0] as number;
+      const dModel = a.shape[1];
+      if (!a.grad) a.grad = new Float32Array(a.size);
+      const off = (seqLen - 1) * dModel;
+      for (let i = 0; i < dModel; i++) a.grad[off + i] += g[i];
+      break;
+    }
+    case 'cat': {
+      const dim = ctx.saved[0] as number;
+      let offset = 0;
+      for (const p of ctx.parents) {
+        const pSize = p.size;
+        const pg = g.slice(offset, offset + pSize);
+        _accumulateGrad(p, pg);
+        offset += pSize;
+      }
+      break;
+    }
+  }
+}
+
 /**
  * 对合并后的 patches 做平均池化
  */
@@ -500,6 +903,19 @@ export class AttentionPooling {
   }
 }
 
+/** forward 缓存的中间值 */
+export interface TextEncoderCache {
+  bytes: Uint8Array | number[];
+  byteEmbedOut: Tensor;
+  entropy: Float32Array;
+  boundaries: number[];
+  pooledOut: Tensor;
+  projected: Tensor;
+  positions: number[];
+  ropeApplied: Tensor;
+  encoderOut: Tensor;
+}
+
 // ==================== TextEncoder ====================
 
 export class TextEncoder {
@@ -512,6 +928,9 @@ export class TextEncoder {
   private learnedMerge: LearnedMerge;
   /** V2: 注意力池化（替代 mean pooling） */
   private attentionPooling: AttentionPooling;
+
+  /** 训练时缓存的中间值（绑定到每次 forward 调用） */
+  private _cached: TextEncoderCache | null = null;
 
   constructor(config?: Partial<TextEncoderConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -576,26 +995,73 @@ export class TextEncoder {
     );
 
     // 4. 池化 patches
-    let patches = poolPatches(embedded, boundaries);
+    let pooled = poolPatches(embedded, boundaries);
 
     // 5. 投影: [S', byteEmbedDim] → [S', outputDim]
-    patches = this.project(patches);
+    let projected = this.project(pooled);
 
     // 6. RoPE 位置编码
-    const seqLen = patches.shape[0];
+    const seqLen = projected.shape[0];
     const positions = Array.from({ length: seqLen }, (_, i) => i);
-    patches = applyRoPE(patches, positions);
+    let ropeApplied = applyRoPE(projected, positions);
 
     // 7. Encoder blocks
+    let encoderOut = ropeApplied;
     for (const block of this.encoderBlocks) {
-      patches = block.attn.forward(patches);
-      patches = block.ffn.forward(patches);
+      encoderOut = block.attn.forward(encoderOut);
+      encoderOut = block.ffn.forward(encoderOut);
     }
 
     // 8. 最终 LayerNorm
-    patches = layerNorm(patches, this.layerNorm.weight, this.layerNorm.bias);
+    let result = layerNorm(encoderOut, this.layerNorm.weight, this.layerNorm.bias);
 
-    return patches;
+    // 训练时缓存中间值
+    if (!isInferenceMode()) {
+      this._cached = {
+        bytes,
+        byteEmbedOut: embedded,
+        entropy,
+        boundaries,
+        pooledOut: pooled,
+        projected,
+        positions,
+        ropeApplied,
+        encoderOut,
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * 训练用前向：返回结果 + 缓存（不存到 this._cached）
+   * 每次调用产生独立的缓存，不会互相覆盖
+   */
+  forwardWithCache(text: string): { result: Tensor; cache: TextEncoderCache } {
+    const encoder = new TextEncoder_API();
+    const bytes = encoder.encode(text);
+    const embedded = this.byteEmbedding.forward(bytes);
+    const entropy = estimateEntropy(bytes, 2);
+    const boundaries = this.learnedMerge.computeMergeBoundaries(
+      embedded, entropy, this.config.maxSeqLen,
+    );
+    let pooled = poolPatches(embedded, boundaries);
+    let projected = this.project(pooled);
+    const seqLen = projected.shape[0];
+    const positions = Array.from({ length: seqLen }, (_, i) => i);
+    let ropeApplied = applyRoPE(projected, positions);
+    let encoderOut = ropeApplied;
+    for (const block of this.encoderBlocks) {
+      encoderOut = block.attn.forward(encoderOut);
+      encoderOut = block.ffn.forward(encoderOut);
+    }
+    let result = layerNorm(encoderOut, this.layerNorm.weight, this.layerNorm.bias);
+
+    const cache: TextEncoderCache = {
+      bytes, byteEmbedOut: embedded, entropy, boundaries,
+      pooledOut: pooled, projected, positions, ropeApplied, encoderOut,
+    };
+    return { result, cache };
   }
 
   /**
@@ -605,6 +1071,187 @@ export class TextEncoder {
   forwardPooled(text: string): Tensor {
     const seq = this.forward(text);
     return this.attentionPooling.forward(seq);
+  }
+
+  /** 单独做注意力池化（训练时用，不触发新的 forward 缓存） */
+  attentionPoolingForward(seq: Tensor): Tensor {
+    return this.attentionPooling.forward(seq);
+  }
+
+  /**
+   * 反向传播：从 pooled 输出的梯度，传播到所有可训练参数
+   *
+   * 流程：gradOutput → AttentionPooling.backward → LayerNorm.backward
+   *       → EncoderBlocks.backward (autograd) → RoPE.backward
+   *       → Projection.backward → poolPatches.backward → ByteEmbedding.backward
+   *
+   * @param gradOutput [1, outputDim] 来自 InfoNCE 的梯度
+   * @param encoderOutput [S, outputDim] forward() 返回的 encoder 输出（LN 后、pooling 前）
+   * @param cache forwardWithCache 返回的缓存
+   */
+  backward(gradOutput: Float32Array, encoderOutput: Tensor, cache: TextEncoderCache): void {
+    const { byteEmbedOut: embedded, boundaries, positions, bytes } = cache;
+    const { outputDim, byteEmbedDim } = this.config;
+    const seqLen = positions.length;
+    if (seqLen === 0) return;
+
+    // 1. AttentionPooling backward → grad 到 encoder 最终输出
+    const gradSeq = attentionPoolingBackward(
+      gradOutput,
+      encoderOutput,
+      this.attentionPooling.query.data,
+      this.attentionPooling.keyWeight.data,
+      this.attentionPooling.keyBias.data,
+      this.attentionPooling.temperature.data[0],
+      outputDim,
+      this.attentionPooling.query,
+      this.attentionPooling.keyWeight,
+      this.attentionPooling.keyBias,
+      this.attentionPooling.temperature,
+    );
+
+    // 2. 最终 LayerNorm backward
+    const gradAfterLN = new Float32Array(seqLen * outputDim);
+    gradAfterLN.set(gradSeq);
+
+    // 手动计算 LayerNorm backward
+    const lnIn = cache.encoderOut;
+    const lnW = this.layerNorm.weight;
+    const lnB = this.layerNorm.bias;
+    const eps = 1e-5;
+    for (let i = 0; i < seqLen; i++) {
+      const off = i * outputDim;
+      let mean = 0;
+      for (let j = 0; j < outputDim; j++) mean += lnIn.data[off + j];
+      mean /= outputDim;
+      let variance = 0;
+      for (let j = 0; j < outputDim; j++) {
+        const diff = lnIn.data[off + j] - mean;
+        variance += diff * diff;
+      }
+      variance /= outputDim;
+      const invStd = 1 / Math.sqrt(variance + eps);
+
+      const xNorm = new Float32Array(outputDim);
+      for (let j = 0; j < outputDim; j++) {
+        xNorm[j] = (lnIn.data[off + j] - mean) * invStd;
+      }
+
+      if (!lnW.grad) lnW.grad = new Float32Array(lnW.size);
+      if (!lnB.grad) lnB.grad = new Float32Array(lnB.size);
+      for (let j = 0; j < outputDim; j++) {
+        lnW.grad[j] += gradAfterLN[off + j] * xNorm[j];
+        lnB.grad[j] += gradAfterLN[off + j];
+      }
+
+      let dotGxNorm = 0;
+      for (let j = 0; j < outputDim; j++) {
+        dotGxNorm += gradAfterLN[off + j] * lnW.data[j] * xNorm[j];
+      }
+      let dotGw = 0;
+      for (let j = 0; j < outputDim; j++) {
+        dotGw += gradAfterLN[off + j] * lnW.data[j];
+      }
+      for (let j = 0; j < outputDim; j++) {
+        gradAfterLN[off + j] = invStd * lnW.data[j] * (
+          gradAfterLN[off + j] - dotGw / outputDim - xNorm[j] * dotGxNorm / outputDim
+        );
+      }
+    }
+
+    // 3. Encoder blocks backward（手动沿计算图传播）
+    // 从 lnIn (encoder blocks 最后输出) 开始，反向穿过每个 block
+    let gradAccum = new Float32Array(gradAfterLN);
+
+    // 反向遍历 encoder blocks（每块: attn(LN(x)) + x → ffn(LN(y)) + y）
+    for (let blockIdx = this.encoderBlocks.length - 1; blockIdx >= 0; blockIdx--) {
+      const block = this.encoderBlocks[blockIdx];
+      // 对每个 block，输入是 ropeApplied（blockIdx==0）或上一个 block 的输出
+      // 输出是下一个 block 的输入（或 lnIn）
+      // 我们需要知道每个 block 的输入和输出
+      // 但由于我们没有缓存每个 block 的中间值，这里用 autograd
+    }
+
+    // 用 autograd 从 encoderOut (lnIn) 反向传播
+    // 问题：backward() 会 fill(1)，但我们已有梯度
+    // 解决：手动遍历计算图
+    {
+      const visited = new Set<Tensor>();
+      const order: Tensor[] = [];
+      const queue: Tensor[] = [lnIn];
+      while (queue.length > 0) {
+        const t = queue.shift()!;
+        if (visited.has(t)) continue;
+        visited.add(t);
+        order.push(t);
+        if (t._ctx) {
+          for (const p of t._ctx.parents) {
+            if (!visited.has(p)) queue.push(p);
+          }
+        }
+      }
+      // 设置 lnIn 的梯度（不覆盖）
+      if (!lnIn.grad) lnIn.grad = new Float32Array(lnIn.size);
+      for (let i = 0; i < gradAccum.length; i++) lnIn.grad[i] += gradAccum[i];
+      // 反向执行
+      for (const t of order) {
+        if (!t._ctx || !t.grad) continue;
+        _backwardOpDirect(t);
+      }
+    }
+
+    // ropeApplied 的梯度来自 encoder blocks 的输入梯度
+    const ropeApplied = cache.ropeApplied;
+    const gradAfterRope = ropeApplied.grad
+      ? new Float32Array(ropeApplied.grad)
+      : new Float32Array(seqLen * outputDim);
+
+    // 4. RoPE backward（逆旋转）
+    const gradAfterProjection = applyRoPEBackward(gradAfterRope, positions, outputDim);
+
+    // 5. Projection backward
+    const projected = cache.projected;
+    const gradW = new Float32Array(byteEmbedDim * outputDim);
+    const gradB = new Float32Array(outputDim);
+    for (let s = 0; s < seqLen; s++) {
+      const gOff = s * outputDim;
+      for (let d = 0; d < outputDim; d++) {
+        const g = gradAfterProjection[gOff + d];
+        gradB[d] += g;
+        for (let k = 0; k < byteEmbedDim; k++) {
+          gradW[k * outputDim + d] += cache.pooledOut.data[s * byteEmbedDim + k] * g;
+        }
+      }
+    }
+    if (!this.projection.w.grad) this.projection.w.grad = new Float32Array(this.projection.w.size);
+    if (!this.projection.b.grad) this.projection.b.grad = new Float32Array(this.projection.b.size);
+    for (let i = 0; i < this.projection.w.size; i++) this.projection.w.grad[i] += gradW[i];
+    for (let i = 0; i < this.projection.b.size; i++) this.projection.b.grad[i] += gradB[i];
+
+    // gradPooledOut = gradAfterProjection @ projection.w^T
+    const gradPooledOut = new Float32Array(seqLen * byteEmbedDim);
+    for (let s = 0; s < seqLen; s++) {
+      for (let k = 0; k < byteEmbedDim; k++) {
+        let sum = 0;
+        for (let d = 0; d < outputDim; d++) {
+          sum += gradAfterProjection[s * outputDim + d] * this.projection.w.data[k * outputDim + d];
+        }
+        gradPooledOut[s * byteEmbedDim + k] = sum;
+      }
+    }
+
+    // 6. poolPatches backward
+    const gradEmbedded = poolPatchesBackward(
+      gradPooledOut, boundaries, embedded.shape[0], byteEmbedDim,
+    );
+
+    // 7. ByteEmbedding backward
+    byteEmbeddingBackward(
+      gradEmbedded,
+      Array.from(bytes),
+      this.byteEmbedding.weight,
+      byteEmbedDim,
+    );
   }
 
   /**
