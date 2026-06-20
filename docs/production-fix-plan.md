@@ -414,3 +414,40 @@ Week 2 (6/27 - 7/4)
 | Embedding 模型池集成 | embedding 模型注册到模型池，三脑路由自动选择最优 provider |
 | Embedding 降级链 | API 不可用 → 本地 ONNX → TF-IDF，自动切换无报错 |
 | Embedding 语义检索 | “开心”能匹配到“快乐”，“bug”能匹配到“错误” |
+
+---
+
+## 七、执行记录
+
+### 2026-06-20 执行结果
+
+| # | 任务 | 提交 | 状态 |
+|---|------|------|------|
+| 1 | 文件写入 LLM 误判 | `8cc248c` | ✅ write_file 返回格式改为 ✅/❌ |
+| 2 | 消息重放风暴 | `8cc248c` | ✅ REPLAY_BUFFER_SIZE 50→20 + resume_ack |
+| 3 | 前端重连退避 | — | ✅ 已有实现（computeBackoff + jitter） |
+| 4 | Embedding 模型池注册 | `8cc248c` | ✅ 静态注入 bge-small-zh 到模型池 |
+| 5 | Embedding 统一路由 + 降级 | `7825cc1` | ✅ 所有失败都降级 TF-IDF |
+| 6 | 本地 ONNX provider | `8f81f7f` | ✅ 代码就绪，需安装 @huggingface/transformers |
+| 7 | 前端配置界面 | — | ✅ 已有基础功能（设置→添加端点） |
+
+### Embedding 三级降级链（已实现）
+
+```
+1. 本地 ONNX（@huggingface/transformers 未安装 → 自动跳过）
+   ↓
+2. API embedding（无 SiliconFlow Key → 自动跳过）
+   ↓
+3. TF-IDF 降级（始终可用，~1ms）
+```
+
+当前状态：只有 MiMo Key，embedding 自动走 TF-IDF。添加 SiliconFlow Key 后自动升级。
+
+### 启用本地 ONNX 的步骤
+
+```bash
+cd /home/work/.openclaw/workspace/buddy
+npm install @huggingface/transformers
+# 首次运行自动下载模型到 ~/.buddy/models/（~50MB）
+# 后续直接加载缓存，延迟 ~50ms
+```
