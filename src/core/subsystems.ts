@@ -18,6 +18,7 @@ import { EdgeTTSBackend } from '../voice/edge-tts.js';
 import { STMPStore } from '../memory/stmp.js';
 import { DreamEngine } from '../memory/dream.js';
 import { CognitiveEngine } from '../cognitive/engine.js';
+import { ONNXEmbeddingProvider, TfIdfEmbedding } from './embedding-providers/index.js';
 
 // ==================== TF-IDF Embedding 降级方案 ====================
 // 当无 embedding 模型可用时，使用简单的字符级 TF-IDF 向量作为后备
@@ -486,28 +487,41 @@ export class Subsystems {
     // --- 记忆 ---
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
     // 注入 embedding 调用器（用于记忆向量检索）
-    // 优先使用 embedding 模型，失败时降级到 FTS5
+    // 优先级：本地 ONNX → API → TF-IDF 降级
+    const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models') });
+    const tfidfFallback = new TfIdfEmbedding(128);
+
+    // 异步初始化 ONNX（不阻塞启动）
+    ONNXEmbeddingProvider.canInit().then(canInit => {
+      if (canInit) {
+        onnxProvider.init().catch(err => {
+          if (verbose) console.warn('[Embedding] ONNX 初始化失败，将使用 API 或 TF-IDF:', err.message);
+        });
+      } else if (verbose) {
+        console.log('[Embedding] @huggingface/transformers 未安装，跳过 ONNX provider');
+      }
+    }).catch(() => {});
+
     this.memory.setEmbedCaller(async (text: string) => {
+      // 1. 尝试本地 ONNX
+      if (onnxProvider.isAvailable()) {
+        try {
+          const vector = await onnxProvider.embed(text);
+          return { vector, dimensions: onnxProvider.dimensions, model: onnxProvider.name };
+        } catch { /* 降级到下一步 */ }
+      }
+
+      // 2. 尝试 API（通过模型池路由）
       try {
         const result = await this._llm.executeMultimodal('embedding', text);
-        if (result.type !== 'embedding' || !result.embeddings[0]) {
-          throw new Error('Embedding result empty');
+        if (result.type === 'embedding' && result.embeddings[0]) {
+          return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
         }
-        return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
-      } catch (err) {
-        // 降级：使用简单的 TF-IDF 向量（128维）作为后备
-        const msg = (err as Error).message;
-        // 所有 embedding 失败都降级到 TF-IDF，不只是“无可用模型”
-        const isEmbedFail = msg.includes('无可用模型') || msg.includes('No available model')
-          || msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('401')
-          || msg.includes('403') || msg.includes('404') || msg.includes('timeout')
-          || msg.includes('aborted') || msg.includes('Embedding result empty');
-        if (isEmbedFail) {
-          const vector = simpleTfIdfEmbed(text, 128);
-          return { vector, dimensions: 128, model: 'tfidf-fallback' };
-        }
-        throw err;
-      }
+      } catch { /* 降级到下一步 */ }
+
+      // 3. TF-IDF 降级（始终可用）
+      const vector = await tfidfFallback.embed(text);
+      return { vector, dimensions: tfidfFallback.dimensions, model: tfidfFallback.name };
     });
     // 异步补全缺失的 embedding（不阻塞启动）
     this.memory.embedBatch(50).catch(() => {});
