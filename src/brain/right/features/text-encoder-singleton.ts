@@ -6,21 +6,54 @@
  */
 
 import { TextEncoder, type TextEncoderConfig } from './text-encoder.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let _instance: TextEncoder | null = null;
 let _refCount = 0;
 
-// LRU 缓存：pooled output (Float32Array[128])
+// LRU 缓存：pooled output (Float32Array[384])
 const CACHE_MAX = 256;
 const _cache = new Map<string, Float32Array>();
 
 /**
  * 获取全局 TextEncoder 单例
  * 首次调用时创建，后续返回同一实例
+ *
+ * 加载优先级：
+ * 1. 训练权重文件 byte-encoder-v2.bin（项目根目录 training-data/）
+ * 2. 不存在则用随机初始化（未训练状态）
  */
 export function getGlobalTextEncoder(config?: Partial<TextEncoderConfig>): TextEncoder {
   if (!_instance) {
-    _instance = new TextEncoder(config);
+    // 尝试加载训练权重
+    const weightPaths = [
+      path.resolve(__dirname, '../../../../../training-data/byte-encoder-v2.bin'),
+      path.resolve(__dirname, '../../../../training-data/byte-encoder-v2.bin'),
+    ];
+
+    let loaded = false;
+    for (const wp of weightPaths) {
+      if (fs.existsSync(wp)) {
+        try {
+          const buf = fs.readFileSync(wp).buffer;
+          _instance = TextEncoder.deserialize(buf);
+          console.log(`[ByteEncoder] 已加载训练权重: ${wp} (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`);
+          loaded = true;
+          break;
+        } catch (e) {
+          console.warn(`[ByteEncoder] 加载权重失败: ${wp}`, e);
+        }
+      }
+    }
+
+    if (!loaded) {
+      _instance = new TextEncoder(config);
+      console.log('[ByteEncoder] 未找到训练权重，使用随机初始化');
+    }
   }
   _refCount++;
   return _instance;

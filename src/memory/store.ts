@@ -97,6 +97,10 @@ export class MemoryStore {
   private embedCaller: ((text: string) => Promise<{ vector: number[]; dimensions: number; model: string }>) | null = null;
   /** P2-2: embedding 可用性标记，余额不足时自动降级 */
   private embeddingAvailable = true;
+  /** 多路召回引擎（可选，有则替代单路 embedCaller 做融合检索） */
+  private multiPathRecall: any = null;
+  /** 每路 provider 的 embedding 缓存：providerLabel → (memoryId → vector) */
+  private multiPathVectors: Map<string, Map<number, { vector: Float32Array; dimensions: number }>> = new Map();
 
   constructor(dbPath: string) {
     const dir = path.dirname(dbPath);
@@ -272,6 +276,56 @@ export class MemoryStore {
   }
 
   /**
+   * 设置多路召回引擎
+   * 设置后 searchMemoriesHybridAsync 会用多路融合替代单路 embedding
+   */
+  setMultiPathRecall(recall: any): void {
+    this.multiPathRecall = recall;
+  }
+
+  /**
+   * 为单条记忆生成多路 embedding 并存储
+   * 每个 provider 独立生成向量，按 provider 标签分别缓存
+   */
+  async embedMemoryMultiPath(id: number, key: string, value: string): Promise<void> {
+    if (!this.multiPathRecall) return;
+    const text = `${key} ${value}`.slice(0, 2000);
+    try {
+      const allVectors = await this.multiPathRecall.embedAll(text);
+      for (const [label, result] of allVectors) {
+        if (!this.multiPathVectors.has(label)) this.multiPathVectors.set(label, new Map());
+        this.multiPathVectors.get(label)!.set(id, {
+          vector: new Float32Array(result.vector),
+          dimensions: result.dimensions,
+        });
+      }
+    } catch (err) {
+      console.warn('[MemoryStore] embedMemoryMultiPath failed:', (err as Error).message);
+    }
+  }
+
+  /**
+   * 批量补全多路 embedding
+   */
+  async embedBatchMultiPath(batchSize = 50): Promise<number> {
+    if (!this.multiPathRecall) return 0;
+    const rows = this.db.prepare(`
+      SELECT m.id, m.key, m.value FROM memories m
+      WHERE m.id NOT IN (
+        SELECT DISTINCT memory_id FROM memory_embeddings
+      )
+      LIMIT ?
+    `).all(batchSize) as Array<{ id: number; key: string; value: string }>;
+
+    let count = 0;
+    for (const row of rows) {
+      await this.embedMemoryMultiPath(row.id, row.key, row.value);
+      count++;
+    }
+    return count;
+  }
+
+  /**
    * 为单条记忆生成 embedding 并存储
    */
   async embedMemory(id: number, key: string, value: string): Promise<void> {
@@ -331,34 +385,118 @@ export class MemoryStore {
   }
 
   /**
-   * Embedding 向量检索 — 余弦相似度
+   * Embedding 向量检索 — 多路/单路余弦相似度
+   *
+   * 优先用 multiPathRecall 多路融合，否则回退到单路 embedCaller。
+   * 异步方法，因为需要调用 embedding provider 生成查询向量。
    */
-  searchMemoriesEmbedding(query: string, limit = 5): Array<{ key: string; value: string; similarity: number }> {
-    if (!this.embedCaller) return [];
+  async searchMemoriesEmbeddingAsync(query: string, limit = 5): Promise<Array<{ key: string; value: string; similarity: number }>> {
+    // 多路召回
+    if (this.multiPathRecall) {
+      try {
+        const allMemories = this.db.prepare(
+          'SELECT m.key, m.value, m.created_at FROM memories m'
+        ).all() as Array<{ key: string; value: string; created_at: number }>;
 
-    // 同步方式：查询向量需要异步获取，这里用一个 workaround
-    // 实际调用在 searchMemoriesHybridAsync 中
-    return [];
+        const multiResults = await this.multiPathRecall.search(query, allMemories);
+        return multiResults.map(r => ({
+          key: r.key,
+          value: r.value,
+          similarity: r.score,
+        })).slice(0, limit);
+      } catch (err) {
+        console.warn('[MemoryStore] searchMemoriesEmbeddingAsync multi-path failed:', (err as Error).message);
+      }
+    }
+
+    // 单路回退
+    if (!this.embedCaller || !this.embeddingAvailable) return [];
+    try {
+      const queryResult = await this.embedCaller(query.slice(0, 2000));
+      const queryVec = new Float32Array(queryResult.vector);
+
+      const rows = this.db.prepare(`
+        SELECT m.key, m.value, m.created_at, e.vector, e.dimensions
+        FROM memory_embeddings e
+        JOIN memories m ON m.id = e.memory_id
+      `).all() as Array<{ key: string; value: string; created_at: number; vector: Buffer; dimensions: number }>;
+
+      const scored = rows.map(row => {
+        const docVec = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4);
+        const similarity = cosineSimilarityDense(queryVec, docVec);
+        return { key: row.key, value: row.value, similarity };
+      });
+
+      scored.sort((a, b) => b.similarity - a.similarity);
+      return scored.slice(0, limit).filter(r => r.similarity > 0.01);
+    } catch (err) {
+      console.warn('[MemoryStore] searchMemoriesEmbeddingAsync failed:', (err as Error).message);
+      return [];
+    }
   }
 
   /**
-   * 异步混合检索 — FTS5 + TF-IDF + Embedding + 时序衰减
+   * 异步混合检索 — FTS5 + TF-IDF + (多路)Embedding + 时序衰减
    *
-   * 三路结果加权合并：FTS5(0.25) + TF-IDF(0.15) + Embedding(0.60)
+   * 有 multiPathRecall 时：FTS5 + TF-IDF + 多路 Embedding RRF 融合
+   * 否则回退到单路：FTS5(0.25) + TF-IDF(0.15) + Embedding(0.60)
    * 时序衰减：半衰期 ~14 天
    */
   async searchMemoriesHybridAsync(query: string, limit = 5): Promise<Array<{ key: string; value: string; score: number }>> {
     const ftsResults = this.searchMemories(query, limit * 2);
     const tfidfResults = this.searchMemoriesSemantic(query, limit * 2);
 
-    // Embedding 检索
+    // Embedding 检索（多路或单路）
     let embedResults: Array<{ key: string; value: string; similarity: number }> = [];
-    if (this.embedCaller && this.embeddingAvailable) {
+
+    if (this.multiPathRecall) {
+      // ── 多路召回融合 ──
+      try {
+        // 获取所有记忆，附带预计算的 embedding 向量（每路独立缓存）
+        const allMemories = this.db.prepare(`
+          SELECT m.id, m.key, m.value, m.created_at
+          FROM memories m
+        `).all() as Array<{ id: number; key: string; value: string; created_at: number }>;
+
+        // 构建带向量的文档列表（每路 provider 的缓存向量）
+        // 如果某路没有缓存向量，multiPathRecall.search 会实时计算
+        const providerLabels = [...this.multiPathVectors.keys()];
+        const documentsForSearch = allMemories.map(m => {
+          const doc: { key: string; value: string; vectors?: Record<string, number[]> } = {
+            key: m.key,
+            value: m.value,
+          };
+          // 附加每路的缓存向量
+          for (const label of providerLabels) {
+            const cached = this.multiPathVectors.get(label)?.get(m.id);
+            if (cached) {
+              if (!doc.vectors) doc.vectors = {};
+              doc.vectors[label] = Array.from(cached.vector);
+            }
+          }
+          return doc;
+        });
+
+        const multiResults = await this.multiPathRecall.search(query, documentsForSearch);
+
+        const timeMapLocal = new Map(allMemories.map(m => [m.key, m.created_at]));
+        embedResults = multiResults.map(r => {
+          const ageHours = (Date.now() - (timeMapLocal.get(r.key) ?? Date.now())) / (1000 * 60 * 60);
+          const timeDecay = Math.exp(-0.002 * ageHours);
+          return { key: r.key, value: r.value, similarity: r.score * timeDecay };
+        }).slice(0, limit * 2);
+      } catch (err) {
+        console.warn('[MemoryStore] multi-path recall failed:', (err as Error).message);
+        // 多路失败，回退到单路
+      }
+    }
+
+    // 单路回退（没有 multiPathRecall 或多路失败时）
+    if (embedResults.length === 0 && this.embedCaller && this.embeddingAvailable) {
       try {
         const queryResult = await this.embedCaller(query.slice(0, 2000));
         const queryVec = new Float32Array(queryResult.vector);
 
-        // 获取所有有 embedding 的记忆
         const rows = this.db.prepare(`
           SELECT m.key, m.value, m.created_at, e.vector, e.dimensions
           FROM memory_embeddings e
@@ -368,7 +506,6 @@ export class MemoryStore {
         const scored = rows.map(row => {
           const docVec = new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.byteLength / 4);
           const similarity = cosineSimilarityDense(queryVec, docVec);
-          // 时序衰减：半衰期 ~14 天
           const ageHours = (Date.now() - row.created_at) / (1000 * 60 * 60);
           const timeDecay = Math.exp(-0.002 * ageHours);
           return { key: row.key, value: row.value, similarity: similarity * timeDecay };

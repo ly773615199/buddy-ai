@@ -74,9 +74,9 @@ export class MemoryIntegrator {
       }
     } catch { /* 静默失败 */ }
 
-    // 路径 3: Embedding 向量检索（语义相似）
+    // 路径 3: Embedding 向量检索（多路/单路语义相似）
     try {
-      const embeddingResults = this.memory.searchMemoriesEmbedding(query, limit * 2);
+      const embeddingResults = await this.memory.searchMemoriesEmbeddingAsync(query, limit * 2);
       for (const r of embeddingResults) {
         const existing = results.get(r.key);
         if (existing) {

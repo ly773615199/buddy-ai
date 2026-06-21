@@ -18,7 +18,7 @@ import { EdgeTTSBackend } from '../voice/edge-tts.js';
 import { STMPStore } from '../memory/stmp.js';
 import { DreamEngine } from '../memory/dream.js';
 import { CognitiveEngine } from '../cognitive/engine.js';
-import { ONNXEmbeddingProvider, ByteEncoderEmbeddingProvider, EnhancedTfIdf } from './embedding-providers/index.js';
+import { ONNXEmbeddingProvider, ByteEncoderEmbeddingProvider, EnhancedTfIdf, MultiPathRecall } from './embedding-providers/index.js';
 
 // ==================== TF-IDF Embedding 降级方案 ====================
 // 当无 embedding 模型可用时，使用简单的字符级 TF-IDF 向量作为后备
@@ -503,55 +503,84 @@ export class Subsystems {
 
     // --- 记忆 ---
     this.memory = new MemoryStore(path.join(dbDir, 'memory.db'));
-    // 注入 embedding 调用器（用于记忆向量检索）
-    // 优先级：本地 ONNX → ByteEncoder → API → TF-IDF 降级
+
+    // ── 多路召回融合 ──
+    // ONNX / ByteEncoder / API / TF-IDF 各有所长，合力取长补短
     const onnxProvider = new ONNXEmbeddingProvider({ modelDir: path.join(dataDir, 'models'), verbose });
     const byteEncoderProvider = new ByteEncoderEmbeddingProvider();
     const enhancedTfidf = new EnhancedTfIdf();
 
+    const multiPathRecall = new MultiPathRecall({ topK: 20, rrfK: 60, verbose });
+
+    // 每路独立注册，权重反映信任度
+    multiPathRecall.addProvider({
+      provider: onnxProvider,
+      weight: 1.0,
+      minSimilarity: 0.05,
+      label: 'ONNX',
+    });
+    multiPathRecall.addProvider({
+      provider: byteEncoderProvider,
+      weight: 0.5,
+      minSimilarity: 0.1,
+      label: 'ByteEncoder',
+    });
+    // TF-IDF 作为独立一路（用 embed() 生成稀疏向量）
+    multiPathRecall.addProvider({
+      provider: {
+        name: 'enhanced-tfidf',
+        dimensions: 512,
+        embed: async (text: string) => enhancedTfidf.embed(text, 512),
+        isAvailable: () => true,
+      },
+      weight: 0.6,
+      minSimilarity: 0.01,
+      label: 'TF-IDF',
+    });
+
     // 异步初始化 ONNX（不阻塞启动）
-    ONNXEmbeddingProvider.canInit().then(canInit => {
+    ONNXEmbeddingProvider.canInit().then(async canInit => {
       if (canInit) {
-        onnxProvider.init().then(() => {
-          console.log('[Embedding] ✅ ONNX 本地模型就绪（优先级最高）');
-        }).catch(err => {
-          if (verbose) console.warn('[Embedding] ONNX 初始化失败:', err.message);
-        });
+        try {
+          await onnxProvider.init();
+          console.log('[Embedding] ✅ ONNX 本地模型就绪');
+        } catch (err) {
+          if (verbose) console.warn('[Embedding] ONNX 初始化失败:', (err as Error).message);
+        }
       } else {
         console.log('[Embedding] @huggingface/transformers 未安装，跳过 ONNX');
       }
-      // 打印降级链状态
-      const apiModels = this._embedModels.length;
-      console.log(`[Embedding] 降级链: ONNX(${canInit ? '可用' : '未安装'}) → ByteEncoder(始终可用) → API(${apiModels}个模型) → TF-IDF(始终可用)`);
+
+      const available = multiPathRecall.getAvailableProviders();
+      console.log(`[Embedding] 多路召回: ${available.join(' + ')} (RRF 融合)`);
     }).catch(() => {});
 
+    // 设置多路召回引擎
+    this.memory.setMultiPathRecall(multiPathRecall);
+
+    // 保留单路 embedCaller 作为 embedMemory（存储）的降级
     this.memory.setEmbedCaller(async (text: string) => {
-      // 1. 尝试本地 ONNX
+      // 优先用 ONNX（存储时只需一路，检索时才多路融合）
       if (onnxProvider.isAvailable()) {
         try {
           const vector = await onnxProvider.embed(text);
           return { vector, dimensions: onnxProvider.dimensions, model: onnxProvider.name };
-        } catch { /* 降级到下一步 */ }
+        } catch { /* 降级 */ }
       }
-
-      // 2. 尝试 ByteEncoder（本地零依赖）
       try {
         const vector = await byteEncoderProvider.embed(text);
         return { vector, dimensions: byteEncoderProvider.dimensions, model: byteEncoderProvider.name };
-      } catch { /* 降级到下一步 */ }
-
-      // 3. 尝试 API（通过模型池路由）
+      } catch { /* 降级 */ }
       try {
         const result = await this._llm.executeMultimodal('embedding', text);
         if (result.type === 'embedding' && result.embeddings[0]) {
           return { vector: result.embeddings[0], dimensions: result.dimensions, model: result.model ?? 'unknown' };
         }
-      } catch { /* 降级到下一步 */ }
-
-      // 3. 增强 TF-IDF 降级（始终可用）
+      } catch { /* 降级 */ }
       const vector = enhancedTfidf.embed(text, 512);
       return { vector, dimensions: 512, model: enhancedTfidf.name };
     });
+
     // 异步补全缺失的 embedding（不阻塞启动）
     this.memory.embedBatch(50).catch(() => {});
     this.pet = new PetManager(path.join(dbDir, 'pet.db'));

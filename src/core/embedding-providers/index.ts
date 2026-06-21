@@ -9,6 +9,8 @@
 
 export { ONNXEmbeddingProvider, type EmbeddingProvider } from './onnx-provider.js';
 export { ByteEncoderEmbeddingProvider } from './byte-encoder-provider.js';
+export { MultiPathRecall, rrfFusion } from './multi-path-recall.js';
+export type { ProviderConfig, RecallResult, MultiPathRecallConfig } from './multi-path-recall.js';
 export { EnhancedTfIdf } from './enhanced-tfidf.js';
 
 /**
