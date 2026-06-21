@@ -916,6 +916,37 @@ export interface TextEncoderCache {
   encoderOut: Tensor;
 }
 
+// ==================== 辅助函数 ====================
+
+/** L2 归一化：将向量缩放到单位球面 */
+function l2Normalize(t: Tensor): Tensor {
+  const data = new Float32Array(t.size);
+  let norm = 0;
+  for (let i = 0; i < t.size; i++) norm += t.data[i] * t.data[i];
+  norm = Math.sqrt(norm);
+  if (norm < 1e-8) return t; // 避免除零
+  for (let i = 0; i < t.size; i++) data[i] = t.data[i] / norm;
+  const out = new Tensor(data, t.shape);
+  // 保留计算图（训练时需要反向）
+  if (t._ctx) out._ctx = t._ctx;
+  return out;
+}
+
+/** 给张量加高斯噪声（训练时用） */
+function addGaussianNoise(t: Tensor, scale: number): Tensor {
+  const data = new Float32Array(t.size);
+  for (let i = 0; i < t.size; i++) {
+    // Box-Muller 变换生成高斯噪声
+    const u1 = Math.random() || 1e-10;
+    const u2 = Math.random();
+    const noise = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2) * scale;
+    data[i] = t.data[i] + noise;
+  }
+  const out = new Tensor(data, t.shape);
+  if (t._ctx) out._ctx = t._ctx;
+  return out;
+}
+
 // ==================== TextEncoder ====================
 
 export class TextEncoder {
@@ -1067,10 +1098,25 @@ export class TextEncoder {
   /**
    * 前向 + 池化：文本 → 单向量 [1, outputDim]
    * V2: 使用 AttentionPooling 替代 mean pooling
+   * 输出 L2 归一化，防止向量范数坍塌
    */
   forwardPooled(text: string): Tensor {
     const seq = this.forward(text);
-    return this.attentionPooling.forward(seq);
+    const pooled = this.attentionPooling.forward(seq);
+    return l2Normalize(pooled);
+  }
+
+  /**
+   * 训练用前向 + 池化 + 噪声注入
+   * SimCSE 需要同一文本的两次前向产生不同表示
+   * 在 encoder 输出上加高斯噪声，模拟 dropout 效果
+   */
+  forwardPooledNoisy(text: string, noiseScale = 0.1): Tensor {
+    const { result: seq, cache } = this.forwardWithCache(text);
+    // 给 encoder 输出加噪声（在 pooling 之前）
+    const noisySeq = addGaussianNoise(seq, noiseScale);
+    const pooled = this.attentionPooling.forward(noisySeq);
+    return l2Normalize(pooled);
   }
 
   /** 单独做注意力池化（训练时用，不触发新的 forward 缓存） */

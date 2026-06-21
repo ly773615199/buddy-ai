@@ -16,6 +16,17 @@ import { infoNCELoss, infoNCEGradient, cosineSimilarity } from './contrastive-lo
 import type { TrainingSample, Dataset } from './dataloader.js';
 import { BatchIterator } from './dataloader.js';
 
+/** L2 归一化 Float32Array */
+function l2Norm(v: Float32Array): Float32Array {
+  let norm = 0;
+  for (let i = 0; i < v.length; i++) norm += v[i] * v[i];
+  norm = Math.sqrt(norm);
+  if (norm < 1e-8) return v;
+  const out = new Float32Array(v.length);
+  for (let i = 0; i < v.length; i++) out[i] = v[i] / norm;
+  return out;
+}
+
 export interface SimCSEConfig {
   /** TextEncoder 配置 */
   encoder: Partial<TextEncoderConfig>;
@@ -121,27 +132,26 @@ export class SimCSETrainer {
     const seqCache2: Array<{ seq: Tensor; cache: TextEncoderCache }> = [];
 
     for (const text of texts) {
-      // 第一次前向（独立缓存）
-      const { result: s1, cache: c1 } = this.encoder.forwardWithCache(text);
-      const p1 = this.encoder.attentionPoolingForward(s1);
-      z1.push(new Float32Array(p1.data));
-      seqCache1.push({ seq: s1, cache: c1 });
+      // SimCSE: 一次干净前向（用于 backward）+ 一次带噪声前向（用于对比）
+      const { result: seq1, cache: c1 } = this.encoder.forwardWithCache(text);
+      const p1 = this.encoder.attentionPoolingForward(seq1);
+      const z1Norm = l2Norm(new Float32Array(p1.data));
+      z1.push(z1Norm);
+      seqCache1.push({ seq: seq1, cache: c1 });
 
-      // 第二次前向（独立缓存）
-      const { result: s2, cache: c2 } = this.encoder.forwardWithCache(text);
-      const p2 = this.encoder.attentionPoolingForward(s2);
+      // 第二次：带噪声的前向（不同视图，不需要 cache）
+      const p2 = this.encoder.forwardPooledNoisy(text, 0.05);
       z2.push(new Float32Array(p2.data));
-      seqCache2.push({ seq: s2, cache: c2 });
     }
 
     // InfoNCE 损失和梯度
     const loss = infoNCELoss(z1, z2, this.config.training.temperature);
     const [gradZ1, gradZ2] = infoNCEGradient(z1, z2, this.config.training.temperature);
 
-    // 反向传播：逐样本 backward
+    // 反向传播：只通过 z1（干净路径）传播梯度
+    // z2 是带噪声的前向，不参与梯度计算
     for (let i = 0; i < N; i++) {
       this.encoder.backward(gradZ1[i], seqCache1[i].seq, seqCache1[i].cache);
-      this.encoder.backward(gradZ2[i], seqCache2[i].seq, seqCache2[i].cache);
     }
 
     // AdamW 更新
