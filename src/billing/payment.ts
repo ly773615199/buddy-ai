@@ -11,6 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { PlanTier } from './subscription.js';
 import { runMigrations, type Migration } from '../core/migration.js';
+// @ts-ignore — stripe v22+ 内置类型但未正确导出
 import Stripe from 'stripe';
 
 const PAYMENT_MIGRATIONS: Migration[] = [

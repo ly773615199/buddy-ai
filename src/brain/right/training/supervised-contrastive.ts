@@ -575,13 +575,16 @@ export class SupervisedContrastiveTrainer {
       }
     }
 
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const _fs = fs!;
+    const _path = path!;
+
+    if (!_fs.existsSync(dir)) _fs.mkdirSync(dir, { recursive: true });
 
     // 保存参数
     const params = this.encoder.parameters();
     for (let i = 0; i < params.length; i++) {
       const buf = Buffer.from(params[i].data.buffer);
-      fs.writeFileSync(path.join(dir, `param_${i}.bin`), buf);
+      _fs.writeFileSync(_path.join(dir, `param_${i}.bin`), buf);
     }
 
     // 保存元信息
@@ -590,7 +593,7 @@ export class SupervisedContrastiveTrainer {
       config: this.config,
       paramShapes: params.map(p => p.shape),
     };
-    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
+    _fs.writeFileSync(_path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
 
     console.log(`[SupCon] Model saved to ${dir} (${params.length} params, step ${this.step})`);
   }

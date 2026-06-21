@@ -399,7 +399,7 @@ export class MemoryStore {
         ).all() as Array<{ key: string; value: string; created_at: number }>;
 
         const multiResults = await this.multiPathRecall.search(query, allMemories);
-        return multiResults.map(r => ({
+        return multiResults.map((r: any) => ({
           key: r.key,
           value: r.value,
           similarity: r.score,
@@ -480,7 +480,7 @@ export class MemoryStore {
         const multiResults = await this.multiPathRecall.search(query, documentsForSearch);
 
         const timeMapLocal = new Map(allMemories.map(m => [m.key, m.created_at]));
-        embedResults = multiResults.map(r => {
+        embedResults = multiResults.map((r: any) => {
           const ageHours = (Date.now() - (timeMapLocal.get(r.key) ?? Date.now())) / (1000 * 60 * 60);
           const timeDecay = Math.exp(-0.002 * ageHours);
           return { key: r.key, value: r.value, similarity: r.score * timeDecay };

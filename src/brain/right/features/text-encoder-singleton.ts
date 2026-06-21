@@ -40,7 +40,7 @@ export function getGlobalTextEncoder(config?: Partial<TextEncoderConfig>): TextE
       if (fs.existsSync(wp)) {
         try {
           const buf = fs.readFileSync(wp).buffer;
-          _instance = TextEncoder.deserialize(buf);
+          _instance = TextEncoder.deserialize(buf) as TextEncoder;
           console.log(`[ByteEncoder] 已加载训练权重: ${wp} (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB)`);
           loaded = true;
           break;
@@ -56,7 +56,7 @@ export function getGlobalTextEncoder(config?: Partial<TextEncoderConfig>): TextE
     }
   }
   _refCount++;
-  return _instance;
+  return _instance!;
 }
 
 /**
