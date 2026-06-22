@@ -276,7 +276,7 @@ export const search_files: ToolDef = {
 
 export const exec: ToolDef = {
   name: 'exec',
-  description: '执行 Shell 命令。有超时限制（30秒），输出有长度限制。沙箱保护：环境变量隔离、工作目录限制、危险命令拦截。',
+  description: '执行 Shell 命令。有超时限制（30秒），输出有长度限制。沙箱保护：环境变量隔离、工作目录限制、危险命令拦截。注意：创建/写入文件请优先使用 write_file，不要用 exec + echo/cat 替代。',
   parameters: z.object({
     command: z.string().describe('要执行的命令'),
     cwd: z.string().optional().describe('工作目录'),

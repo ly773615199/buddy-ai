@@ -37,8 +37,7 @@ export function getFallbackReply(attrs: Attributes): string {
 export const BEHAVIOR_COMPUTE_INTERVAL = 20;
 
 export const TOOL_CATEGORIES: Record<string, string> = {
-  chat: 'basic', read_file: 'basic', list_files: 'basic', exec: 'basic', git_status: 'basic', get_time: 'basic',
-  write_file: 'advanced', search_files: 'advanced', git_diff: 'advanced', git_log: 'advanced',
+  chat: 'basic', read_file: 'basic', list_files: 'basic', write_file: 'basic', exec: 'basic', git_status: 'basic', get_time: 'basic', search_files: 'advanced', git_diff: 'advanced', git_log: 'advanced',
   search_web: 'advanced', fetch_url: 'advanced', analyze_file: 'advanced', find_references: 'advanced',
   buddy_learn: 'advanced', scan_project: 'advanced',
   stmp_retrieve: 'expert', dream_consolidate: 'expert', knowledge_extract: 'expert',

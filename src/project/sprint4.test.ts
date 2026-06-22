@@ -55,9 +55,9 @@ describe('ArtifactManager', () => {
   });
 
   describe('create', () => {
-    it('should create an artifact', () => {
+    it('should create an artifact', async () => {
       const project = makeProject(store);
-      const art = am.create({
+      const art = await am.create({
         projectId: project.id,
         name: 'api-spec',
         type: 'document',
@@ -70,9 +70,9 @@ describe('ArtifactManager', () => {
       expect(art.content).toBe('# API Spec v1');
     });
 
-    it('should create with metadata', () => {
+    it('should create with metadata', async () => {
       const project = makeProject(store);
-      const art = am.create({
+      const art = await am.create({
         projectId: project.id,
         name: 'config',
         type: 'config',
@@ -84,16 +84,16 @@ describe('ArtifactManager', () => {
   });
 
   describe('update', () => {
-    it('should create new version on update', () => {
+    it('should create new version on update', async () => {
       const project = makeProject(store);
-      const v1 = am.create({
+      const v1 = await am.create({
         projectId: project.id,
         name: 'spec',
         type: 'document',
         content: 'v1 content',
       });
 
-      const v2 = am.update(v1.id, { content: 'v2 content' });
+      const v2 = await am.update(v1.id, { content: 'v2 content' });
 
       expect(v2.version).toBe(2);
       expect(v2.parentVersionId).toBe(v1.id);
@@ -101,18 +101,18 @@ describe('ArtifactManager', () => {
       expect(v2.name).toBe('spec');
     });
 
-    it('should throw for non-existent artifact', () => {
-      expect(() => am.update('art_x', { content: 'x' }))
-        .toThrow('Artifact not found');
+    it('should throw for non-existent artifact', async () => {
+      await expect(am.update('art_x', { content: 'x' }))
+        .rejects.toThrow('Artifact not found');
     });
   });
 
   describe('getVersions', () => {
-    it('should return all versions', () => {
+    it('should return all versions', async () => {
       const project = makeProject(store);
-      const v1 = am.create({ projectId: project.id, name: 'doc', type: 'document', content: 'v1' });
-      am.update(v1.id, { content: 'v2' });
-      am.update(v1.id, { content: 'v3' });
+      const v1 = await am.create({ projectId: project.id, name: 'doc', type: 'document', content: 'v1' });
+      await am.update(v1.id, { content: 'v2' });
+      await am.update(v1.id, { content: 'v3' });
 
       const versions = am.getVersions(project.id, 'doc');
       expect(versions).toHaveLength(3);
@@ -122,10 +122,10 @@ describe('ArtifactManager', () => {
   });
 
   describe('getLatest', () => {
-    it('should return latest version', () => {
+    it('should return latest version', async () => {
       const project = makeProject(store);
-      const v1 = am.create({ projectId: project.id, name: 'file', type: 'code', content: 'old' });
-      am.update(v1.id, { content: 'new' });
+      const v1 = await am.create({ projectId: project.id, name: 'file', type: 'code', content: 'old' });
+      await am.update(v1.id, { content: 'new' });
 
       const latest = am.getLatest(project.id, 'file');
       expect(latest!.content).toBe('new');
@@ -138,21 +138,21 @@ describe('ArtifactManager', () => {
   });
 
   describe('listLatest', () => {
-    it('should list only latest versions', () => {
+    it('should list only latest versions', async () => {
       const project = makeProject(store);
-      const a = am.create({ projectId: project.id, name: 'doc-a', type: 'document', content: 'a1' });
-      am.update(a.id, { content: 'a2' });
-      am.create({ projectId: project.id, name: 'doc-b', type: 'document', content: 'b1' });
+      const a = await am.create({ projectId: project.id, name: 'doc-a', type: 'document', content: 'a1' });
+      await am.update(a.id, { content: 'a2' });
+      await am.create({ projectId: project.id, name: 'doc-b', type: 'document', content: 'b1' });
 
       const list = am.listLatest(project.id);
       expect(list).toHaveLength(2);
       expect(list.find(a => a.name === 'doc-a')!.version).toBe(2);
     });
 
-    it('should filter by type', () => {
+    it('should filter by type', async () => {
       const project = makeProject(store);
-      am.create({ projectId: project.id, name: 'doc', type: 'document', content: '' });
-      am.create({ projectId: project.id, name: 'code', type: 'code', content: '' });
+      await am.create({ projectId: project.id, name: 'doc', type: 'document', content: '' });
+      await am.create({ projectId: project.id, name: 'code', type: 'code', content: '' });
 
       expect(am.listLatest(project.id, 'document')).toHaveLength(1);
       expect(am.listLatest(project.id, 'code')).toHaveLength(1);
@@ -160,20 +160,20 @@ describe('ArtifactManager', () => {
   });
 
   describe('diff', () => {
-    it('should detect content changes', () => {
+    it('should detect content changes', async () => {
       const project = makeProject(store);
-      const v1 = am.create({ projectId: project.id, name: 'x', type: 'document', content: 'old' });
-      const v2 = am.update(v1.id, { content: 'new' });
+      const v1 = await am.create({ projectId: project.id, name: 'x', type: 'document', content: 'old' });
+      const v2 = await am.update(v1.id, { content: 'new' });
 
       const d = am.diff(v1.id, v2.id);
       expect(d.contentChanged).toBe(true);
       expect(d.summary).toContain('内容已变更');
     });
 
-    it('should detect path changes', () => {
+    it('should detect path changes', async () => {
       const project = makeProject(store);
-      const v1 = am.create({ projectId: project.id, name: 'x', type: 'code', path: '/old/path' });
-      const v2 = am.update(v1.id, { path: '/new/path' });
+      const v1 = await am.create({ projectId: project.id, name: 'x', type: 'code', path: '/old/path' });
+      const v2 = await am.update(v1.id, { path: '/new/path' });
 
       const d = am.diff(v1.id, v2.id);
       expect(d.pathChanged).toBe(true);
@@ -181,10 +181,10 @@ describe('ArtifactManager', () => {
   });
 
   describe('deleteAll', () => {
-    it('should delete all versions', () => {
+    it('should delete all versions', async () => {
       const project = makeProject(store);
-      const v1 = am.create({ projectId: project.id, name: 'tmp', type: 'other', content: '1' });
-      am.update(v1.id, { content: '2' });
+      const v1 = await am.create({ projectId: project.id, name: 'tmp', type: 'other', content: '1' });
+      await am.update(v1.id, { content: '2' });
 
       const deleted = am.deleteAll(project.id, 'tmp');
       expect(deleted).toBe(2);

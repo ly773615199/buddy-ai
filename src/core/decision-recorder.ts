@@ -258,15 +258,12 @@ export class DecisionRecorder {
    * 追加一条记录到 JSONL 文件
    */
   private appendToFile(record: DecisionRecord): void {
-    try {
-      const dir = path.dirname(this.dataFile);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.appendFileSync(this.dataFile, JSON.stringify(record) + '\n');
-    } catch {
-      // 持久化失败不影响运行
-    }
+    const dir = path.dirname(this.dataFile);
+    const line = JSON.stringify(record) + '\n';
+    // 异步写入，不阻塞事件循环
+    fs.promises.mkdir(dir, { recursive: true })
+      .then(() => fs.promises.appendFile(this.dataFile, line))
+      .catch(() => { /* 持久化失败不影响运行 */ });
   }
 
   /**

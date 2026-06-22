@@ -188,9 +188,9 @@ export class EvolutionStateManager {
   private async persistSnapshot(snapshot: EvolutionSnapshot): Promise<void> {
     try {
       const dir = path.join(this.dataDir, 'evolution', 'snapshots');
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       const file = path.join(dir, `v${snapshot.version}.json`);
-      fs.writeFileSync(file, JSON.stringify(snapshot, null, 2));
+      await fs.promises.writeFile(file, JSON.stringify(snapshot, null, 2));
     } catch {
       // 静默失败，不影响主流程
     }
@@ -199,9 +199,9 @@ export class EvolutionStateManager {
   private async persistLog(entry: EvolutionLogEntry): Promise<void> {
     try {
       const dir = path.join(this.dataDir, 'evolution');
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       const file = path.join(dir, 'log.jsonl');
-      fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+      await fs.promises.appendFile(file, JSON.stringify(entry) + '\n');
     } catch {
       // 静默失败
     }
@@ -271,7 +271,8 @@ export class EvolutionStateManager {
       for (const [key, value] of this.intentRegistry) {
         data[String(key)] = value;
       }
-      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      fs.promises.writeFile(file, JSON.stringify(data, null, 2))
+        .catch(() => { /* 静默失败 */ });
     } catch {
       // 静默失败
     }

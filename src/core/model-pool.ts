@@ -2037,7 +2037,7 @@ export class ModelPool {
 
       // 保存用户偏好
       fs.writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify(this.preferences, null, 2));
-    } catch (e) { console.debug('[model-pool] persist fail', e); }
+    } catch (e) { console.warn('[model-pool] 状态持久化失败:', (e as Error).message); }
   }
 
   private loadUnifiedState(): void {

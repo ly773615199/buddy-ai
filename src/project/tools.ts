@@ -828,21 +828,21 @@ export const checkpoint_list: ToolDef = {
 
 export const artifact_create: ToolDef = {
   name: 'artifact_create',
-  description: '创建项目产出物（代码、文档、配置、测试等）。',
+  description: '创建项目产出物（代码、文档、配置、测试等）。如果提供 path 和 content，会实际写入磁盘。',
   parameters: z.object({
     projectId: z.string().describe('项目 ID'),
     name: z.string().describe('产出物名称'),
     type: z.enum(['code', 'document', 'config', 'data', 'design', 'test', 'other']).describe('类型'),
-    path: z.string().optional().describe('文件路径'),
-    content: z.string().optional().describe('内容'),
+    path: z.string().optional().describe('文件路径（提供后会实际创建文件）'),
+    content: z.string().optional().describe('内容（与 path 配合写入磁盘）'),
     planId: z.string().optional().describe('关联方案 ID'),
     metadata: z.record(z.unknown()).optional().describe('自定义元数据'),
   }),
-  permission: 'read_files',
+  permission: 'write_files',
   execute: async (args) => {
     const am = getArtifactManager();
     try {
-      const art = am.create({
+      const art = await am.create({
         projectId: args.projectId as string,
         planId: args.planId as string,
         name: args.name as string,
@@ -862,18 +862,18 @@ export const artifact_create: ToolDef = {
 
 export const artifact_update: ToolDef = {
   name: 'artifact_update',
-  description: '更新产出物（自动创建新版本）。',
+  description: '更新产出物（自动创建新版本）。如果提供 path 或 content，会实际写入磁盘。',
   parameters: z.object({
     artifactId: z.string().describe('产出物 ID'),
     content: z.string().optional().describe('新内容'),
     path: z.string().optional().describe('新路径'),
     metadata: z.record(z.unknown()).optional().describe('新元数据'),
   }),
-  permission: 'read_files',
+  permission: 'write_files',
   execute: async (args) => {
     const am = getArtifactManager();
     try {
-      const art = am.update(args.artifactId as string, {
+      const art = await am.update(args.artifactId as string, {
         content: args.content as string,
         path: args.path as string,
         metadata: args.metadata as Record<string, unknown>,

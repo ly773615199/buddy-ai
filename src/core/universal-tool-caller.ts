@@ -201,9 +201,20 @@ ${examples}`;
 （系统会返回命令输出，然后你总结给用户）`);
     }
 
+    // 写文件示例（优先级高：防止 LLM 用 exec 替代）
+    const writeFile = tools.find(t => t.name === 'write_file');
+    if (writeFile) {
+      examples.push(`用户：创建一个 hello.py 文件，内容是 print("hello")
+你：
+\`\`\`json
+{"tool": "write_file", "args": {"path": "hello.py", "content": "print(\\"hello\\")"}}
+\`\`\`
+（系统会创建文件并返回确认，然后你告诉用户文件已创建）`);
+    }
+
     // 搜索文件示例
     const search = tools.find(t => t.name === 'search_files');
-    if (search) {
+    if (search && !examples.some(e => e.includes('search_files'))) {
       examples.push(`用户：在 src 目录下搜索包含 "TODO" 的文件
 你：
 \`\`\`json
@@ -221,19 +232,9 @@ ${examples}`;
 \`\`\``);
     }
 
-    // 写文件示例
-    const writeFile = tools.find(t => t.name === 'write_file');
-    if (writeFile && !examples.some(e => e.includes('write_file'))) {
-      examples.push(`用户：创建一个 hello.py 文件，内容是 print("hello")
-你：
-\`\`\`json
-{"tool": "write_file", "args": {"path": "hello.py", "content": "print(\\"hello\\")"}}
-\`\`\``);
-    }
-
     // 获取时间示例
     const getTime = tools.find(t => t.name === 'get_time');
-    if (getTime && examples.length < 3) {
+    if (getTime && !examples.some(e => e.includes('get_time'))) {
       examples.push(`用户：现在几点了
 你：
 \`\`\`json

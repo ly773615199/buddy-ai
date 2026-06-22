@@ -833,7 +833,7 @@ export class ModelRouter {
       const data = { outcomes: this.outcomes.slice(-100), savedAt: Date.now() };
       fs.mkdirSync(path.dirname(this.dataFile), { recursive: true });
       fs.writeFileSync(this.dataFile, JSON.stringify(data, null, 2));
-    } catch (e) { console.debug('[model-router] persist fail', e); }
+    } catch (e) { console.warn('[model-router] 状态持久化失败:', (e as Error).message); }
   }
 
   private load(): void {

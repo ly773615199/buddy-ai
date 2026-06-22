@@ -9,8 +9,24 @@
  */
 
 import { randomUUID } from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { ProjectStore } from './store.js';
 import type { Artifact } from './types.js';
+
+/**
+ * 安全路径检查：防止写入敏感位置
+ */
+const SENSITIVE_PATHS = [
+  '/etc/', '/proc/', '/sys/', '/dev/',
+  '.ssh/', '.gnupg/', '.env', 'id_rsa', 'id_ed25519',
+  '.pem', '.key', '.aws/', '.kube/',
+];
+
+function isSensitivePath(p: string): boolean {
+  const resolved = path.resolve(p);
+  return SENSITIVE_PATHS.some(sp => resolved.includes(sp) || p.includes(sp));
+}
 
 export class ArtifactManager {
   constructor(private store: ProjectStore) {}
@@ -18,7 +34,7 @@ export class ArtifactManager {
   /**
    * 创建产出物
    */
-  create(params: {
+  async create(params: {
     projectId: string;
     planId?: string;
     name: string;
@@ -27,7 +43,7 @@ export class ArtifactManager {
     content?: string;
     createdBy?: string;
     metadata?: Record<string, unknown>;
-  }): Artifact {
+  }): Promise<Artifact> {
     const now = Date.now();
     const artifact: Artifact = {
       id: `art_${randomUUID().slice(0, 8)}`,
@@ -44,20 +60,26 @@ export class ArtifactManager {
     };
 
     this.store.createArtifact(artifact);
+
+    // 如果有 path + content，实际写入磁盘
+    if (artifact.path && artifact.content != null) {
+      await this.writeToDisk(artifact.path, artifact.content);
+    }
+
     return artifact;
   }
 
   /**
    * 更新产出物（自动创建新版本）
    */
-  update(
+  async update(
     artifactId: string,
     changes: {
       content?: string;
       path?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Artifact {
+  ): Promise<Artifact> {
     const existing = this.store.getArtifact(artifactId);
     if (!existing) throw new Error(`Artifact not found: ${artifactId}`);
 
@@ -81,6 +103,14 @@ export class ArtifactManager {
     };
 
     this.store.createArtifact(newArtifact);
+
+    // 如果 path 或 content 有变更，实际写入磁盘
+    const newPath = changes.path ?? existing.path;
+    const newContent = changes.content ?? existing.content;
+    if (newPath && newContent != null) {
+      await this.writeToDisk(newPath, newContent);
+    }
+
     return newArtifact;
   }
 
@@ -154,6 +184,26 @@ export class ArtifactManager {
       metadataChanged,
       summary: parts.length > 0 ? parts.join(' | ') : '无变更',
     };
+  }
+
+  /**
+   * 将产出物内容写入磁盘
+   */
+  private async writeToDisk(filePath: string, content: string): Promise<void> {
+    // 安全检查
+    if (isSensitivePath(filePath)) {
+      console.warn(`[ArtifactManager] 拒绝写入敏感路径: ${filePath}`);
+      return;
+    }
+
+    try {
+      const resolved = path.resolve(filePath);
+      const dir = path.dirname(resolved);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(resolved, content, 'utf-8');
+    } catch (err) {
+      console.warn(`[ArtifactManager] 文件写入失败 (${filePath}): ${(err as Error).message}`);
+    }
   }
 
   /**

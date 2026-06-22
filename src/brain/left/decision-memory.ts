@@ -372,10 +372,11 @@ export class DecisionMemory {
 
   private appendToFile(record: DecisionRecord): void {
     if (!this.dataFile) return;
-    try {
-      const dir = path.dirname(this.dataFile);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(this.dataFile, JSON.stringify(record) + '\n');
-    } catch { /* write failed, non-critical */ }
+    const dir = path.dirname(this.dataFile);
+    const line = JSON.stringify(record) + '\n';
+    // 异步写入，不阻塞事件循环
+    fs.promises.mkdir(dir, { recursive: true })
+      .then(() => fs.promises.appendFile(this.dataFile!, line))
+      .catch(() => { /* write failed, non-critical */ });
   }
 }

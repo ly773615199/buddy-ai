@@ -78,7 +78,7 @@ export class SkillGrowth {
 
     // 每 60 秒自动保存一次
     this.autoSaveTimer = setInterval(() => {
-      this.save().catch(() => {});
+      this.save().catch((e) => { console.warn('[SkillGrowth] 定时保存失败:', (e as Error).message); });
     }, 60_000);
 
     // 进程退出时保存
@@ -104,7 +104,7 @@ export class SkillGrowth {
       clearInterval(this.autoSaveTimer);
       this.autoSaveTimer = null;
     }
-    this.save().catch(() => {});
+    this.save().catch((e) => { console.warn('[SkillGrowth] dispose保存失败:', (e as Error).message); });
   }
 
   /** 记录一次 Skill 调用 */

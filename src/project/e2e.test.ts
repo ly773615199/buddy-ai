@@ -52,7 +52,7 @@ describe('ProjectModel E2E', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('complete project lifecycle', () => {
+  it('complete project lifecycle', async () => {
     // === 1. 创建项目 ===
     const project = (() => {
       const now = Date.now();
@@ -137,7 +137,7 @@ describe('ProjectModel E2E', () => {
     em.markStepDone(project.id, 'step_5', '优化完成');
 
     // === 10. 创建产出物 ===
-    const doc = am.create({
+    const doc = await am.create({
       projectId: project.id,
       name: 'API 文档',
       type: 'document',
@@ -145,7 +145,7 @@ describe('ProjectModel E2E', () => {
     });
     expect(doc.version).toBe(1);
 
-    const docV2 = am.update(doc.id, { content: '# API 文档 v2\n\n## 登录接口\n## 看板接口' });
+    const docV2 = await am.update(doc.id, { content: '# API 文档 v2\n\n## 登录接口\n## 看板接口' });
     expect(docV2.version).toBe(2);
 
     // === 11. 记录教训 ===
