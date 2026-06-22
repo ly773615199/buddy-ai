@@ -1160,6 +1160,13 @@ export class Subsystems {
 
         // V2-缺口5: 注入资源中心到 DAG 规划器（资源感知规划）
         this.dagPlanner.setResourceHub(system.hub);
+
+        // 注入资源画像到三脑决策管线（规则引擎 + 调度器）
+        if (this.threeBrain) {
+          this.threeBrain.setResourceHub(system.hub);
+          if (verbose) console.log('[ThreeBrain] 资源画像已注入决策管线');
+        }
+
         // 通知等待者 resourceSystem 已就绪
         this._resolveResourceSystemReady?.();
 

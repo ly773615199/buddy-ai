@@ -14,13 +14,35 @@ import type {
   DAGSkeleton, SkeletonStep, GateResult, GateViolation, TaskDAG,
 } from '../../orchestrate/types.js';
 import type { ToolRegistry } from '../../tools/registry.js';
+import type { UnifiedResourceHub } from '../hub/unified-resource-hub.js';
+import type { ResourceType } from '../hub/types.js';
 
 export class RuleEngine {
   private rules: Rule[] = [];
   private negations: Map<string, number> = new Map();
+  private resourceHub: UnifiedResourceHub | null = null;
 
   constructor() {
     this.loadBuiltinRules();
+  }
+
+  /** 注入资源画像系统 */
+  setResourceHub(hub: UnifiedResourceHub): void {
+    this.resourceHub = hub;
+  }
+
+  /**
+   * 查询能处理指定任务的资源
+   * 封装 recommend()，供规则 condition/action 使用
+   */
+  findResources(
+    taskType: string,
+    domain?: string,
+    type?: ResourceType,
+    context?: { requiresToolCalling?: boolean; requiresVision?: boolean },
+  ) {
+    if (!this.resourceHub) return [];
+    return this.resourceHub.recommend(taskType, domain, type, context);
   }
 
   /** 加载内置规则（从 agent.ts 迁移的 8 条 if-else） */
@@ -413,7 +435,7 @@ export class RuleEngine {
         createdAt: now,
       },
 
-      // ── 问候/闲聊规则 ──
+      // ── 问候/闲聊规则（资源感知） ──
       {
         id: 'builtin-greeting',
         name: '问候/闲聊 → 简单回复',
@@ -422,11 +444,47 @@ export class RuleEngine {
           const content = (signal.content ?? "").toLowerCase().trim();
           return /^(你好|hello|hi|hey|嗨|在吗|早上好|good\s*morning|good\s*evening|晚安|good\s*night|谢谢|thanks|thank\s*you|再见|bye|拜拜)$/.test(content);
         },
-        action: (signal) => ({
-          mode: 'single', reason: '问候/闲聊，简单回复',
-          selectedNodes: [{ id: 'local', type: 'local_expert' }],
-          confidence: 0.95, source: 'rule',
-        }),
+        action: (signal) => {
+          // 查资源画像：谁能处理 chat？
+          const experts = this.findResources('chat', undefined, 'local_expert');
+          if (experts.length > 0 && experts[0].healthScore > 40) {
+            return {
+              mode: 'single' as const,
+              reason: `问候/闲聊，资源画像推荐本地专家: ${experts[0].id}`,
+              selectedNodes: [{
+                id: experts[0].id,
+                type: 'local_expert' as const,
+                domain: (experts[0].metadata as any).domain as string,
+              }],
+              confidence: experts[0].healthScore / 100,
+              source: 'rule' as const,
+            };
+          }
+          // 无本地专家 → 用最便宜的云模型
+          const models = this.findResources('chat', undefined, 'model');
+          if (models.length > 0) {
+            return {
+              mode: 'single' as const,
+              reason: `问候/闲聊，资源画像推荐云模型: ${models[0].id}`,
+              selectedNodes: [{
+                id: models[0].id,
+                type: 'cloud_node' as const,
+                provider: (models[0].metadata as any).provider as string,
+                model: (models[0].metadata as any).model as string,
+              }],
+              confidence: 0.7,
+              source: 'rule' as const,
+            };
+          }
+          // 无可用资源
+          return {
+            mode: 'single' as const,
+            reason: '问候/闲聊，无可用资源',
+            selectedNodes: [],
+            confidence: 0.1,
+            source: 'rule' as const,
+          };
+        },
         source: 'builtin',
         stats: { hits: 0, successes: 0, lastUsed: 0 },
         createdAt: now,
@@ -769,7 +827,9 @@ export class RuleEngine {
     body?: BodyState,
   ): ExecutionPlan | null {
     const sorted = [...this.rules].sort((a, b) => b.priority - a.priority);
+    const content = (signal.content ?? '').trim();
 
+    // 第一轮：原始 content 匹配
     for (const rule of sorted) {
       const fingerprint = this.fingerprint(signal);
       if (this.negations.has(fingerprint)) continue;
@@ -778,14 +838,51 @@ export class RuleEngine {
         rule.stats.hits++;
         rule.stats.lastUsed = Date.now();
         const plan = rule.action(signal, resources);
-        // Step 14: 尝试提取直接工具调用（跳过 LLM）
-        const directTool = RuleEngine.tryExtractDirectTool(signal.content ?? '');
+        const directTool = RuleEngine.tryExtractDirectTool(content);
         if (directTool) {
           plan.directTool = directTool;
           plan.mode = 'direct';
           plan.reason = `${plan.reason} → 直接执行 ${directTool.name}`;
         }
         return plan;
+      }
+    }
+
+    // 第二轮：自然语言中提取命令后重试
+    const embedded = RuleEngine.extractEmbeddedCommand(content);
+    if (embedded && embedded !== content) {
+      const syntheticSignal = { ...signal, content: embedded };
+      for (const rule of sorted) {
+        if (rule.condition(syntheticSignal, resources, intuition, body)) {
+          rule.stats.hits++;
+          rule.stats.lastUsed = Date.now();
+          const plan = rule.action(syntheticSignal, resources);
+          plan.reason = `${plan.reason} → 命令提取: "${embedded}"`;
+          const directTool = RuleEngine.tryExtractDirectTool(embedded);
+          if (directTool) {
+            plan.directTool = directTool;
+            plan.mode = 'direct';
+            plan.reason = `${plan.reason} → 直接执行 ${directTool.name}`;
+          }
+          return plan;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 从自然语言中提取嵌入的命令
+   * "帮我执行 git status" → "git status"
+   * "运行一下 npm install" → "npm install"
+   */
+  static extractEmbeddedCommand(content: string): string | null {
+    const m = content.match(/(?:帮我|请|麻烦|运行|执行|跑|看看?|查一下?|试一下?)(?:一下)?\s+(.+)/i);
+    if (m) {
+      const candidate = m[1].trim().replace(/[吧呗啊呀哦哈]+$/, '');
+      if (/^(git|npm|yarn|pnpm|pip|docker|curl|cat|ls|grep|find|make|cargo|tsc|node|python|docker-compose)\s/i.test(candidate)) {
+        return candidate;
       }
     }
     return null;

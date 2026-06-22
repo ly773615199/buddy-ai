@@ -423,3 +423,105 @@ describe('HomeostasisRegulator — PID 稳态调节', () => {
     });
   });
 });
+
+// ==================== 资源感知 + 自然语言命令提取 ====================
+
+describe('RuleEngine 资源感知', () => {
+  let engine: RuleEngine;
+
+  beforeEach(() => {
+    engine = new RuleEngine();
+  });
+
+  describe('问候规则资源感知', () => {
+    it('你好 → 命中 greeting 规则', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: '你好', complexity: 'simple', taskType: 'chat', domains: [] }),
+        makeResources(),
+      );
+      expect(plan).not.toBeNull();
+      expect(plan!.reason).toContain('问候');
+    });
+
+    it('hello → 命中 greeting 规则', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: 'hello', complexity: 'simple', taskType: 'chat', domains: [] }),
+        makeResources(),
+      );
+      expect(plan).not.toBeNull();
+      expect(plan!.reason).toContain('问候');
+    });
+
+    it('非问候内容不命中 greeting 规则', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: '帮我写个函数', complexity: 'medium', taskType: 'tools', domains: ['code'] }),
+        makeResources(),
+      );
+      // 可能命中其他规则，但不应该是 greeting
+      if (plan) {
+        expect(plan.reason).not.toContain('问候');
+      }
+    });
+  });
+
+  describe('自然语言命令提取', () => {
+    it('extractEmbeddedCommand: 帮我执行 git status → git status', () => {
+      const cmd = RuleEngine.extractEmbeddedCommand('帮我执行 git status');
+      expect(cmd).toBe('git status');
+    });
+
+    it('extractEmbeddedCommand: 运行一下 npm install → npm install', () => {
+      const cmd = RuleEngine.extractEmbeddedCommand('运行一下 npm install');
+      expect(cmd).toBe('npm install');
+    });
+
+    it('extractEmbeddedCommand: 帮我看看 cat package.json → cat package.json', () => {
+      const cmd = RuleEngine.extractEmbeddedCommand('帮我看看 cat package.json');
+      expect(cmd).toBe('cat package.json');
+    });
+
+    it('extractEmbeddedCommand: 纯命令返回 null（不需要提取）', () => {
+      const cmd = RuleEngine.extractEmbeddedCommand('git status');
+      expect(cmd).toBeNull();
+    });
+
+    it('extractEmbeddedCommand: 无关内容返回 null', () => {
+      const cmd = RuleEngine.extractEmbeddedCommand('今天天气怎么样');
+      expect(cmd).toBeNull();
+    });
+  });
+
+  describe('两轮匹配（自然语言 → 命令提取）', () => {
+    it('帮我执行 git status → 命中 git-status 规则 + directTool', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: '帮我执行 git status', complexity: 'medium', taskType: 'tools', domains: ['code'] }),
+        makeResources(),
+      );
+      expect(plan).not.toBeNull();
+      expect(plan!.reason).toContain('命令提取');
+      expect(plan!.directTool).toBeDefined();
+      expect(plan!.directTool!.name).toBe('exec');
+      expect(plan!.directTool!.args).toEqual({ command: 'git status' });
+    });
+
+    it('运行一下 npm install → 命中 shell pattern + directTool', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: '运行一下 npm install', complexity: 'medium', taskType: 'tools', domains: ['code'] }),
+        makeResources(),
+      );
+      expect(plan).not.toBeNull();
+      expect(plan!.directTool).toBeDefined();
+      expect(plan!.directTool!.name).toBe('exec');
+    });
+
+    it('纯 git status（无需提取）→ 直接命中 + directTool', () => {
+      const plan = engine.evaluate(
+        makeSignal({ content: 'git status', complexity: 'simple', taskType: 'tools', domains: ['code'] }),
+        makeResources(),
+      );
+      expect(plan).not.toBeNull();
+      expect(plan!.mode).toBe('direct');
+      expect(plan!.directTool).toBeDefined();
+    });
+  });
+});

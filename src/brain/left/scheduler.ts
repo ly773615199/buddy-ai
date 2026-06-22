@@ -153,8 +153,8 @@ export class UnifiedScheduler {
   // Phase 1.1: 当前调度的资源状态（供 selectViaRouter 读取排除列表）
   private _currentResources: ResourceState | null = null;
 
-  // Phase 5: 资源画像系统（供能力校验使用）
-  private _resourceHub: import('../../brain/hub/resource-hub.js').ResourceHub | null = null;
+  // Phase 5: 资源画像系统（供能力校验 + 资源推荐使用）
+  private _resourceHub: import('../../brain/hub/unified-resource-hub.js').UnifiedResourceHub | null = null;
 
   constructor(config?: Partial<SchedulerConfig>, verbose = false) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -164,8 +164,9 @@ export class UnifiedScheduler {
   /**
    * Phase 5: 注入资源画像系统
    * 能力校验需要查询模型的能力标签和亲和度
+   * 资源推荐需要查询可用资源列表
    */
-  setResourceHub(hub: import('../../brain/hub/resource-hub.js').ResourceHub): void {
+  setResourceHub(hub: import('../../brain/hub/unified-resource-hub.js').UnifiedResourceHub): void {
     this._resourceHub = hub;
   }
 
@@ -744,15 +745,37 @@ export class UnifiedScheduler {
     body: BodyState | undefined,
     reason: string,
   ): Promise<ExecutionPlan> {
-    const pool = this.router?.getPool();
-    if (!pool || pool.profileCount === 0) {
-      return this.makePlan(routePath, 'local_only', `${reason} → 无模型池`, 0.3, [
-        { id: 'local', type: 'local_expert' },
-      ]);
-    }
-
     const taskType = signal.taskType as TaskType;
     const criticality = signal.criticality ?? 'normal';
+
+    // ── 优先：从资源画像获取推荐（包含 model + expert） ──
+    if (this._resourceHub) {
+      const candidates = this._resourceHub.recommend(taskType, signal.domains[0], undefined, {
+        requiresToolCalling: taskType === 'tools',
+        bodyState: body ? { load: body.load, energy: body.energy } : undefined,
+      });
+
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        const node = this.resourceToNode(best);
+        if (node) {
+          if (this.verbose) {
+            console.log(`[Scheduler] ${routePath}: ${reason} → 资源画像推荐: ${best.id} (type=${best.type}, health=${best.healthScore})`);
+          }
+          return this.makePlan(routePath, 'single',
+            `[${routePath}] ${reason} → 资源画像推荐: ${best.id}`,
+            Math.max(0.5, best.healthScore / 100), [node]);
+        }
+      }
+    }
+
+    // ── 降级：查 ModelPool ──
+    const pool = this.router?.getPool();
+    if (!pool || pool.profileCount === 0) {
+      return this.makePlan(routePath, 'single', `${reason} → 无模型池`, 0.3, [
+        { id: 'fallback', type: 'cloud_node' },
+      ]);
+    }
 
     // 构建查询条件
     const filter: Parameters<typeof pool.queryForBrain>[1] = {};
@@ -762,7 +785,6 @@ export class UnifiedScheduler {
     if (taskType === 'tools') {
       filter.requireToolCalling = true;
     }
-    // 关键任务不限成本
     if (criticality === 'high') {
       // 不设 maxCost
     } else if (criticality === 'low') {
@@ -773,20 +795,16 @@ export class UnifiedScheduler {
     const excludeIds = (this._currentResources as any)?._excludeModelIds as string[] | undefined;
     if (excludeIds) filter.excludeIds = excludeIds;
 
-    // 查询可用模型
     let models = pool.queryForBrain(taskType, filter);
-
-    // 无结果 → 放宽约束重试
     if (models.length === 0) {
       models = pool.queryForBrain(taskType, {});
       if (models.length === 0) {
-        return this.makePlan(routePath, 'local_only', `${reason} → 无可用模型`, 0.3, [
-          { id: 'local', type: 'local_expert' },
+        return this.makePlan(routePath, 'single', `${reason} → 无可用模型`, 0.3, [
+          { id: 'fallback', type: 'cloud_node' },
         ]);
       }
     }
 
-    // 三脑综合评分
     const scored = models.map(m => ({
       model: m,
       score: this.computeBrainScore(m, criticality, taskType, body),
@@ -805,7 +823,7 @@ export class UnifiedScheduler {
     };
 
     if (this.verbose) {
-      console.log(`[Scheduler] ${routePath}: ${reason} → 三脑选择: ${best.id} (score=${scored[0].score.toFixed(2)}, criticality=${criticality})`);
+      console.log(`[Scheduler] ${routePath}: ${reason} → ModelPool选择: ${best.id} (score=${scored[0].score.toFixed(2)}, criticality=${criticality})`);
     }
 
     return {
@@ -815,6 +833,36 @@ export class UnifiedScheduler {
       confidence: 0.8,
       source: 'scheduler',
     };
+  }
+
+  /**
+   * 资源 → OrchestrationNode 转换
+   * 从资源画像的 UnifiedResource 映射到决策管线的节点类型
+   */
+  private resourceToNode(resource: import('../hub/types.js').UnifiedResource): OrchestrationNode | null {
+    switch (resource.type) {
+      case 'model':
+        return {
+          id: resource.id,
+          type: 'cloud_node',
+          provider: (resource.metadata as any).provider as string,
+          model: (resource.metadata as any).model as string,
+        };
+      case 'local_expert':
+        return {
+          id: resource.id,
+          type: 'local_expert',
+          domain: (resource.metadata as any).domain as string,
+        };
+      case 'skill':
+        return {
+          id: resource.id,
+          type: 'experience',
+          skillId: resource.id.replace('skill/', ''),
+        };
+      default:
+        return null;
+    }
   }
 
   /**
@@ -982,23 +1030,27 @@ export class UnifiedScheduler {
     const recommendedModelId = expHit.model;
     if (!recommendedModelId) return null;
 
-    const modelProfile = resourceHub.getById(recommendedModelId);
+    const modelProfile = resourceHub.get(recommendedModelId);
     if (!modelProfile) return null;
 
-    // 校验 1: 亲和度过低
-    const affinity = modelProfile.affinity[taskType] ?? 0.5;
-    if (affinity < 0.3) {
-      return `经验推荐 ${recommendedModelId} 但亲和度 ${affinity.toFixed(2)} 过低(${taskType})`;
+    // 校验 1: 任务类型成功率过低
+    const typeStats = modelProfile.stats.byTaskType[taskType];
+    if (typeStats && typeStats.attempts >= 3) {
+      const successRate = typeStats.successes / typeStats.attempts;
+      if (successRate < 0.3) {
+        return `经验推荐 ${recommendedModelId} 但任务 ${taskType} 成功率 ${(successRate * 100).toFixed(0)}% 过低`;
+      }
     }
 
     // 校验 2: 任务需要工具调用但模型不支持
-    if (taskType === 'tools' && !modelProfile.capabilities.toolCalling) {
+    const toolCalling = modelProfile.capabilities.toolCalling;
+    if (taskType === 'tools' && toolCalling && !toolCalling.value) {
       return `经验推荐 ${recommendedModelId} 但不支持工具调用`;
     }
 
-    // 校验 3: 任务需要推理但模型推理能力弱
-    if (taskType === 'reasoning' && modelProfile.capabilities.weakAt?.includes('reasoning')) {
-      return `经验推荐 ${recommendedModelId} 但推理能力弱`;
+    // 校验 3: 健康度过低
+    if (modelProfile.healthScore < 30) {
+      return `经验推荐 ${recommendedModelId} 但健康度 ${modelProfile.healthScore} 过低`;
     }
 
     return null; // 校验通过

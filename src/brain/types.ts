@@ -144,6 +144,8 @@ export interface OrchestrationNode {
   /** 统一模型池：具体模型的 provider 和 model */
   provider?: string;
   model?: string;
+  /** 本地专家领域 */
+  domain?: string;
   /** Provider 凭据（由 UnifiedScheduler 从 ModelPool 注入） */
   apiKey?: string;
   baseUrl?: string;

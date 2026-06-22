@@ -559,23 +559,56 @@ async function executeLocal(ctx: ExecutionContext, plan: OrchestrationPlan): Pro
   return executeSingle(ctx, plan);
 }
 
-/** single — 单 LLM 调用 */
+/** single — 单资源调用（按节点类型分发） */
 async function executeSingle(ctx: ExecutionContext, plan: OrchestrationPlan): Promise<ExecutionResult> {
   const startTime = Date.now();
-
-  // 三脑已选定具体模型 → 直接使用，不再重新选择
   const node = plan.selectedNodes[0];
+
+  // ── 按节点类型分发（决策层从资源画像选出的具体资源） ──
+
+  // local_expert → 本地三进制模型推理
+  if (node?.type === 'local_expert' && node.domain) {
+    try {
+      const start = Date.now();
+      const result = await ctx.sys.ternaryRouter.query(node.domain, plan.content);
+      const elapsed = Date.now() - start;
+      if (result.answer && result.answer.length > 10) {
+        recordResourceOutcome(ctx.sys, node.id, true, elapsed, undefined, plan.taskType, node.domain);
+        return { text: result.answer, source: `local/${node.domain}`, toolCalls: [] };
+      }
+      recordResourceOutcome(ctx.sys, node.id, false, elapsed, undefined, plan.taskType, node.domain);
+    } catch (err) {
+      recordResourceOutcome(ctx.sys, node.id, false, 0, undefined, plan.taskType, node.domain);
+      if (ctx.verbose) {
+        console.warn(`[PlanExecutor] 本地专家 ${node.domain} 推理失败: ${(err as Error).message}`);
+      }
+    }
+    // 本地推理无结果 → 记录 outcome 更新画像，继续走 LLM
+  }
+
+  // cloud_node 且有具体模型 → 直接调用
   if (node?.type === 'cloud_node' && node.provider && node.model) {
     try {
       return await executeWithConcreteNode(ctx, node, plan.content);
     } catch (err) {
       if (ctx.verbose) {
-        console.warn(`[PlanExecutor] 三脑选定的模型 ${node.provider}/${node.model} 执行失败，降级到 processStream: ${(err as Error).message}`);
+        console.warn(`[PlanExecutor] 三脑选定的模型 ${node.provider}/${node.model} 执行失败: ${(err as Error).message}`);
       }
-      // 降级到 processStream（内部重新选择）
     }
   }
 
+  // experience → 经验执行
+  if (node?.type === 'experience' && node.skillId) {
+    try {
+      return await executeExperience(ctx, node.skillId, plan.content);
+    } catch (err) {
+      if (ctx.verbose) {
+        console.warn(`[PlanExecutor] 经验 ${node.skillId} 执行失败: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // 默认：processStream
   try {
     const result = await ctx.processor.processStream(plan.content, () => {}, null, { skipDAG: true, taskType: plan.taskType });
     const elapsed = Date.now() - startTime;

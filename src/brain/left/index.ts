@@ -15,6 +15,7 @@ import type {
   TaskSignal, ResourceState, ExecutionPlan, IntuitionSignal,
   BodyState, DecisionRecord, DecisionOutcome, DistillReport, Rule,
 } from '../types.js';
+import type { UnifiedResourceHub } from '../hub/unified-resource-hub.js';
 import { RuleEngine } from './rule-engine.js';
 import { UnifiedScheduler } from './scheduler.js';
 import { PolicyDistiller } from './policy-distiller.js';
@@ -58,6 +59,12 @@ export class LeftBrain {
   /** Phase 2: 获取规则引擎（供 Gate-1/Gate-2 门控调用） */
   getRuleEngine(): RuleEngine {
     return this.ruleEngine;
+  }
+
+  /** 注入资源画像系统到规则引擎和调度器 */
+  setResourceHub(hub: UnifiedResourceHub): void {
+    this.ruleEngine.setResourceHub(hub);
+    this.scheduler.setResourceHub(hub);
   }
 
   /**

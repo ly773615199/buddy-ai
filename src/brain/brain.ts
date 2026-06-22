@@ -125,6 +125,11 @@ export class ThreeBrain {
     if (this.verbose) console.log('[ThreeBrain] 三脑架构初始化完成');
   }
 
+  /** 注入资源画像系统到左脑（规则引擎 + 调度器） */
+  setResourceHub(hub: import('./hub/unified-resource-hub.js').UnifiedResourceHub): void {
+    this.left.setResourceHub(hub);
+  }
+
   // ── 图像注入接口（Phase 2 补完：接通视神经） ──
 
   /**
