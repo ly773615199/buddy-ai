@@ -48,7 +48,7 @@ import { resolveDAGPipeline as resolveDAGImpl, type DAGPipelineResult } from './
 
 export class BuddyAgent {
   // ISSUE-015: 命名常量
-  private static readonly CONFIRM_TIMEOUT_MS = 30_000;    // 工具确认超时
+  private static readonly CONFIRM_TIMEOUT_MS = 300_000;   // 工具确认超时 5分钟
   private static readonly MAX_DECISION_TRACE = 200;        // 决策追踪上限
   private static readonly CONTENT_PREVIEW_LEN = 200;       // 内容预览截断长度
 
