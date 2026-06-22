@@ -425,6 +425,7 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
           role: 'system',
           content: `⚠️ 需要确认：${event.description || event.tool}`,
           timestamp: Date.now(),
+          confirmId: event.id,
         }]);
         break;
 
