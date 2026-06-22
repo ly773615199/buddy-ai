@@ -113,14 +113,14 @@ describe('CapabilityGraph', () => {
     const snap1: CapabilitySnapshot = {
       timestamp: now - 10000,
       source: 'probe',
-      capabilities: { x: { value: 1, verified: true, lastVerifiedAt: now - 10000 } },
+      capabilities: { x: { value: 1, verified: true, sourcePriority: 4, lastVerifiedAt: now - 10000 } },
       confidence: 1,
       latencyMs: 50,
     };
     const snap2: CapabilitySnapshot = {
       timestamp: now - 5000,
       source: 'probe',
-      capabilities: { x: { value: 2, verified: true, lastVerifiedAt: now - 5000 } },
+      capabilities: { x: { value: 2, verified: true, sourcePriority: 4, lastVerifiedAt: now - 5000 } },
       confidence: 1,
       latencyMs: 50,
     };
@@ -140,12 +140,12 @@ describe('CapabilityGraph', () => {
     const now = Date.now();
     hub.onProbeResult('m1', {
       timestamp: now - 2000, source: 'probe',
-      capabilities: { latency: { value: 100, verified: true, lastVerifiedAt: now } },
+      capabilities: { latency: { value: 100, verified: true, sourcePriority: 4, lastVerifiedAt: now } },
       confidence: 1, latencyMs: 50,
     });
     hub.onProbeResult('m1', {
       timestamp: now - 1000, source: 'probe',
-      capabilities: { latency: { value: 200, verified: true, lastVerifiedAt: now } },
+      capabilities: { latency: { value: 200, verified: true, sourcePriority: 4, lastVerifiedAt: now } },
       confidence: 1, latencyMs: 50,
     });
 
@@ -161,7 +161,7 @@ describe('CapabilityGraph', () => {
     hub.register({ id: 'm1', type: 'model', name: 'test' });
     hub.onProbeResult('m1', {
       timestamp: Date.now(), source: 'probe',
-      capabilities: { reachable: { value: true, verified: true, lastVerifiedAt: Date.now() } },
+      capabilities: { reachable: { value: true, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() } },
       confidence: 1, latencyMs: 50,
     });
 
@@ -179,10 +179,10 @@ describe('CapabilityGraph', () => {
 
     const r1 = hub.get('m1')!;
     const r2 = hub.get('m2')!;
-    r1.capabilities.vision = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
-    r1.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
-    r2.capabilities.vision = { value: false, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
-    r2.capabilities.tools = { value: true, verified: true, lastVerifiedAt: Date.now(), sourcePriority: 5 };
+    r1.capabilities.vision = { value: true, verified: true, sourcePriority: 5, lastVerifiedAt: Date.now() };
+    r1.capabilities.tools = { value: true, verified: true, sourcePriority: 5, lastVerifiedAt: Date.now() };
+    r2.capabilities.vision = { value: false, verified: true, sourcePriority: 5, lastVerifiedAt: Date.now() };
+    r2.capabilities.tools = { value: true, verified: true, sourcePriority: 5, lastVerifiedAt: Date.now() };
 
     const graph = new CapabilityGraph(hub);
     const diff = graph.compareCapabilities('m1', 'm2');

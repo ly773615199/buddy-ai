@@ -125,7 +125,7 @@ describe('Encoder 梯度传播', () => {
       const losses = backwardPass(
         model, output,
         0, toolLabels32, 0.8,
-        { intent: 0.4, tool: 0.4, quality: 0.2, spatial: 0.15, scene: 0.15 },
+        { alpha: 0.4, beta: 0.4, gamma: 0.2, delta: 0.15, epsilon: 0.15 },
       );
 
       // losses 可能因随机权重有数值问题，检查非 NaN
@@ -161,9 +161,9 @@ describe('Encoder 梯度传播', () => {
 
       const toolLabels32 = Array.from({ length: 32 }, (_, i) => i < 3 ? 1 : 0);
       backwardPass(model1, out1, 0, toolLabels32, 0.5,
-        { intent: 0.4, tool: 0.4, quality: 0.2, spatial: 0.15, scene: 0.15 });
+        { alpha: 0.4, beta: 0.4, gamma: 0.2, delta: 0.15, epsilon: 0.15 });
       backwardPass(model2, out2, 3, toolLabels32, 0.9,
-        { intent: 0.4, tool: 0.4, quality: 0.2, spatial: 0.15, scene: 0.15 });
+        { alpha: 0.4, beta: 0.4, gamma: 0.2, delta: 0.15, epsilon: 0.15 });
 
       // 两个模型的梯度应该不同
       let gradDiff = false;
@@ -189,7 +189,7 @@ describe('Encoder 梯度传播', () => {
 
       const toolLabels32 = Array.from({ length: 32 }, (_, i) => i < 2 ? 1 : 0);
       backwardPass(model, output, 0, toolLabels32, 0.5,
-        { intent: 0.4, tool: 0.4, quality: 0.2, spatial: 0.15, scene: 0.15 });
+        { alpha: 0.4, beta: 0.4, gamma: 0.2, delta: 0.15, epsilon: 0.15 });
 
       // 检查没有 NaN/Inf 梯度
       const params = model.parameters();
@@ -216,7 +216,7 @@ describe('Encoder 梯度传播', () => {
       const losses = backwardPass(
         model, output,
         2, toolLabels32, 0.7,
-        { intent: 0.3, tool: 0.3, quality: 0.1, spatial: 0.15, scene: 0.15 },
+        { alpha: 0.3, beta: 0.3, gamma: 0.1, delta: 0.15, epsilon: 0.15 },
         [0, 1, 0, 0, 0, 0],  // spatialLabels
         5,                     // sceneLabel
       );

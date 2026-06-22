@@ -35,7 +35,7 @@ describe('CrossSession → ModelPool 参数恢复', () => {
     expect(pool.getThompsonParamByKey('chat:test/model')).toBeNull();
 
     // 设置参数
-    pool.setThompsonParamByKey('chat:test/model', { alpha: 5, beta: 2 });
+    pool.setThompsonParamByKey('chat:test/model', { alpha: 5, beta: 2, totalCalls: 5 + 2, avgQuality: 0.5, lastUsed: Date.now() });
     const params = pool.getThompsonParamByKey('chat:test/model');
     expect(params).not.toBeNull();
     expect(params!.alpha).toBe(5);
@@ -45,12 +45,12 @@ describe('CrossSession → ModelPool 参数恢复', () => {
   it('exportThompsonParams 导出所有参数', () => {
     const pool = new ModelPool(null, path.join(tmpDir, 'pool-b'));
 
-    pool.setThompsonParamByKey('chat:a', { alpha: 3, beta: 1 });
-    pool.setThompsonParamByKey('tools:b', { alpha: 2, beta: 4 });
+    pool.setThompsonParamByKey('chat:a', { alpha: 3, beta: 1, totalCalls: 3 + 1, avgQuality: 0.5, lastUsed: Date.now() });
+    pool.setThompsonParamByKey('tools:b', { alpha: 2, beta: 4, totalCalls: 2 + 4, avgQuality: 0.5, lastUsed: Date.now() });
 
     const exported = pool.exportThompsonParams();
-    expect(exported['chat:a']).toEqual({ alpha: 3, beta: 1 });
-    expect(exported['tools:b']).toEqual({ alpha: 2, beta: 4 });
+    expect(exported['chat:a']).toMatchObject({ alpha: 3, beta: 1 });
+    expect(exported['tools:b']).toMatchObject({ alpha: 2, beta: 4 });
   });
 
   it('CrossSession 参数恢复到空 pool', () => {
@@ -75,7 +75,7 @@ describe('CrossSession → ModelPool 参数恢复', () => {
       if (decayed) {
         const existing = pool.getThompsonParamByKey(gp.key);
         if (!existing || (existing.alpha + existing.beta) < (decayed.alpha + decayed.beta)) {
-          pool.setThompsonParamByKey(gp.key, decayed);
+          pool.setThompsonParamByKey(gp.key, { ...decayed, totalCalls: decayed.alpha + decayed.beta, avgQuality: 0.5, lastUsed: Date.now() });
           restored++;
         }
       }
@@ -94,7 +94,7 @@ describe('CrossSession → ModelPool 参数恢复', () => {
 
     // pool 已有高质量参数
     const pool = new ModelPool(null, poolDir);
-    pool.setThompsonParamByKey('chat:model', { alpha: 20, beta: 3 });
+    pool.setThompsonParamByKey('chat:model', { alpha: 20, beta: 3, totalCalls: 20 + 3, avgQuality: 0.5, lastUsed: Date.now() });
 
     // CrossSession 只有少量数据
     const cs = new CrossSessionLearner(csDir, 'session-x');
@@ -107,7 +107,7 @@ describe('CrossSession → ModelPool 参数恢复', () => {
       if (decayed) {
         const existing = pool.getThompsonParamByKey(gp.key);
         if (!existing || (existing.alpha + existing.beta) < (decayed.alpha + decayed.beta)) {
-          pool.setThompsonParamByKey(gp.key, decayed);
+          pool.setThompsonParamByKey(gp.key, { ...decayed, totalCalls: decayed.alpha + decayed.beta, avgQuality: 0.5, lastUsed: Date.now() });
         }
       }
     }

@@ -27,7 +27,7 @@ describe('UnifiedResourceHub', () => {
       timestamp: Date.now(),
       source: 'probe',
       capabilities: {
-        toolCalling: { value: true, verified: true, lastVerifiedAt: Date.now() },
+        toolCalling: { value: true, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() },
       },
       confidence: 1,
       latencyMs: 100,
@@ -130,7 +130,7 @@ describe('UnifiedResourceHub', () => {
       timestamp: Date.now(),
       source: 'probe',
       capabilities: {
-        toolCalling: { value: false, verified: true, lastVerifiedAt: Date.now() },
+        toolCalling: { value: false, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() },
       },
       confidence: 1,
       latencyMs: 100,

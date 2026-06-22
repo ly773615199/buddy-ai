@@ -45,7 +45,7 @@ describe('Adaptive Layer — 小脑自适应层', () => {
   describe('HabitMemory', () => {
     it('未固化条目不命中', () => {
       const habit = new HabitMemory();
-      const signal = { domains: ['code'], complexity: 'simple', taskType: 'chat',
+      const signal = { domains: ['code'], complexity: 'simple' as const, taskType: 'chat' as const,
         shouldUseDAG: false, dagReason: '', intentConfidence: 0.8 };
       const plan = { mode: 'single' as const, reason: 'test', selectedNodes: [],
         confidence: 0.8, source: 'rule' };
@@ -55,7 +55,7 @@ describe('Adaptive Layer — 小脑自适应层', () => {
 
     it('固化后命中', () => {
       const habit = new HabitMemory();
-      const signal = { domains: ['code'], complexity: 'simple', taskType: 'chat',
+      const signal = { domains: ['code'], complexity: 'simple' as const, taskType: 'chat' as const,
         shouldUseDAG: false, dagReason: '', intentConfidence: 0.8 };
       const plan = { mode: 'single' as const, reason: 'test', selectedNodes: [],
         confidence: 0.8, source: 'rule' };
@@ -65,7 +65,7 @@ describe('Adaptive Layer — 小脑自适应层', () => {
 
     it('成功率下降后淘汰', () => {
       const habit = new HabitMemory({ minSuccessRate: 0.7 });
-      const signal = { domains: ['git'], complexity: 'complex', taskType: 'tools',
+      const signal = { domains: ['git'], complexity: 'complex' as const, taskType: 'tools' as const,
         shouldUseDAG: false, dagReason: '', intentConfidence: 0.5 };
       const plan = { mode: 'single' as const, reason: 'test', selectedNodes: [],
         confidence: 0.5, source: 'scheduler' };
@@ -80,7 +80,7 @@ describe('Adaptive Layer — 小脑自适应层', () => {
 
     it('性能 < 0.1ms', () => {
       const habit = new HabitMemory();
-      const signal = { domains: ['code'], complexity: 'simple', taskType: 'chat',
+      const signal = { domains: ['code'], complexity: 'simple' as const, taskType: 'chat' as const,
         shouldUseDAG: false, dagReason: '', intentConfidence: 0.8 };
       const plan = { mode: 'single' as const, reason: 'test', selectedNodes: [],
         confidence: 0.8, source: 'rule' };

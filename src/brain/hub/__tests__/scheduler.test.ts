@@ -12,7 +12,7 @@ function makeProber(type: ResourceType, result?: Partial<CapabilitySnapshot>): R
       timestamp: Date.now(),
       source: 'probe',
       capabilities: {
-        reachable: { value: true, verified: true, lastVerifiedAt: Date.now() },
+        reachable: { value: true, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() },
       },
       confidence: 1,
       latencyMs: 50,

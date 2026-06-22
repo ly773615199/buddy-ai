@@ -52,12 +52,13 @@ const validResolved: ResolveResult = {
 };
 
 function passedGate(): GateResult {
-  return { passed: true, violations: [] };
+  return { passed: true, violations: [], action: 'proceed' };
 }
 
 function blockedGate(action?: string): GateResult {
   return {
     passed: false,
+    action: 'replan',
     violations: [{
       rule: 'test-rule',
       severity: 'block',
@@ -70,6 +71,7 @@ function blockedGate(action?: string): GateResult {
 function warnGate(): GateResult {
   return {
     passed: true,
+    action: 'proceed',
     violations: [{
       rule: 'warn-rule',
       severity: 'warn',

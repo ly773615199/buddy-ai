@@ -26,7 +26,7 @@ function makeSignal(domainIdx: number, complexityIdx: number, taskTypeIdx: numbe
     domains: [DOMAINS[domainIdx % DOMAINS.length]],
     complexity: COMPLEXITIES[complexityIdx % COMPLEXITIES.length],
     taskType: TASK_TYPES[taskTypeIdx % TASK_TYPES.length],
-    shouldUseDAP: false, dagReason: '', intentConfidence: 0.8,
+    shouldUseDAG: false, dagReason: '', intentConfidence: 0.8,
   };
 }
 

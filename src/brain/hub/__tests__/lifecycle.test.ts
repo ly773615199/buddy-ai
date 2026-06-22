@@ -144,7 +144,7 @@ describe('DriftDetector', () => {
   });
 
   it('detects drift on boolean flip', () => {
-    const dd = new DriftDetector({ windowSize: 10, warningThreshold: 0.3, criticalThreshold: 0.6 });
+    const dd = new DriftDetector({ default: { windowSize: 10, warningThreshold: 0.3, criticalThreshold: 0.6 } });
     const rid = 'test/model-1';
     // Fill window with true
     for (let i = 0; i < 5; i++) dd.detect(rid, 'toolCalling', true);
@@ -155,7 +155,7 @@ describe('DriftDetector', () => {
   });
 
   it('detects warning level drift on partial flip', () => {
-    const dd = new DriftDetector({ windowSize: 10, warningThreshold: 0.3, criticalThreshold: 0.6 });
+    const dd = new DriftDetector({ default: { windowSize: 10, warningThreshold: 0.3, criticalThreshold: 0.6 } });
     const rid = 'test/model-1';
     // Mix values
     dd.detect(rid, 'latency', 100);
@@ -176,7 +176,7 @@ describe('DriftDetector', () => {
   });
 
   it('batch detectSnapshot returns alerts for drifted dimensions', () => {
-    const dd = new DriftDetector({ windowSize: 10, warningThreshold: 0.2, criticalThreshold: 0.5 });
+    const dd = new DriftDetector({ default: { windowSize: 10, warningThreshold: 0.2, criticalThreshold: 0.5 } });
     const rid = 'test/model-1';
     // Pre-fill
     for (let i = 0; i < 5; i++) {
@@ -187,8 +187,8 @@ describe('DriftDetector', () => {
       timestamp: Date.now(),
       source: 'probe',
       capabilities: {
-        vision: { value: false, verified: true, lastVerifiedAt: Date.now() },
-        maxContext: { value: 4096, verified: true, lastVerifiedAt: Date.now() },
+        vision: { value: false, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() },
+        maxContext: { value: 4096, verified: true, sourcePriority: 4, lastVerifiedAt: Date.now() },
       },
       confidence: 1,
       latencyMs: 100,

@@ -107,9 +107,9 @@ describe('SwarmManager', () => {
 
   it('should select best by score', () => {
     const candidates = [
-      { proposal: { id: 'a' } as any, abResults: [], lockResult: { passed: true } as any, score: 0.3, rank: 0 },
-      { proposal: { id: 'b' } as any, abResults: [], lockResult: { passed: true } as any, score: 0.8, rank: 0 },
-      { proposal: { id: 'c' } as any, abResults: [], lockResult: { passed: true } as any, score: 0.5, rank: 0 },
+      { proposal: { id: 'a' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: true } as any, score: 0.3, rank: 0 },
+      { proposal: { id: 'b' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: true } as any, score: 0.8, rank: 0 },
+      { proposal: { id: 'c' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: true } as any, score: 0.5, rank: 0 },
     ];
 
     const best = swarm['selectBest'](candidates);
@@ -118,8 +118,8 @@ describe('SwarmManager', () => {
 
   it('should exclude failed lock results from best selection', () => {
     const candidates = [
-      { proposal: { id: 'a' } as any, abResults: [], lockResult: { passed: false } as any, score: 0.9, rank: 0 },
-      { proposal: { id: 'b' } as any, abResults: [], lockResult: { passed: true } as any, score: 0.5, rank: 0 },
+      { proposal: { id: 'a' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: false } as any, score: 0.9, rank: 0 },
+      { proposal: { id: 'b' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: true } as any, score: 0.5, rank: 0 },
     ];
 
     const best = swarm['selectBest'](candidates);
@@ -128,7 +128,7 @@ describe('SwarmManager', () => {
 
   it('should return null when all candidates fail lock', () => {
     const candidates = [
-      { proposal: { id: 'a' } as any, abResults: [], lockResult: { passed: false } as any, score: 0.9, rank: 0 },
+      { proposal: { id: 'a' } as any, offlineResults: [], replayResults: null, offlineScore: 0, replayScore: null, lockResult: { passed: false } as any, score: 0.9, rank: 0 },
     ];
 
     const best = swarm['selectBest'](candidates);

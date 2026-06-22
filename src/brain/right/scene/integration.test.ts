@@ -14,6 +14,7 @@ import { SceneWorldModel } from './scene-world-model.js';
 import { extractFromProject, extractFromSTMP, extractFromExperience, extractFromKnowledge, syncAllSources } from './entity-adapters.js';
 import { RuntimeCollector } from './runtime-collector.js';
 import { KnowledgeBridge } from './knowledge-bridge.js';
+import type { ExtractedKnowledgeLite } from './knowledge-bridge.js';
 import { generateSyntheticSamples, toNNSample } from './scene-training.js';
 import type { ProjectIndexSource, STMPSource, ExperienceSource, KnowledgeItem } from './entity-adapters.js';
 import type { SceneGraph } from '../features/scene-encoder.js';

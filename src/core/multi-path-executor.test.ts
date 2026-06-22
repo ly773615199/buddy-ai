@@ -232,8 +232,8 @@ describe('MultiPathExecutor', () => {
         makeAllocation('full_llm', true),
         cache,
         {
-          fullLLM: makeResult.bind(null, { pathName: 'fast-high', qualityScore: 0.9, latencyMs: 50, cost: 0.01 }),
-          templatePlusCache: makeResult.bind(null, { pathName: 'slow-low', qualityScore: 0.6, latencyMs: 500, cost: 0.01 }),
+          fullLLM: async () => makeResult({ pathName: 'fast-high', qualityScore: 0.9, latencyMs: 50, cost: 0.01 }),
+          templatePlusCache: async () => makeResult({ pathName: 'slow-low', qualityScore: 0.6, latencyMs: 500, cost: 0.01 }),
         },
       );
       expect(result.selectedPath).toBe('fast-high');
@@ -245,8 +245,8 @@ describe('MultiPathExecutor', () => {
         makeAllocation('full_llm', true),
         cache,
         {
-          fullLLM: makeResult.bind(null, { pathName: 'expensive', qualityScore: 0.8, latencyMs: 100, cost: 0.1 }),
-          templatePlusCache: makeResult.bind(null, { pathName: 'cheap', qualityScore: 0.8, latencyMs: 100, cost: 0.001 }),
+          fullLLM: async () => makeResult({ pathName: 'expensive', qualityScore: 0.8, latencyMs: 100, cost: 0.1 }),
+          templatePlusCache: async () => makeResult({ pathName: 'cheap', qualityScore: 0.8, latencyMs: 100, cost: 0.001 }),
         },
       );
       expect(result.selectedPath).toBe('cheap');

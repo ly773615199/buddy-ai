@@ -229,7 +229,7 @@ describe('PrototypeMemory', () => {
         toolDist: new Map([['read', 5], ['write', 3]]),
         toolSuccess: new Map([['read', { attempts: 5, successes: 4 }]]),
         firstSeen: Date.now(), lastSeen: Date.now(),
-        isSeed: true, tags: ['seed'],
+        isSeed: true, tags: ['seed'], qualityScore: 1.0, failureStreak: 0,
       };
       // @ts-ignore
       mem.prototypes = [proto];

@@ -82,10 +82,10 @@ describe('ProjectModel E2E', () => {
     // === 2. 创建方案 ===
     const plan = pm.createPlan(project.id, '初版方案', {
       steps: [
-        { id: 'step_1', title: '搭建项目框架', deps: [], status: 'pending' },
-        { id: 'step_2', title: '实现登录模块', deps: ['step_1'], status: 'pending' },
-        { id: 'step_3', title: '实现数据看板', deps: ['step_1'], status: 'pending' },
-        { id: 'step_4', title: '集成测试', deps: ['step_2', 'step_3'], status: 'pending' },
+        { id: 'step_1', title: '搭建项目框架', description: '', deps: [], status: 'pending' },
+        { id: 'step_2', title: '实现登录模块', description: '', deps: ['step_1'], status: 'pending' },
+        { id: 'step_3', title: '实现数据看板', description: '', deps: ['step_1'], status: 'pending' },
+        { id: 'step_4', title: '集成测试', description: '', deps: ['step_2', 'step_3'], status: 'pending' },
       ],
     });
     expect(plan.steps).toHaveLength(4);
@@ -104,7 +104,7 @@ describe('ProjectModel E2E', () => {
       reason: '增加性能优化步骤',
       steps: [
         ...plan.steps,
-        { id: 'step_5', title: '性能优化', deps: ['step_4'], status: 'pending' },
+        { id: 'step_5', title: '性能优化', description: '', deps: ['step_4'], status: 'pending' },
       ],
     });
     expect(planV2.version).toBe(2);
@@ -236,9 +236,9 @@ describe('ProjectModel E2E', () => {
 
     const plan = pm.createPlan(project.id, '重构方案', {
       steps: [
-        { id: 's1', title: '分析现有代码', deps: [], status: 'pending' },
-        { id: 's2', title: '提取接口', deps: ['s1'], status: 'pending' },
-        { id: 's3', title: '重写实现', deps: ['s2'], status: 'pending' },
+        { id: 's1', title: '分析现有代码', description: '', deps: [], status: 'pending' },
+        { id: 's2', title: '提取接口', description: '', deps: ['s1'], status: 'pending' },
+        { id: 's3', title: '重写实现', description: '', deps: ['s2'], status: 'pending' },
       ],
     });
 
@@ -272,16 +272,16 @@ describe('ProjectModel E2E', () => {
 
     const v1 = pm.createPlan('proj_diff', 'Plan v1', {
       steps: [
-        { id: 's1', title: 'Step A', deps: [], status: 'pending' },
-        { id: 's2', title: 'Step B', deps: [], status: 'pending' },
+        { id: 's1', title: 'Step A', description: '', deps: [], status: 'pending' },
+        { id: 's2', title: 'Step B', description: '', deps: [], status: 'pending' },
       ],
     });
 
     const v2 = pm.createNewVersion(v1.id, {
       reason: '优化步骤',
       steps: [
-        { id: 's1', title: 'Step A (优化)', deps: [], status: 'pending' },
-        { id: 's3', title: 'Step C (新增)', deps: ['s1'], status: 'pending' },
+        { id: 's1', title: 'Step A (优化)', description: '', deps: [], status: 'pending' },
+        { id: 's3', title: 'Step C (新增)', description: '', deps: ['s1'], status: 'pending' },
       ],
     });
 

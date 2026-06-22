@@ -8,7 +8,7 @@
  * 以确保 `new Constructor()` 在 ESM 下正常工作。
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import * as path from 'path';
 
 // ════════════════════════════════════════════════════════════════

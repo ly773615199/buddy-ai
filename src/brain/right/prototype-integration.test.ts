@@ -51,6 +51,8 @@ describe('PrototypeMemory 集成', () => {
         lastSeen: Date.now(),
         isSeed: true,
         tags: ['seed'],
+        qualityScore: 1.0,
+        failureStreak: 0,
       };
       mem.addPrototype(proto);
 
@@ -221,7 +223,8 @@ describe('PrototypeMemory 集成', () => {
         count: 100,
         toolDist: new Map([['read', 80], ['write', 50]]),
         toolSuccess: new Map([['read', { attempts: 80, successes: 75 }]]),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: true, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(),
+        isSeed: true, tags: [],
         qualityScore: 1.0, failureStreak: 0,
       });
 
@@ -232,7 +235,8 @@ describe('PrototypeMemory 集成', () => {
         count: 20,
         toolDist: new Map([['read', 15], ['search_files', 10]]),
         toolSuccess: new Map([['search_files', { attempts: 10, successes: 2 }]]),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: ['low_quality'],
+        firstSeen: Date.now(), lastSeen: Date.now(),
+        isSeed: false, tags: ['low_quality'],
         qualityScore: 0.15, failureStreak: 6,
       });
 
@@ -258,7 +262,7 @@ describe('PrototypeMemory 集成', () => {
         id: 'seed_a', label: 'A',
         centroid: makeNormed(4, 1, 0, 0, 0),
         count: 10, toolDist: new Map(), toolSuccess: new Map(),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: true, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: true, tags: [], qualityScore: 1.0, failureStreak: 0,
         qualityScore: 1.0, failureStreak: 0,
       });
 
@@ -267,7 +271,7 @@ describe('PrototypeMemory 集成', () => {
         id: 'good_proto', label: 'good',
         centroid: makeNormed(4, 0, 1, 0, 0),
         count: 50, toolDist: new Map(), toolSuccess: new Map(),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [], qualityScore: 0.5, failureStreak: 0,
         qualityScore: 0.9, failureStreak: 0,
       });
 
@@ -281,7 +285,7 @@ describe('PrototypeMemory 集成', () => {
         id: 'orphan', label: 'orphan',
         centroid: makeNormed(4, 1, 0, 0, 0),
         count: 10, toolDist: new Map(), toolSuccess: new Map(),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [], qualityScore: 0.5, failureStreak: 0,
         qualityScore: 0.1, failureStreak: 10,
       });
 
@@ -294,7 +298,7 @@ describe('PrototypeMemory 集成', () => {
         id: 'proto_q', label: 'Q',
         centroid: makeNormed(4, 1, 0, 0, 0),
         count: 10, toolDist: new Map(), toolSuccess: new Map(),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [], qualityScore: 0.5, failureStreak: 0,
         qualityScore: 0.5, failureStreak: 0,
       });
 
@@ -314,7 +318,7 @@ describe('PrototypeMemory 集成', () => {
         id: 'proto_r', label: 'R',
         centroid: makeNormed(4, 1, 0, 0, 0),
         count: 10, toolDist: new Map(), toolSuccess: new Map(),
-        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [],
+        firstSeen: Date.now(), lastSeen: Date.now(), isSeed: false, tags: [], qualityScore: 0.5, failureStreak: 0,
         qualityScore: 0.5, failureStreak: 3,
       });
 
