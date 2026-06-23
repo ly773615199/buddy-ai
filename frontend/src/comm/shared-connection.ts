@@ -15,7 +15,7 @@
 
 const BC_CHANNEL_NAME = 'buddy-ws-shared';
 const HEARTBEAT_INTERVAL_MS = 5_000;
-const HEARTBEAT_TIMEOUT_MS = 15_000; // 3 次未收到心跳 → 主节点失效
+const HEARTBEAT_TIMEOUT_MS = 20_000; // 4 次未收到心跳 → 主节点失效
 
 export interface BCMessage {
   type: 'claim' | 'heartbeat' | 'message' | 'send' | 'close';
@@ -56,14 +56,14 @@ export class SharedConnection {
     this.bc = new BroadcastChannel(BC_CHANNEL_NAME);
     this.bc.onmessage = (event) => this.handleBCMessage(event.data as BCMessage);
 
-    // 竞选：先等一小段时间看有没有主节点
+    // 竞选：先等一段时间看有没有主节点（延长等待，减少竞争）
     this.broadcast({ type: 'claim' });
     this.claimTimer = setTimeout(() => {
       if (this.role === 'unclaimed') {
         // 没人响应 → 我当主节点
         this.becomeMaster();
       }
-    }, 500);
+    }, 1000);
   }
 
   /** 设置消息回调（主节点收到的 WS 消息转发给从节点） */

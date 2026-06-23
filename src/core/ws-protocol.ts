@@ -122,13 +122,26 @@ export class WSProtocol {
         // 1. 广播给所有客户端（应只发给请求者）
         // 2. 重新写入 replayBuffer（导致重放风暴）
         if (ws && ws.readyState === 1 /* OPEN */) {
-          for (const replayMsg of replayMessages) {
-            ws.send(JSON.stringify(replayMsg));
-          }
+          // 分批发送，避免突发大量消息导致客户端处理不过来
+          const BATCH_SIZE = 5;
+          const BATCH_DELAY_MS = 50;
+          const sendBatch = async () => {
+            for (let i = 0; i < replayMessages.length; i += BATCH_SIZE) {
+              const batch = replayMessages.slice(i, i + BATCH_SIZE);
+              for (const replayMsg of batch) {
+                if (ws.readyState !== 1) break; // 连接已断开
+                ws.send(JSON.stringify(replayMsg));
+              }
+              if (i + BATCH_SIZE < replayMessages.length) {
+                await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+              }
+            }
+          };
+          sendBatch().catch(() => {});
         } else {
-          // fallback: ws 不可用时走 eventBus（兼容旧路径）
+          // fallback: ws 不可用时走 eventBus（兼容旧路径，标记 skipReplay 防止回写）
           for (const replayMsg of replayMessages) {
-            eventBus.emit(replayMsg as WSEvent);
+            eventBus.emit(replayMsg as WSEvent, { skipReplay: true });
           }
         }
         this.deps.linkHandler.recordEvent('flush', true, undefined, { count: replayMessages.length, reason: 'resume' });

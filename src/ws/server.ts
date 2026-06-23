@@ -306,7 +306,7 @@ export class EventBus {
   }
 
   /** 广播事件给所有连接的客户端（自动注入 seq + 写入重放缓冲区） */
-  emit(event: WSEvent): void {
+  emit(event: WSEvent, options?: { skipReplay?: boolean }): void {
     // 注入 seq（心跳 pong 不注入，避免缓冲区膨胀）
     let seq: number | undefined;
     if (this.linkHandler && event.type !== 'pong') {
@@ -321,8 +321,8 @@ export class EventBus {
       }
     }
 
-    // 写入重放缓冲区（仅需要可靠送达的事件）
-    if (seq !== undefined && this.linkHandler && this.shouldReplay(event.type)) {
+    // 写入重放缓冲区（仅需要可靠送达的事件，且非重放消息）
+    if (seq !== undefined && this.linkHandler && !options?.skipReplay && this.shouldReplay(event.type)) {
       this.linkHandler.addToReplayBuffer(seq, event as Record<string, unknown>);
     }
   }

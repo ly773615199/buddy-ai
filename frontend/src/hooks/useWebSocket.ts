@@ -896,14 +896,19 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
   // ==================== 连接管理 ====================
 
   // 防止 React StrictMode 双重执行导致重复连接
-  const connectGuardRef = useRef(false);
+  // 用 AbortController 替代 boolean guard，cleanup 时可靠中止
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!url) return;
     if (url.includes('token=undefined') || url.includes('token=null')) return;
-    // StrictMode 保护：跳过第二次执行
-    if (connectGuardRef.current) return;
-    connectGuardRef.current = true;
+
+    // 中止上一次连接（StrictMode cleanup+rerun 时确保旧连接完全关闭）
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     // 从节点不建立 WS 连接，通过 SharedConnection 收发
     const shared = sharedRef.current;
@@ -986,7 +991,7 @@ export function useWebSocket({ url, onEvent, onStateChange }: UseWebSocketOption
     return () => {
       unsubResume();
       link.disconnect();
-      connectGuardRef.current = false;
+      controller.abort();
     };
   }, [url]);
 
