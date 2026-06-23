@@ -242,7 +242,12 @@ function App() {
     }}>
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 12, position: 'relative', width: '100%', maxWidth: 1200 }}>
-        <h1 style={{ fontSize: '1.4em', margin: 0, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}><IconLogo size={28} color="var(--accent-blue)" /> {"光灵"}</h1>
+        <h1 style={{ fontSize: '1.4em', margin: 0, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+          <IconLogo size={26} color="var(--accent-blue)" />
+          <span style={{ fontWeight: 700, letterSpacing: 1 }}>{"光灵"}</span>
+          <span style={{ width: 1, height: 16, background: 'var(--border-primary)', margin: '0 2px' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>{"你的 AI 伙伴"}</span>
+        </h1>
         <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{"\u4F60\u7684 AI \u4F19\u4F34"}</div>
         {/* 语音情绪检测开关 */}
         <button
