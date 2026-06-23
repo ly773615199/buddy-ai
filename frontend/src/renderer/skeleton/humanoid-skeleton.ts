@@ -87,6 +87,8 @@ export class HumanoidSkeleton {
   private nextBlinkAt = 2 + Math.random() * 4;  // 2-6秒眨一次
   private isBlinking = false;
   private blinkPhase = 0;  // 0=闭眼中, 1=睁眼中
+  /** 正在眨眼时为 true，通知 FacialExpressionSystem 暂停覆盖眼皮 */
+  isBlinkActive = false;
 
   constructor(genome: BuddyGenome) {
     this.buildSkeleton(genome);
@@ -459,34 +461,30 @@ export class HumanoidSkeleton {
     this.blinkTimer += delta;
 
     if (!this.isBlinking && this.blinkTimer >= this.nextBlinkAt) {
-      // 开始眨眼
       this.isBlinking = true;
       this.blinkPhase = 0;
       this.blinkTimer = 0;
+      this.isBlinkActive = true;
     }
 
     if (this.isBlinking) {
       const eyeLidL = this.bones.get('eyelid_l');
       const eyeLidR = this.bones.get('eyelid_r');
-      // 闭眼 60ms → 睁眼 100ms
       if (this.blinkPhase === 0 && this.blinkTimer > 0.06) {
         this.blinkPhase = 1;
         this.blinkTimer = 0;
       }
       if (this.blinkPhase === 0) {
-        // 闭眼阶段
         if (eyeLidL) eyeLidL.rotation.x = Math.min(eyeLidL.rotation.x + delta * 8, 0.3);
         if (eyeLidR) eyeLidR.rotation.x = Math.min(eyeLidR.rotation.x + delta * 8, 0.3);
       } else {
-        // 睁眼阶段（自然回弹）
         if (eyeLidL) eyeLidL.rotation.x = Math.max(eyeLidL.rotation.x - delta * 4, 0);
         if (eyeLidR) eyeLidR.rotation.x = Math.max(eyeLidR.rotation.x - delta * 4, 0);
         if (this.blinkTimer > 0.1) {
           this.isBlinking = false;
+          this.isBlinkActive = false;
           this.blinkTimer = 0;
-          // 下次眨眼间隔：2-6秒（偶尔快速连眨）
           this.nextBlinkAt = 2 + Math.random() * 4;
-          // 10% 概率连眨
           if (Math.random() < 0.1) this.nextBlinkAt = 0.3;
         }
       }

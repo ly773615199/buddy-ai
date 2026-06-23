@@ -83,7 +83,6 @@ export class BuddyRenderer {
   private costumeRenderer: CostumeRenderer | null = null;
   private activeMesh: 'orb' | 'humanoid' = 'orb';
   private currentMood = 'neutral';
-  private blinkTimer = 0;
   private currentGenome: BuddyGenome | null = null;
   private isWebGPU = false;
 
@@ -490,11 +489,6 @@ export class BuddyRenderer {
       }
       if (this.facial && this.skeleton) {
         this.facial.update(this.skeleton);
-        this.blinkTimer += delta;
-        if (this.blinkTimer > 3 + Math.random() * 2) {
-          this.facial.blink(this.skeleton);
-          this.blinkTimer = 0;
-        }
       }
       this.chibi.render(this.skeleton, this.facial, this.currentGenome, this.currentFormProgress);
       return;
@@ -519,16 +513,9 @@ export class BuddyRenderer {
         this.skeleton.update(now, this.currentGenome, this.currentMood);
       }
 
-      // 面部表情
+      // 面部表情（眨眼已由 skeleton.update() 内置泊松系统处理）
       if (this.facial && this.skeleton) {
         this.facial.update(this.skeleton);
-
-        // 眨眼（每 3-5 秒随机一次）
-        this.blinkTimer += delta;
-        if (this.blinkTimer > 3 + Math.random() * 2) {
-          this.facial.blink(this.skeleton);
-          this.blinkTimer = 0;
-        }
       }
     }
 

@@ -119,6 +119,7 @@ export class FacialExpressionSystem {
 
   /**
    * 每帧更新 — 平滑过渡 + 应用到骨骼
+   * @param skeleton 骨架实例，用于检查 isBlinkActive
    */
   update(skeleton: HumanoidSkeleton): void {
     // 平滑过渡
@@ -131,8 +132,10 @@ export class FacialExpressionSystem {
     this.current.lipL     += (this.target.lipL     - this.current.lipL)     * t;
     this.current.lipR     += (this.target.lipR     - this.current.lipR)     * t;
 
-    // 应用到骨骼
+    // 应用到骨骼（眨眼期间跳过眼皮，避免覆盖骨架的眨眼动画）
     for (const [key, transform] of Object.entries(BONE_TRANSFORMS)) {
+      // 眨眼进行中时，跳过眼皮骨骼
+      if (skeleton.isBlinkActive && (key === 'eyeLidL' || key === 'eyeLidR')) continue;
       const bone = skeleton.getBone(transform.boneName);
       if (bone) {
         const value = this.current[key as keyof FacialExpression];
