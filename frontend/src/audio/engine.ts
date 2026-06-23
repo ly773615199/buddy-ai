@@ -7,6 +7,22 @@
 
 export type SoundCategory = 'sfx' | 'ambient' | 'voice' | 'music';
 
+/** 滤波器预设 */
+export interface FilterPreset {
+  type: BiquadFilterType;
+  frequency: number;
+  Q?: number;
+  gain?: number;
+}
+
+/** 空间位置 */
+export interface SpatialPosition {
+  /** 左右 -1(左) ~ 1(右)，0 居中 */
+  pan: number;
+  /** 距离 0(近) ~ 1(远)，影响音量衰减 */
+  distance?: number;
+}
+
 export interface VolumeState {
   master: number;    // 0-1 主音量
   sfx: number;       // 0-1 音效
@@ -114,6 +130,56 @@ export class AudioEngine {
   /** 获取分类的 GainNode（用于连接音频源） */
   getCategoryGain(category: SoundCategory): GainNode | null {
     return this.categoryGains.get(category) ?? null;
+  }
+
+  /** 创建滤波器节点 */
+  createFilter(preset: FilterPreset): BiquadFilterNode | null {
+    if (!this.ctx) return null;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = preset.type;
+    filter.frequency.value = preset.frequency;
+    if (preset.Q !== undefined) filter.Q.value = preset.Q;
+    if (preset.gain !== undefined) filter.gain.value = preset.gain;
+    return filter;
+  }
+
+  /** 创建立体声声像节点 */
+  createPanner(pan: number): StereoPannerNode | null {
+    if (!this.ctx) return null;
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = clamp(pan, -1, 1);
+    return panner;
+  }
+
+  /** 创建完整的播放链：source → filter? → panner? → categoryGain */
+  createPlaybackChain(
+    category: SoundCategory,
+    options?: { filter?: FilterPreset; pan?: number },
+  ): { input: AudioNode; output: GainNode } | null {
+    const catGain = this.categoryGains.get(category);
+    if (!catGain || !this.ctx) return null;
+
+    let tail: AudioNode = catGain;
+
+    // 声像（离 categoryGain 最近）
+    if (options?.pan !== undefined && options.pan !== 0) {
+      const panner = this.createPanner(options.pan);
+      if (panner) {
+        panner.connect(tail);
+        tail = panner;
+      }
+    }
+
+    // 滤波器
+    if (options?.filter) {
+      const filter = this.createFilter(options.filter);
+      if (filter) {
+        filter.connect(tail);
+        tail = filter;
+      }
+    }
+
+    return { input: tail, output: catGain };
   }
 
   /** 活跃音频源计数 */

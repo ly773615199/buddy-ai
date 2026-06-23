@@ -1,10 +1,13 @@
 /**
- * 音频 React Hook — 在组件中使用音频系统
+ * 音频 React Hook — 在组件中使用音频系统 (v2)
+ *
+ * 增强：ambient / melody 控制
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { getAudioEngine, type VolumeState } from './engine.js';
 import { playSFX, playMoodSFX, playEventSFX, UI_SFX, SPRITE_SFX } from './sfx-player.js';
+import { getAmbientPlayer, getMelodyGenerator, type MelodyOptions } from './ambient.js';
 
 /**
  * 音频控制 Hook
@@ -14,6 +17,8 @@ export function useAudio() {
   const engine = getAudioEngine();
   const [volume, setVolumeState] = useState<VolumeState>(engine.getVolume());
   const [initialized, setInitialized] = useState(engine.isInitialized());
+  const [ambientPlaying, setAmbientPlaying] = useState(false);
+  const [melodyPlaying, setMelodyPlaying] = useState(false);
 
   // 首次交互时初始化 AudioContext
   const initAudio = useCallback(async () => {
@@ -39,7 +44,7 @@ export function useAudio() {
     };
   }, [initialized, initAudio]);
 
-  // 音效播放
+  // ── UI 音效 ──
   const playClick = useCallback(() => playSFX(UI_SFX.click, 'ui-click'), []);
   const playSend = useCallback(() => playSFX(UI_SFX.send, 'ui-send'), []);
   const playReceive = useCallback(() => playSFX(UI_SFX.receive, 'ui-receive'), []);
@@ -48,21 +53,45 @@ export function useAudio() {
   const playError = useCallback(() => playSFX(UI_SFX.error, 'ui-error'), []);
   const playTyping = useCallback(() => playSFX(UI_SFX.typing, 'ui-typing'), []);
 
-  // 光灵状态音效
+  // ── 光灵音效 ──
   const playBreathe = useCallback(() => playSFX(SPRITE_SFX.breathe, 'sprite-breathe'), []);
   const playWake = useCallback(() => playSFX(SPRITE_SFX.wake, 'sprite-wake'), []);
   const playSleep = useCallback(() => playSFX(SPRITE_SFX.sleep, 'sprite-sleep'), []);
 
-  // 情绪音效
+  // ── 情绪 / 事件 ──
   const playMood = useCallback((mood: string) => playMoodSFX(mood), []);
-
-  // 事件音效
   const playEvent = useCallback((event: string) => playEventSFX(event), []);
 
-  // 通用播放
+  // ── 通用播放 ──
   const play = useCallback((name: string) => playSFX(name, name), []);
 
-  // 音量控制
+  // ── 环境音 ──
+  const startAmbient = useCallback(async (presetName: string) => {
+    const player = getAmbientPlayer();
+    await player.play(presetName);
+    setAmbientPlaying(true);
+  }, []);
+
+  const stopAmbient = useCallback(() => {
+    const player = getAmbientPlayer();
+    player.stop();
+    setAmbientPlaying(false);
+  }, []);
+
+  // ── 旋律 ──
+  const startMelody = useCallback(async (options?: MelodyOptions) => {
+    const gen = getMelodyGenerator(options);
+    await gen.play();
+    setMelodyPlaying(true);
+  }, []);
+
+  const stopMelody = useCallback(() => {
+    const gen = getMelodyGenerator();
+    gen.stop();
+    setMelodyPlaying(false);
+  }, []);
+
+  // ── 音量控制 ──
   const setMasterVolume = useCallback((value: number) => {
     engine.setMasterVolume(value);
     setVolumeState(engine.getVolume());
@@ -86,6 +115,8 @@ export function useAudio() {
     // 状态
     initialized,
     volume,
+    ambientPlaying,
+    melodyPlaying,
     // UI 音效
     playClick,
     playSend,
@@ -98,10 +129,16 @@ export function useAudio() {
     playBreathe,
     playWake,
     playSleep,
-    // 情绪/事件
+    // 情绪 / 事件
     playMood,
     playEvent,
     play,
+    // 环境音
+    startAmbient,
+    stopAmbient,
+    // 旋律
+    startMelody,
+    stopMelody,
     // 音量
     setMasterVolume,
     setCategoryVolume,
