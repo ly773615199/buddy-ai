@@ -271,7 +271,7 @@ export function IconSettings({ size = 20, color = 'currentColor', active, style,
 
 // ==================== 功能图标 ====================
 
-/** 🏠 Logo — 光灵人形 */
+/** 🏠 Logo — 光灵人形 (实心版) */
 export function IconLogo({ size = 24, color = 'currentColor', style, className }: Omit<IconProps, 'active'>) {
   return (
     <svg
@@ -280,24 +280,25 @@ export function IconLogo({ size = 24, color = 'currentColor', style, className }
     >
       <defs>
         <filter id="glowLogo" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="1.5" result="blur"/>
+          <feGaussianBlur stdDeviation="2" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
       </defs>
       <g filter="url(#glowLogo)">
         {/* 头部光晕 */}
-        <circle cx="32" cy="18" r="10" fill={color} opacity="0.12" />
-        {/* 头 */}
-        <circle cx="32" cy="18" r="6" fill={color} opacity="0.3" stroke={color} strokeWidth="1.5" />
-        <circle cx="32" cy="18" r="2.5" fill="#fff" opacity="0.8" />
-        {/* 身体 */}
-        <path d="M32 24 L32 40" stroke={color} strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+        <circle cx="32" cy="18" r="12" fill={color} opacity="0.15" />
+        {/* 头 — 实心 */}
+        <circle cx="32" cy="18" r="7" fill={color} opacity="0.85" />
+        <circle cx="32" cy="18" r="3" fill="#fff" opacity="0.9" />
+        <circle cx="32" cy="18" r="1.2" fill="#fff" opacity="1" />
+        {/* 身体 — 粗实线 */}
+        <path d="M32 25 L32 42" stroke={color} strokeWidth="3" strokeLinecap="round" />
         {/* 手臂 */}
-        <path d="M32 30 L22 36" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-        <path d="M32 30 L42 36" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-        {/* 底部光 */}
-        <circle cx="32" cy="48" r="4" fill={color} opacity="0.15" />
-        <circle cx="32" cy="48" r="2" fill={color} opacity="0.4" />
+        <path d="M32 31 L20 37" stroke={color} strokeWidth="2.5" strokeLinecap="round" opacity="0.8" />
+        <path d="M32 31 L44 37" stroke={color} strokeWidth="2.5" strokeLinecap="round" opacity="0.8" />
+        {/* 底部光 — 实心 */}
+        <circle cx="32" cy="50" r="4" fill={color} opacity="0.25" />
+        <circle cx="32" cy="50" r="2" fill={color} opacity="0.6" />
       </g>
     </svg>
   );
