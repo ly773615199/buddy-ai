@@ -38,6 +38,11 @@ function darken(hex: string, amount: number): string {
   return `rgb(${Math.max(0,r-amount)},${Math.max(0,g-amount)},${Math.max(0,b-amount)})`;
 }
 
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
 // ==================== 默认基因 ====================
 
 const DEFAULT_GENOME: Partial<BuddyGenome> = {
@@ -146,17 +151,20 @@ export class ChibiRenderer {
 
   /**
    * 外部调用：每帧渲染（由 BuddyCanvas 驱动）
+   * 跟随 formProgress 渐进绘制：混沌光团 → Q版角色
    */
   render(
     skeleton: HumanoidSkeleton | null,
     facial: FacialExpressionSystem | null,
     genome: BuddyGenome | null,
+    formProgress: number = 100,
   ): void {
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
     const g = { ...DEFAULT_GENOME, ...genome } as BuddyGenome;
     const t = this.time;
+    const fp = Math.max(0, Math.min(100, formProgress)) / 100; // 0~1
 
     // 清除
     ctx.clearRect(0, 0, w, h);
@@ -170,65 +178,282 @@ export class ChibiRenderer {
     const breathe = Math.sin(t * g.breatheSpeed * 2) * 0.02;
     const sway = Math.sin(t * 0.5) * g.swayAmount * 2;
 
-    // 获取骨骼旋转（如果有骨架）
-    const headRot = skeleton?.getBone('head')?.rotation.z ?? 0;
-    const tailRot = skeleton?.getBone('tail')?.rotation.y ?? Math.sin(t * 0.06) * 0.3;
-    const earLRot = skeleton?.getBone('ear_l')?.rotation.z ?? 0;
-    const earRRot = skeleton?.getBone('ear_r')?.rotation.z ?? 0;
-
-    // 获取表情
-    const face = facial?.getCurrent() ?? { browL: 0, browR: 0, eyeLidL: 0, eyeLidR: 0, jaw: 0, lipL: 0, lipR: 0 };
-
     ctx.save();
     ctx.translate(cx + sway, cy);
     ctx.scale(scale, scale * (1 + breathe));
 
-    // 1. 阴影
-    this.drawShadow(ctx, g);
+    // ═══ 渐进绘制 ═══
 
-    // 2. 尾巴
-    this.drawTail(ctx, g, tailRot);
+    // 阶段 1: 混沌光团 (fp 0~0.15)
+    if (fp < 0.15) {
+      this.drawChaosOrb(ctx, g, t, fp);
+      ctx.restore();
+      this.drawParticles(ctx, g);
+      if (this.flashAlpha > 0) this.drawFlash(ctx);
+      return;
+    }
 
-    // 3. 身体
-    this.drawBody(ctx, g);
+    // 阶段 2: 光团开始有轮廓 (fp 0.15~0.3)
+    if (fp < 0.3) {
+      const morphT = (fp - 0.15) / 0.15; // 0~1
+      this.drawChaosOrb(ctx, g, t, fp);
+      this.drawEmergingOutline(ctx, g, t, morphT);
+      ctx.restore();
+      this.drawParticles(ctx, g);
+      if (this.flashAlpha > 0) this.drawFlash(ctx);
+      return;
+    }
+
+    // 阶段 3+: 渐进显现 Q 版角色
+    const bodyT = smoothstep(0.3, 0.7, fp);
+    const detailT = smoothstep(0.5, 0.9, fp);
+    const accessoryT = smoothstep(0.6, 1.0, fp);
+
+    // 获取骨骼旋转
+    const headRot = skeleton?.getBone('head')?.rotation.z ?? 0;
+    const tailRot = skeleton?.getBone('tail')?.rotation.y ?? Math.sin(t * 0.06) * 0.3;
+    const earLRot = skeleton?.getBone('ear_l')?.rotation.z ?? 0;
+    const earRRot = skeleton?.getBone('ear_r')?.rotation.z ?? 0;
+    const face = facial?.getCurrent() ?? { browL: 0, browR: 0, eyeLidL: 0, eyeLidR: 0, jaw: 0, lipL: 0, lipR: 0 };
+
+    // 1. 阴影（淡入）
+    if (bodyT > 0.1) {
+      ctx.globalAlpha = bodyT;
+      this.drawShadow(ctx, g);
+      ctx.globalAlpha = 1;
+    }
+
+    // 2. 尾巴（后期出现）
+    if (accessoryT > 0.1 && g.tailLength > 0.1) {
+      ctx.globalAlpha = accessoryT;
+      this.drawTail(ctx, g, tailRot);
+      ctx.globalAlpha = 1;
+    }
+
+    // 3. 身体（从光团渐变为 Q 版身体）
+    if (bodyT > 0) {
+      this.drawBodyMorph(ctx, g, bodyT, t);
+    }
 
     // 4. 腿
-    this.drawLegs(ctx, g, t);
+    if (bodyT > 0.3) {
+      ctx.globalAlpha = smoothstep(0.3, 0.6, fp);
+      this.drawLegs(ctx, g, t);
+      ctx.globalAlpha = 1;
+    }
 
     // 5. 手臂
-    this.drawArms(ctx, g, t);
+    if (bodyT > 0.2) {
+      ctx.globalAlpha = smoothstep(0.2, 0.5, fp);
+      this.drawArms(ctx, g, t);
+      ctx.globalAlpha = 1;
+    }
 
     // 6. 翅膀
-    if (g.wingSize > 0.1) this.drawWings(ctx, g, t);
+    if (accessoryT > 0.2 && g.wingSize > 0.1) {
+      ctx.globalAlpha = accessoryT;
+      this.drawWings(ctx, g, t);
+      ctx.globalAlpha = 1;
+    }
 
-    // 7. 头
+    // 7. 头部
     ctx.save();
-    ctx.rotate(headRot * 0.3);
-    this.drawHead(ctx, g);
+    ctx.rotate(headRot * 0.3 * detailT);
+    this.drawHeadMorph(ctx, g, bodyT, detailT);
 
     // 8. 耳朵
-    this.drawEars(ctx, g, earLRot, earRRot);
+    if (accessoryT > 0.1) {
+      ctx.globalAlpha = accessoryT;
+      this.drawEars(ctx, g, earLRot, earRRot);
+      ctx.globalAlpha = 1;
+    }
 
     // 9. 角
-    if (g.hornSize > 0.1) this.drawHorns(ctx, g);
+    if (accessoryT > 0.2 && g.hornSize > 0.1) {
+      ctx.globalAlpha = accessoryT;
+      this.drawHorns(ctx, g);
+      ctx.globalAlpha = 1;
+    }
 
     // 10. 五官
-    this.drawFace(ctx, g, face, t);
+    if (detailT > 0.1) {
+      ctx.globalAlpha = detailT;
+      this.drawFace(ctx, g, face, t);
+      ctx.globalAlpha = 1;
+    }
 
     ctx.restore(); // head rotation
-
     ctx.restore(); // main transform
 
     // 11. 粒子
     this.drawParticles(ctx, g);
 
     // 12. 点击闪光
-    if (this.flashAlpha > 0) {
-      this.drawFlash(ctx);
-    }
+    if (this.flashAlpha > 0) this.drawFlash(ctx);
   }
 
   // ==================== 绘制方法 ====================
+
+  // ==================== 渐进阶段绘制 ====================
+
+  /**
+   * 混沌光团 (formProgress 0~15%)
+   * 一团发光的粒子云，呼吸脉动
+   */
+  private drawChaosOrb(ctx: CanvasRenderingContext2D, g: BuddyGenome, t: number, fp: number): void {
+    const baseR = 30 + fp * 40; // 随进度微微膨胀
+    const pulse = 1 + Math.sin(t * g.breatheSpeed * 2) * 0.08;
+    const r = baseR * pulse;
+
+    // 多层光晕
+    const layers = [
+      { radius: r * 1.8, alpha: 0.04 },
+      { radius: r * 1.4, alpha: 0.08 },
+      { radius: r * 1.1, alpha: 0.15 },
+      { radius: r * 0.8, alpha: 0.35 },
+      { radius: r * 0.5, alpha: 0.6 },
+    ];
+
+    for (const layer of layers) {
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, layer.radius);
+      grad.addColorStop(0, rgba(g.primaryColor, layer.alpha));
+      grad.addColorStop(0.6, rgba(g.secondaryColor, layer.alpha * 0.5));
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, layer.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 核心亮点
+    ctx.fillStyle = rgba('#ffffff', 0.4 + Math.sin(t * 3) * 0.2);
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 旋涡粒子（暗示内部结构）
+    for (let i = 0; i < 8; i++) {
+      const angle = t * 0.5 + i * Math.PI * 2 / 8;
+      const dist = r * 0.6 + Math.sin(t * 2 + i) * 10;
+      const px = Math.cos(angle) * dist;
+      const py = Math.sin(angle) * dist;
+      const alpha = 0.2 + Math.sin(t + i) * 0.1;
+      ctx.fillStyle = rgba(g.primaryColor, alpha);
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /**
+   * 涌现轮廓 (formProgress 15~30%)
+   * 光团开始有形状暗示
+   */
+  private drawEmergingOutline(ctx: CanvasRenderingContext2D, g: BuddyGenome, t: number, morphT: number): void {
+    // 在光团基础上叠加模糊轮廓
+    ctx.save();
+    ctx.globalAlpha = morphT * 0.3;
+    ctx.strokeStyle = g.primaryColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+
+    // 头部轮廓（大圆）
+    const headR = 24 + g.headSize * 12;
+    ctx.beginPath();
+    ctx.arc(0, -headR - 10, headR * (0.5 + morphT * 0.5), 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 身体轮廓（椭圆）
+    const bw = 28 * g.bodyWidth * morphT;
+    const bh = 35 * g.bodyHeight * morphT;
+    ctx.beginPath();
+    ctx.ellipse(0, bh * 0.3, bw, bh * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /**
+   * 身体渐变绘制 (formProgress 30~70%)
+   * 从模糊轮廓渐变为清晰 Q 版身体
+   */
+  private drawBodyMorph(ctx: CanvasRenderingContext2D, g: BuddyGenome, bodyT: number, t: number): void {
+    const bw = 28 * g.bodyWidth;
+    const bh = 35 * g.bodyHeight;
+
+    // 模糊度随 bodyT 降低
+    ctx.save();
+    ctx.globalAlpha = 0.3 + bodyT * 0.7;
+
+    // 主体
+    ctx.fillStyle = g.primaryColor;
+    ctx.beginPath();
+    ctx.roundRect(-bw, -5, bw * 2, bh, [12 * g.bodyRoundness]);
+    ctx.fill();
+
+    // 肚子高光
+    if (bodyT > 0.3) {
+      const grad = ctx.createRadialGradient(0, bh * 0.3, 0, 0, bh * 0.3, bw);
+      grad.addColorStop(0, rgba(lighten(g.primaryColor, 40), 0.4 * bodyT));
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(0, bh * 0.3, bw * 0.6, bh * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 纹路（后期出现）
+    if (g.patternDensity > 0.2 && bodyT > 0.5) {
+      ctx.globalAlpha = (bodyT - 0.5) * 2 * g.patternDensity * 0.3;
+      this.drawPattern(ctx, g, -bw, -5, bw * 2, bh);
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * 头部渐变绘制 (formProgress 30~90%)
+   * 从模糊圆形渐变为清晰 Q 版头
+   */
+  private drawHeadMorph(ctx: CanvasRenderingContext2D, g: BuddyGenome, bodyT: number, detailT: number): void {
+    const hr = 24 + g.headSize * 12;
+
+    ctx.save();
+    ctx.globalAlpha = 0.3 + bodyT * 0.7;
+
+    // 头部主体
+    ctx.fillStyle = g.primaryColor;
+    ctx.beginPath();
+    ctx.arc(0, -hr - 10, hr, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 脸部高光（后期出现）
+    if (detailT > 0.2) {
+      const grad = ctx.createRadialGradient(-hr * 0.3, -hr - 20, 0, 0, -hr - 10, hr);
+      grad.addColorStop(0, rgba(lighten(g.primaryColor, 50), 0.5 * detailT));
+      grad.addColorStop(0.5, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, -hr - 10, hr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 腮红（后期出现）
+    if (detailT > 0.5) {
+      ctx.fillStyle = rgba(g.secondaryColor, 0.15 * detailT);
+      ctx.beginPath();
+      ctx.ellipse(-hr * 0.5, -hr, hr * 0.25, hr * 0.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(hr * 0.5, -hr, hr * 0.25, hr * 0.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // ==================== 基础绘制方法 ====================
 
   private drawShadow(ctx: CanvasRenderingContext2D, g: BuddyGenome): void {
     const shadowW = 40 * g.bodyWidth;

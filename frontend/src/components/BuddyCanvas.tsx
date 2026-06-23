@@ -135,11 +135,11 @@ export default function BuddyCanvas({
       renderer.updateProgress(buddyState.formProgress);
     }
 
-    // genome → 人形 mesh + 触发 2D→3D 切换
+    // genome → 人形 mesh + 触发 2D→3D 切换（需要 formProgress > 15%）
     if (buddyState?.genome) {
       renderer.updateGenome(buddyState.genome);
-      // 3D 就绪后切换
-      if (renderer.isChibiMode()) {
+      // 3D 就绪 + 已过混沌阶段 → 切换
+      if (renderer.isChibiMode() && (buddyState.formProgress ?? 0) > 15) {
         renderer.triggerSwitchTo3D();
       }
     }

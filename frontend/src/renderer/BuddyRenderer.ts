@@ -95,6 +95,7 @@ export class BuddyRenderer {
   private animationId = 0;
   private chibi: ChibiRenderer | null = null;
   private useChibi = false;
+  private currentFormProgress = 0;
 
   // Config
   private width: number;
@@ -314,6 +315,7 @@ export class BuddyRenderer {
    * 早期更强（光团感），后期减弱（形态清晰）
    */
   updateProgress(progress: number): void {
+    this.currentFormProgress = progress;
     const t = progress / 100;
     const glowIntensity = Math.max(0, 1 - t);
     this.orb.updateParams({ glowIntensity });
@@ -494,7 +496,7 @@ export class BuddyRenderer {
           this.blinkTimer = 0;
         }
       }
-      this.chibi.render(this.skeleton, this.facial, this.currentGenome);
+      this.chibi.render(this.skeleton, this.facial, this.currentGenome, this.currentFormProgress);
       return;
     }
 
