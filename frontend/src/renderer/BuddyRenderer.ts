@@ -20,6 +20,7 @@ import { ParticleSystem } from './particle-system';
 import { HumanoidSkeleton } from './skeleton/humanoid-skeleton';
 import { FacialExpressionSystem } from './skeleton/facial-expression';
 import { PostProcessing } from './post-processing';
+import { ChibiRenderer } from './chibi-renderer';
 import { CostumeRenderer } from './costume/CostumeRenderer';
 import type { EmotionParticleParams } from '../emotion/emotion-particles';
 import type { BuddyGenome } from '../../pet/genome';
@@ -92,6 +93,8 @@ export class BuddyRenderer {
   private running = false;
   private lastTime = 0;
   private animationId = 0;
+  private chibi: ChibiRenderer | null = null;
+  private useChibi = false;
 
   // Config
   private width: number;
@@ -167,6 +170,11 @@ export class BuddyRenderer {
       config.secondaryColor || config.primaryColor,
       { ...this.caps, maxParticles: 50 },
     );
+
+    // ChibiRenderer — 立即可用，不等 GPU 检测
+    this.chibi = new ChibiRenderer(config.container, config.width, config.height);
+    this.useChibi = true;
+    this.chibi.start();
   }
 
   /**
@@ -219,7 +227,29 @@ export class BuddyRenderer {
       this.caps,
     );
 
+    // 3D 就绪，但不立即切换——等 genome 到达后由 triggerSwitchTo3D() 触发
     return this.tier;
+  }
+
+  /**
+   * 外部触发切换：2D Q版 → 3D（genome 就绪后调用）
+   */
+  triggerSwitchTo3D(): void {
+    if (!this.useChibi || !this.renderer) return;
+    this.useChibi = false;
+    // 3D 渲染器开始工作
+    if (!this.running) {
+      this.running = true;
+      this.lastTime = performance.now() / 1000;
+      this.loop();
+    }
+  }
+
+  /**
+   * 是否在用 2D 模式
+   */
+  isChibiMode(): boolean {
+    return this.useChibi;
   }
 
   /**
@@ -256,6 +286,7 @@ export class BuddyRenderer {
   updateMood(mood: string): void {
     this.currentMood = mood;
     this.facial?.setEmotion(mood);
+    this.postProcessing?.updateMood(mood);
   }
 
   /**
@@ -411,6 +442,8 @@ export class BuddyRenderer {
    */
   dispose(): void {
     this.stop();
+    this.chibi?.dispose();
+    this.chibi = null;
     this.postProcessing?.dispose();
     this.costumeRenderer?.dispose();
     this.particles.dispose();
@@ -442,6 +475,30 @@ export class BuddyRenderer {
     const delta = now - this.lastTime;
     this.lastTime = now;
 
+    // ── Chibi 模式：只更新骨骼 + 渲染 2D ──
+    if (this.useChibi && this.chibi) {
+      // 更新骨骼动画
+      if (this.skeleton && this.currentGenome) {
+        if (this.mouseInside) {
+          const normX = (this.mouseX / this.width) * 2 - 1;
+          const normY = -((this.mouseY / this.height) * 2 - 1);
+          this.skeleton.setAttentionTarget(normX, normY);
+        }
+        this.skeleton.update(now, this.currentGenome, this.currentMood);
+      }
+      if (this.facial && this.skeleton) {
+        this.facial.update(this.skeleton);
+        this.blinkTimer += delta;
+        if (this.blinkTimer > 3 + Math.random() * 2) {
+          this.facial.blink(this.skeleton);
+          this.blinkTimer = 0;
+        }
+      }
+      this.chibi.render(this.skeleton, this.facial, this.currentGenome);
+      return;
+    }
+
+    // ── 3D 模式 ──
     // 更新光团
     this.orb.update(delta);
 

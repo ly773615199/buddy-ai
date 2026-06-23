@@ -197,6 +197,42 @@ export class PostProcessing {
   }
 
   /**
+   * 情绪驱动后处理
+   */
+  updateMood(mood: string): void {
+    switch (mood) {
+      case 'happy':
+      case 'excited':
+      case 'energetic':
+        this.setColorCorrection(0.03, 1.1, 1.15);
+        this.setBloom(0.5, this.config.bloomRadius, 0.8);
+        break;
+      case 'sad':
+      case 'tired':
+        this.setColorCorrection(-0.04, 0.9, 0.75);
+        this.setBloom(0.2, this.config.bloomRadius, 0.92);
+        break;
+      case 'frustrated':
+      case 'angry':
+        this.setColorCorrection(0.02, 1.2, 1.05);
+        this.setBloom(0.7, this.config.bloomRadius, 0.75);
+        break;
+      case 'calm':
+        this.setColorCorrection(0.0, 1.0, 0.9);
+        this.setBloom(0.3, this.config.bloomRadius, 0.88);
+        break;
+      case 'thinking':
+      case 'confused':
+        this.setColorCorrection(-0.02, 1.05, 0.95);
+        this.setBloom(0.35, this.config.bloomRadius, 0.85);
+        break;
+      default:
+        this.setColorCorrection(0.0, 1.0, 1.0);
+        this.setBloom(this.config.bloomStrength, this.config.bloomRadius, this.config.bloomThreshold);
+    }
+  }
+
+  /**
    * 是否启用
    */
   isEnabled(): boolean {

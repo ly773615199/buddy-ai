@@ -428,9 +428,9 @@ function App() {
             )}
           </div>
 
-          {/* Tab Content — B.3: All tabs rendered, visibility toggled via display */}
+          {/* Tab Content — 条件渲染，只 mount 当前 tab */}
           <div style={{ padding: 12 }}>
-            <div style={{ display: activeTab === 'chat' ? 'block' : 'none' }}>
+            {activeTab === 'chat' && (
               <ErrorBoundary name="对话">
                 <div>
                   <ChatPanel
@@ -453,27 +453,27 @@ function App() {
                   }
                 </div>
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'tools' ? 'block' : 'none' }}>
+            {activeTab === 'tools' && (
               <ErrorBoundary name="工具">
                 <ToolPanel data={toolPanelData} onRequestData={requestToolPanel} primaryColor={visualSeed?.primaryColor} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'memory' ? 'block' : 'none' }}>
+            {activeTab === 'memory' && (
               <ErrorBoundary name="记忆">
                 <MemoryPanel data={memoryPanelData} onRequestData={requestMemoryPanel} primaryColor={visualSeed?.primaryColor} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'knowledge' ? 'block' : 'none' }}>
+            {activeTab === 'knowledge' && (
               <ErrorBoundary name="知识">
                 <KnowledgePanel data={knowledgePanelData} onRequestData={requestKnowledgePanel} primaryColor={visualSeed?.primaryColor} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'activity' ? 'block' : 'none' }}>
+            {activeTab === 'activity' && (
               <ErrorBoundary name="活动">
                 <ActivityPanel
                   petStats={buddyState?.petStats ?? null}
@@ -482,17 +482,16 @@ function App() {
                   scheduleEvents={scheduleEvents}
                   perceptionEvents={perceptionEvents}
                   primaryColor={visualSeed?.primaryColor} />
-                
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'stats' ? 'block' : 'none' }}>
+            {activeTab === 'stats' && (
               <ErrorBoundary name="探索">
                 <PetStats buddyState={buddyState} spriteState={spriteState} onPet={handlePet} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'vision' ? 'block' : 'none' }}>
+            {activeTab === 'vision' && (
               <ErrorBoundary name="视觉">
                 <VisionPanel primaryColor={visualSeed?.primaryColor} onResult={(r) => {
                   if (import.meta.env.DEV) console.log('[Vision]', r);
@@ -500,38 +499,37 @@ function App() {
                   send(JSON.stringify({ ...rest, type: 'vision_result' }));
                 }} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'sensors' ? 'block' : 'none' }}>
+            {activeTab === 'sensors' && (
               <ErrorBoundary name="传感">
                 <SensorPanel
                   primaryColor={visualSeed?.primaryColor}
                   onSensorUpdate={(data) => {
                     send(JSON.stringify({ type: 'sensor_update', data }));
                   }} />
-                
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'experts' ? 'block' : 'none' }}>
+            {activeTab === 'experts' && (
               <ErrorBoundary name="专家">
                 <Experts wsExperts={ternaryExperts} trainProgress={trainProgress} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'cognitive' ? 'block' : 'none' }}>
+            {activeTab === 'cognitive' && (
               <ErrorBoundary name="认知">
                 <CognitiveDashboard ws={ws} connected={connected} skills={registeredSkills} />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'resources' ? 'block' : 'none' }}>
+            {activeTab === 'resources' && (
               <ErrorBoundary name="资源画像">
                 <ResourceProfilePanel />
               </ErrorBoundary>
-            </div>
+            )}
 
-            <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+            {activeTab === 'settings' && (
               <ErrorBoundary name="设置">
                 <Settings
                   primaryColor={visualSeed?.primaryColor}
@@ -539,9 +537,8 @@ function App() {
                   onLanguageChange={(lang) => {
                     changeLanguage(lang as any);
                   }} />
-                
               </ErrorBoundary>
-            </div>
+            )}
           </div>
         </div>
       </div>

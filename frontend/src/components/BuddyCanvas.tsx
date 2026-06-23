@@ -135,9 +135,13 @@ export default function BuddyCanvas({
       renderer.updateProgress(buddyState.formProgress);
     }
 
-    // genome → 人形 mesh
+    // genome → 人形 mesh + 触发 2D→3D 切换
     if (buddyState?.genome) {
       renderer.updateGenome(buddyState.genome);
+      // 3D 就绪后切换
+      if (renderer.isChibiMode()) {
+        renderer.triggerSwitchTo3D();
+      }
     }
 
     // 情绪 → 粒子参数
@@ -196,7 +200,8 @@ export default function BuddyCanvas({
         background: 'linear-gradient(180deg, rgba(13,17,23,0) 0%, rgba(22,27,34,0.5) 100%)',
         position: 'relative',
         touchAction: 'none',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        imageRendering: 'auto',
       }}>
       
       {/* 渲染器会自动挂载 canvas 到这里 */}

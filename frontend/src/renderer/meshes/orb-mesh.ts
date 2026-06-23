@@ -24,7 +24,7 @@ void main() {
 }
 `;
 
-/** 光团着色器 — 片段 */
+/** 光团着色器 — 片段 (升级版: 噪声 + 多层 Fresnel + 视角高光) */
 const ORB_FRAGMENT = /* glsl */ `
 uniform vec3 u_primaryColor;
 uniform vec3 u_secondaryColor;
@@ -38,12 +38,37 @@ varying vec3 vNormal;
 varying vec3 vWorldPos;
 varying vec2 vUv;
 
+// 3D 噪声
+float hash3D(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise3D(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash3D(i), hash3D(i + vec3(1,0,0)), f.x),
+        mix(hash3D(i + vec3(0,1,0)), hash3D(i + vec3(1,1,0)), f.x), f.y),
+    mix(mix(hash3D(i + vec3(0,0,1)), hash3D(i + vec3(1,0,1)), f.x),
+        mix(hash3D(i + vec3(0,1,1)), hash3D(i + vec3(1,1,1)), f.x), f.y),
+    f.z
+  );
+}
+
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(cameraPosition - vWorldPos);
 
-  // Fresnel 边缘发光
-  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  // 噪声扰动法线（让光团有呼吸的有机感）
+  float noiseVal = noise3D(vWorldPos * 3.0 + u_time * 0.15);
+  vec3 distortedN = normalize(N + (noise3D(vWorldPos * 5.0 + u_time * 0.1) - 0.5) * 0.2);
+
+  // 多层 Fresnel（内层柔和 + 外层锐利）
+  float NdotV = max(dot(distortedN, V), 0.0);
+  float fresnelInner = pow(1.0 - NdotV, 2.0);
+  float fresnelOuter = pow(1.0 - NdotV, 5.0);
 
   // 径向渐变（中心亮，边缘暗）
   float centerGlow = 1.0 - length(vUv - 0.5) * 1.4;
@@ -52,23 +77,28 @@ void main() {
   // 呼吸脉动
   float pulse = 0.7 + sin(u_time * u_breathScale) * 0.3;
 
-  // 基础颜色
+  // 基础颜色 + 噪声扰动的副色混合
   vec3 baseColor = u_primaryColor;
-
-  // 副色微光（偏移位置）
-  float secondaryGlow = smoothstep(0.3, 0.7, length(vUv - vec2(0.55, 0.4)));
+  float secondaryGlow = smoothstep(0.3, 0.7, length(vUv - vec2(0.55 + noiseVal * 0.1, 0.4)));
   baseColor = mix(baseColor, u_secondaryColor, secondaryGlow * u_secondaryMix * 0.3);
 
   // 合成
   vec3 center = baseColor * centerGlow * pulse * u_glowIntensity;
-  vec3 edge = u_primaryColor * fresnel * u_edgeHardness * pulse * 0.5;
+  vec3 edgeInner = u_primaryColor * fresnelInner * u_edgeHardness * pulse * 0.4;
+  vec3 edgeOuter = u_secondaryColor * fresnelOuter * u_edgeHardness * pulse * 0.2;
   vec3 ambient = u_primaryColor * 0.08;
 
-  // 中心高光
-  float highlight = smoothstep(0.25, 0.0, length(vUv - vec2(0.4, 0.35)));
-  vec3 highlightColor = vec3(1.0) * highlight * 0.15 * pulse;
+  // 中心高光（视角相关，不再是固定点）
+  vec3 lightDir = normalize(vec3(0.4, 0.6, 0.8));
+  vec3 R = reflect(-V, distortedN);
+  float specular = pow(max(dot(R, lightDir), 0.0), 32.0);
+  vec3 highlightColor = vec3(1.0) * specular * 0.2 * pulse;
 
-  vec3 finalColor = ambient + center + edge + highlightColor;
+  // 色散效果（边缘微微彩虹化）
+  vec3 dispersed = mix(u_primaryColor, u_secondaryColor, fresnelInner * 0.4);
+
+  vec3 finalColor = ambient + center + edgeInner + edgeOuter + highlightColor;
+  finalColor = mix(finalColor, dispersed, fresnelInner * 0.15);
 
   gl_FragColor = vec4(finalColor, 1.0);
 }
