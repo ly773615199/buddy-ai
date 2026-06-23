@@ -4,6 +4,7 @@ import { t } from '../i18n/t';
 import { ToolCallCard } from './ToolCallCard';
 import { DiagnosticCard } from './DiagnosticCard';
 import { renderMarkdown } from '../utils/markdown';
+import { IconCopy, IconRetry, IconDelete, IconCheck } from './Icons';
 import type { ChatMessage } from '../types/buddy';
 
 interface MessageBubbleProps {
@@ -78,7 +79,7 @@ function ActionBar({
         onMouseEnter={(e) => {e.currentTarget.style.color = 'var(--accent-blue)';e.currentTarget.style.background = 'rgba(88,166,255,.1)';}}
         onMouseLeave={(e) => {e.currentTarget.style.color = 'var(--text-muted)';e.currentTarget.style.background = 'none';}}>
         
-        {copied ? "\u2713 \u5DF2\u590D\u5236" : "\uD83D\uDCCB \u590D\u5236"}
+        {copied ? <><IconCheck size={12} color="var(--accent-green)" /> 已复制</> : <><IconCopy size={12} /> 复制</>}
       </button>
       {isLastUserMessage && onRetry &&
       <button
@@ -86,7 +87,7 @@ function ActionBar({
         style={btnStyle}
         onMouseEnter={(e) => {e.currentTarget.style.color = 'var(--accent-yellow)';e.currentTarget.style.background = 'rgba(210,153,34,.1)';}}
         onMouseLeave={(e) => {e.currentTarget.style.color = 'var(--text-muted)';e.currentTarget.style.background = 'none';}}>
-        {"\uD83D\uDD04 \u91CD\u8BD5"}</button>
+        <IconRetry size={12} /> 重试</button>
       }
       {onDelete &&
       <button
@@ -94,7 +95,7 @@ function ActionBar({
         style={btnStyle}
         onMouseEnter={(e) => {e.currentTarget.style.color = 'var(--accent-red)';e.currentTarget.style.background = 'rgba(248,81,73,.1)';}}
         onMouseLeave={(e) => {e.currentTarget.style.color = 'var(--text-muted)';e.currentTarget.style.background = 'none';}}>
-        {"\uD83D\uDDD1\uFE0F \u5220\u9664"}</button>
+        <IconDelete size={12} /> 删除</button>
       }
     </div>);
 

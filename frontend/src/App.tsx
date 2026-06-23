@@ -20,6 +20,7 @@ import AgentTrace from './components/AgentTrace';
 import { CognitiveDashboard } from './components/CognitiveDashboard';
 import { ResourceProfilePanel } from './components/ResourceProfilePanel';
 import SensorPanel from './components/SensorPanel';
+import { IconLogo, TAB_ICONS, IconMic } from './components/Icons';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useVoiceEmotion } from './hooks/useVoiceEmotion';
 import type { VisualSeed } from './types/buddy';
@@ -213,19 +214,19 @@ function App() {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
-  const tabs: {key: Tab;label: string;icon: string;}[] = [
-  { key: 'chat', label: "\u804A\u5929", icon: '💬' },
-  { key: 'tools', label: "\u5DE5\u5177", icon: '🔧' },
-  { key: 'memory', label: "\u8BB0\u5FC6", icon: '🧠' },
-  { key: 'knowledge', label: "\u77E5\u8BC6", icon: '📚' },
-  { key: 'activity', label: "\u6D3B\u52A8", icon: '📊' },
-  { key: 'stats', label: "\u63A2\u7D22", icon: '🗺️' },
-  { key: 'vision', label: "\u89C6\u89C9", icon: '👁️' },
-  { key: 'sensors', label: "\u4F20\u611F", icon: '📡' },
-  { key: 'experts', label: "\u4E13\u5BB6", icon: '🎓' },
-  { key: 'cognitive', label: "\u8BA4\u77E5", icon: '🧩' },
-  { key: 'resources', label: "资源", icon: '📊' },
-  { key: 'settings', label: "\u8BBE\u7F6E", icon: '⚙️' }];
+  const tabs: {key: Tab;label: string;}[] = [
+  { key: 'chat', label: "聊天" },
+  { key: 'tools', label: "工具" },
+  { key: 'memory', label: "记忆" },
+  { key: 'knowledge', label: "知识" },
+  { key: 'activity', label: "活动" },
+  { key: 'stats', label: "探索" },
+  { key: 'vision', label: "视觉" },
+  { key: 'sensors', label: "传感" },
+  { key: 'experts', label: "专家" },
+  { key: 'cognitive', label: "认知" },
+  { key: 'resources', label: "资源" },
+  { key: 'settings', label: "设置" }];
 
 
   return (
@@ -241,7 +242,7 @@ function App() {
     }}>
       {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 12, position: 'relative', width: '100%', maxWidth: 1200 }}>
-        <h1 style={{ fontSize: '1.4em', margin: 0 }}>{"\uD83C\uDFE0 \u5149\u7075"}</h1>
+        <h1 style={{ fontSize: '1.4em', margin: 0, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}><IconLogo size={28} color="var(--accent-blue)" /> {"光灵"}</h1>
         <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{"\u4F60\u7684 AI \u4F19\u4F34"}</div>
         {/* 语音情绪检测开关 */}
         <button
@@ -266,7 +267,7 @@ function App() {
             boxShadow: voiceEmotion.isAnalyzing ? '0 0 8px rgba(63,185,80,.4)' : 'none'
           }}>
           
-          {voiceEmotion.isAnalyzing ? '🎙️' : '🎤'}
+          <IconMic size={16} color={voiceEmotion.isAnalyzing ? '#fff' : 'var(--text-muted)'} active={voiceEmotion.isAnalyzing} />
         </button>
         {voiceEmotion.isAnalyzing && voiceEmotion.currentEmotion !== 'none' &&
         <div style={{
@@ -411,7 +412,13 @@ function App() {
                 transition: 'all 0.15s'
               }}>
               
-                {t.icon} {t.label}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {(() => {
+                  const IconComp = TAB_ICONS[t.key];
+                  return IconComp ? <IconComp size={15} active={activeTab === t.key} color={activeTab === t.key ? 'var(--text-secondary)' : 'var(--text-muted)'} /> : null;
+                })()}
+                {t.label}
+              </span>
               </button>
             )}
           </div>

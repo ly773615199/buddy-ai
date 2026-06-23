@@ -5,6 +5,7 @@ import type { ChatMessage } from '../types/buddy';
 import MessageBubble from './MessageBubble';
 import InputBar from './InputBar';
 import EmptyState from './EmptyState';
+import { IconSearch, IconClose, IconDelete } from './Icons';
 
 
 interface ChatPanelProps {
@@ -249,7 +250,7 @@ export default function ChatPanel({
               padding: '2px 4px'
             }}>
             
-              ✕
+              <IconClose size={12} color="var(--text-muted)" />
             </button>
           </div>
         }
@@ -272,7 +273,7 @@ export default function ChatPanel({
             onMouseLeave={(e) => {e.currentTarget.style.color = 'var(--text-faint)';e.currentTarget.style.background = 'none';}}
             title={"\u641C\u7D22\u6D88\u606F (Ctrl+F)"}>
             
-              🔍
+              <IconSearch size={14} color="var(--text-faint)" />
             </button>
           }
           {messages.length > 0 &&
@@ -290,7 +291,7 @@ export default function ChatPanel({
             }}
             onMouseEnter={(e) => {e.currentTarget.style.color = 'var(--accent-red)';e.currentTarget.style.background = 'rgba(248,81,73,.1)';}}
             onMouseLeave={(e) => {e.currentTarget.style.color = 'var(--text-faint)';e.currentTarget.style.background = 'none';}}>
-            {"\uD83D\uDDD1\uFE0F \u6E05\u7A7A"}</button>
+            <IconDelete size={12} color="var(--text-faint)" /> 清空</button>
           }
         </div>
       </div>
