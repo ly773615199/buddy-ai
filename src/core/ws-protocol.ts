@@ -144,10 +144,12 @@ export class WSProtocol {
             eventBus.emit(replayMsg as WSEvent, { skipReplay: true });
           }
         }
+        // 关键：replay 完成后清除已发送的消息，防止下次 resume 重复重放
+        const lastReplaySeq = (replayMessages.at(-1) as Record<string, unknown>)?.seq as number ?? lastSeq;
+        this.deps.linkHandler.clearReplayUpTo(lastReplaySeq);
         this.deps.linkHandler.recordEvent('flush', true, undefined, { count: replayMessages.length, reason: 'resume' });
         // 发送 resume_ack，告知客户端重放结束的 seq
         if (ws && ws.readyState === 1) {
-          const lastReplaySeq = (replayMessages.at(-1) as Record<string, unknown>)?.seq as number ?? lastSeq;
           ws.send(JSON.stringify({ type: 'resume_ack', lastSeq: lastReplaySeq, count: replayMessages.length }));
         }
       }

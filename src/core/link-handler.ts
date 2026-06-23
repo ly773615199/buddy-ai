@@ -156,6 +156,13 @@ export class LinkHandler {
   }
 
   /**
+   * 清除 replayBuffer 中 seq <= maxSeq 的消息（replay 完成后调用，防重放风暴）
+   */
+  clearReplayUpTo(maxSeq: number): void {
+    this.replayBuffer = this.replayBuffer.filter(e => e.seq > maxSeq);
+  }
+
+  /**
    * 获取当前最大序列号（用于新连接初始值）
    */
   getCurrentSeq(): number {
