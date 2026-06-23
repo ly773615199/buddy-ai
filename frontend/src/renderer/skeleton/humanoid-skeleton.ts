@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import type { BuddyGenome } from '../../pet/genome';
+import { SpringValue, SpringVec3, SPRING_PRESETS } from '../physics/spring-physics';
 
 export interface BoneDefinition {
   name: string;
@@ -73,6 +74,19 @@ export class HumanoidSkeleton {
   private headAttention = { x: 0, y: 0 };        // 头部当前跟随位置
   private shoulderAttention = { x: 0, y: 0 };    // 肩膀当前跟随位置
   private lastUpdateTime = 0;                     // 上次 update 时间戳（用于计算 delta）
+
+  // ── 弹簧驱动的次级运动 ──
+  private earSpringL = new SpringVec3([0, 0, 0], SPRING_PRESETS.ear);
+  private earSpringR = new SpringVec3([0, 0, 0], SPRING_PRESETS.ear);
+  private tailSpring  = new SpringVec3([0, 0, 0], SPRING_PRESETS.tail);
+  private wingSpringL = new SpringVec3([0, 0, 0], SPRING_PRESETS.wing);
+  private wingSpringR = new SpringVec3([0, 0, 0], SPRING_PRESETS.wing);
+
+  // ── 自然眨眼状态 ──
+  private blinkTimer = 0;
+  private nextBlinkAt = 2 + Math.random() * 4;  // 2-6秒眨一次
+  private isBlinking = false;
+  private blinkPhase = 0;  // 0=闭眼中, 1=睁眼中
 
   constructor(genome: BuddyGenome) {
     this.buildSkeleton(genome);
@@ -219,30 +233,57 @@ export class HumanoidSkeleton {
     const breathCycle = Math.sin(time * genome.breatheSpeed);
     const breathCycleSlow = Math.sin(time * genome.breatheSpeed * 0.5);
 
-    // ── 尾巴摇摆 ──
+    // ── 尾巴摇摆（弹簧驱动，sin 作为目标 + 情绪调制） ──
     const tail = this.bones.get('tail');
     if (tail && genome.tailLength > 0) {
       const tailSpeed = mood === 'excited' ? 0.15 : mood === 'sleeping' ? 0.02 : 0.06;
-      const tailWag = Math.sin(time * tailSpeed) * (8 + genome.tailLength * 4);
-      tail.rotation.y = tailWag * 0.01;
+      // 弹簧目标：基础摆动 + 情绪加成
+      const targetY = Math.sin(time * tailSpeed) * (0.08 + genome.tailLength * 0.04);
+      const targetX = Math.sin(time * tailSpeed * 0.7) * 0.02;
+      // 情绪脉冲：开心时给尾巴一个额外的摇摆力
+      if (mood === 'happy' || mood === 'excited') {
+        this.tailSpring.y.impulse(Math.sin(time * 0.3) * 0.001);
+      }
+      const tailRot = this.tailSpring.update([targetX, targetY, 0], delta);
+      tail.rotation.x = tailRot[0];
+      tail.rotation.y = tailRot[1];
     }
 
-    // ── 翅膀扇动 ──
+    // ── 翅膀扇动（弹簧驱动） ──
     const wingL = this.bones.get('wing_l');
     const wingR = this.bones.get('wing_r');
     if (wingL && wingR && genome.wingSize > 0) {
-      const flap = Math.sin(time * 0.04) * 5 * genome.wingSize;
-      wingL.rotation.z = -flap * 0.01;
-      wingR.rotation.z = flap * 0.01;
+      const flapTarget = Math.sin(time * 0.04) * 0.05 * genome.wingSize;
+      const wingRotL = this.wingSpringL.update([0, 0, -flapTarget], delta);
+      const wingRotR = this.wingSpringR.update([0, 0, flapTarget], delta);
+      wingL.rotation.z = wingRotL[2];
+      wingR.rotation.z = wingRotR[2];
+      // 翅膀微前后摆动
+      wingL.rotation.x = wingRotL[0];
+      wingR.rotation.x = wingRotR[0];
     }
 
-    // ── 耳朵竖起/耷拉 ──
+    // ── 耳朵（弹簧驱动：情绪目标 + 跟随头部微动） ──
     const earL = this.bones.get('ear_l');
     const earR = this.bones.get('ear_r');
     if (earL && earR) {
-      const earMood = mood === 'excited' ? 6 : mood === 'sleeping' ? -4 : 0;
-      earL.rotation.x = earMood * 0.01;
-      earR.rotation.x = earMood * 0.01;
+      const earMoodX = mood === 'excited' ? 0.06 : mood === 'sleeping' ? -0.04 : 0;
+      const earMoodZ = mood === 'happy' ? 0.03 : mood === 'confused' ? -0.02 : 0;
+      // 跟随头部转动产生微偏移
+      const headInfluence = this.headAttention.x * 0.02;
+      const earTargetL: [number, number, number] = [earMoodX, 0, earMoodZ - headInfluence];
+      const earTargetR: [number, number, number] = [earMoodX, 0, -earMoodZ - headInfluence];
+      // 开心时耳朵给一个弹跳力
+      if (mood === 'happy') {
+        this.earSpringL.impulse([0.01, 0, 0]);
+        this.earSpringR.impulse([0.01, 0, 0]);
+      }
+      const earRotL = this.earSpringL.update(earTargetL, delta);
+      const earRotR = this.earSpringR.update(earTargetR, delta);
+      earL.rotation.x = earRotL[0];
+      earL.rotation.z = earRotL[2];
+      earR.rotation.x = earRotR[0];
+      earR.rotation.z = earRotR[2];
     }
 
     // ── 根骨骼：呼吸 + 摇摆 ──
@@ -410,6 +451,45 @@ export class HumanoidSkeleton {
     if (shoulderR) {
       shoulderR.position.x += this.shoulderAttention.x * -0.005;
       shoulderR.position.y += this.shoulderAttention.y * 0.003;
+    }
+
+    // ══════════════════════════════════════════
+    // 自然眨眼系统（泊松分布间隔）
+    // ══════════════════════════════════════════
+    this.blinkTimer += delta;
+
+    if (!this.isBlinking && this.blinkTimer >= this.nextBlinkAt) {
+      // 开始眨眼
+      this.isBlinking = true;
+      this.blinkPhase = 0;
+      this.blinkTimer = 0;
+    }
+
+    if (this.isBlinking) {
+      const eyeLidL = this.bones.get('eyelid_l');
+      const eyeLidR = this.bones.get('eyelid_r');
+      // 闭眼 60ms → 睁眼 100ms
+      if (this.blinkPhase === 0 && this.blinkTimer > 0.06) {
+        this.blinkPhase = 1;
+        this.blinkTimer = 0;
+      }
+      if (this.blinkPhase === 0) {
+        // 闭眼阶段
+        if (eyeLidL) eyeLidL.rotation.x = Math.min(eyeLidL.rotation.x + delta * 8, 0.3);
+        if (eyeLidR) eyeLidR.rotation.x = Math.min(eyeLidR.rotation.x + delta * 8, 0.3);
+      } else {
+        // 睁眼阶段（自然回弹）
+        if (eyeLidL) eyeLidL.rotation.x = Math.max(eyeLidL.rotation.x - delta * 4, 0);
+        if (eyeLidR) eyeLidR.rotation.x = Math.max(eyeLidR.rotation.x - delta * 4, 0);
+        if (this.blinkTimer > 0.1) {
+          this.isBlinking = false;
+          this.blinkTimer = 0;
+          // 下次眨眼间隔：2-6秒（偶尔快速连眨）
+          this.nextBlinkAt = 2 + Math.random() * 4;
+          // 10% 概率连眨
+          if (Math.random() < 0.1) this.nextBlinkAt = 0.3;
+        }
+      }
     }
   }
 }

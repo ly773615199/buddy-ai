@@ -143,15 +143,28 @@ vec3 buddyColor(vec3 baseColor, vec3 normal, vec3 worldPos, vec2 uv) {
     col = mix(col, u_secondaryColor, texNoise * u_patternDensity * 0.3);
   }
 
-  // Fresnel 边缘发光（早期更强）
+  // Fresnel 边缘光（物理：基于视角的 rim light）
   vec3 V = normalize(cameraPosition - worldPos);
-  float fresnel = pow(1.0 - max(dot(normalize(normal), V), 0.0), 3.0);
-  vec3 fresnelGlow = u_primaryColor * fresnel * u_glowIntensity * 0.3;
+  float NdotV = max(dot(normalize(normal), V), 0.0);
+  float fresnel = pow(1.0 - NdotV, 4.0);  // Schlick 近似，指数 4 更物理
+  // rim light：边缘微微照亮，颜色偏向环境色
+  vec3 rimColor = mix(u_primaryColor, vec3(1.0), 0.3);
+  vec3 rimLight = rimColor * fresnel * u_glowIntensity * 0.25;
 
-  // 情绪发光
-  vec3 emission = u_primaryColor * 0.05;
+  // SSS 次表面散射近似（wrap lighting）
+  // 假设主光源方向为 (0.3, 0.6, 0.4) —— 与 BuddyRenderer 灯光一致
+  vec3 lightDir = normalize(vec3(0.3, 0.6, 0.4));
+  float NdotL = dot(normalize(normal), lightDir);
+  // wrap factor: 光线绕到背面，模拟皮肤透光
+  float sssWrap = 0.4;
+  float sss = max(0.0, NdotL + sssWrap) / (1.0 + sssWrap);
+  // 散射颜色：主色调偏暖偏红（皮肤典型）
+  vec3 sssColor = mix(col, u_primaryColor * vec3(1.2, 0.8, 0.7), 0.3) * sss * 0.15;
 
-  return col + fresnelGlow + emission;
+  // 微发光（情绪，保持原有）
+  vec3 emission = u_primaryColor * 0.03;
+
+  return col + rimLight + sssColor + emission;
 }
 `;
 
