@@ -44,11 +44,12 @@ export function detectDomains(sys: Subsystems, content: string): string[] {
     complex_task: ['code', 'architect'],
   };
   const domains = CATEGORY_TO_DOMAIN[intent.category] ?? [];
-  if (intent.confidence < 0.3) {
+  if (intent.confidence < 0.5) {
     const domainKeywords: Record<string, string[]> = {
       architect: ['架构', '设计', '模式', 'architecture', 'design', 'pattern'],
       test: ['测试', 'test', 'coverage', '断言', 'assert'],
-      review: ['审查', 'review', '规范', '安全', '性能', '质量', '优化'],
+      review: ['审查', 'review', '规范', '安全', 'security', '性能', '质量', '优化', 'audit', '漏洞', 'vulnerability'],
+      security: ['安全', 'security', '审查', 'audit', '漏洞', 'vulnerability', '注入', 'injection', '权限', 'permission', '认证', 'authentication', '加密', 'encrypt', '敏感', 'sensitive', '扫描', 'scan', 'CVE', '渗透', 'penetration'],
       data: ['数据', '分析', '统计', 'data', 'analyze', 'csv', 'sql', '图表'],
       writing: ['写', '文章', '文档', 'write', 'article', 'doc', '总结', '翻译'],
     };

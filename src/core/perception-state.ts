@@ -97,6 +97,9 @@ export function assessComplexity(
     'architecture', 'system', 'design', 'refactor', 'implement', 'distributed',
     'microservice', 'concurrency', 'algorithm', 'database', 'cache', 'deploy',
     '写一个', '实现一个', 'build a', 'create a', 'develop',
+    '安全', 'security', '审查', 'audit', '漏洞', 'vulnerability', '扫描', 'scan',
+    '注入', 'injection', '权限', 'permission', '认证', 'authentication',
+    '加密', 'encrypt', '敏感', 'sensitive', 'CVE', '渗透', 'penetration',
   ];
   const lower = content.toLowerCase();
   const hits = techKeywords.filter(k => lower.includes(k)).length;
