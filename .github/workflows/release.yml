@@ -1,0 +1,381 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ──────────────────────────────────────
+  # 准备
+  # ──────────────────────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version from tag
+        id: meta
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 Building Buddy v$VERSION ($TAG)"
+
+  # ──────────────────────────────────────
+  # Windows
+  # ──────────────────────────────────────
+  build-win:
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # 缓存 electron 二进制
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-win-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd frontend && npm ci
+
+      - name: Build frontend
+        run: npm run build:frontend
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Build Electron (Windows ${{ matrix.arch }})
+        run: npx electron-builder --win --${{ matrix.arch }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List artifacts
+        shell: bash
+        run: ls -lh release/*.exe 2>/dev/null || echo "No exe files found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-${{ matrix.arch }}
+          path: release/*.exe
+          retention-days: 5
+
+  # ──────────────────────────────────────
+  # macOS
+  # ──────────────────────────────────────
+  build-mac:
+    needs: prepare
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-mac-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd frontend && npm ci
+
+      - name: Build frontend
+        run: npm run build:frontend
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Build Electron (macOS ${{ matrix.arch }})
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List artifacts
+        run: ls -lh release/*.dmg 2>/dev/null || echo "No dmg files found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: release/*.dmg
+          retention-days: 5
+
+  # ──────────────────────────────────────
+  # Linux
+  # ──────────────────────────────────────
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-linux-x64-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd frontend && npm ci
+
+      - name: Build frontend
+        run: npm run build:frontend
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Build Electron (Linux x64)
+        run: npx electron-builder --linux --x64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List artifacts
+        run: ls -lh release/*.AppImage release/*.deb 2>/dev/null || echo "No linux artifacts found"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            release/*.AppImage
+            release/*.deb
+          retention-days: 5
+
+  # ──────────────────────────────────────
+  # Android (APK + AAB)
+  # ──────────────────────────────────────
+  build-android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('frontend/android/**/*.gradle*') }}
+
+      - name: Install dependencies
+        run: |
+          cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npx vite build
+
+      - name: Sync Capacitor
+        run: cd frontend && npx cap sync android
+
+      - name: Decode keystore
+        if: secrets.ANDROID_KEYSTORE_BASE64 != ''
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > /tmp/buddy-release.p12
+          echo "ANDROID_KEYSTORE_FILE=/tmp/buddy-release.p12" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_TYPE=PKCS12" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: |
+          cd frontend/android
+          ./gradlew assembleRelease
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build AAB
+        run: |
+          cd frontend/android
+          ./gradlew bundleRelease
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: List artifacts
+        run: |
+          find frontend/android/app/build/outputs -name '*.apk' -o -name '*.aab' | sort
+          ls -lh frontend/android/app/build/outputs/apk/release/*.apk 2>/dev/null
+          ls -lh frontend/android/app/build/outputs/bundle/release/*.aab 2>/dev/null
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: frontend/android/app/build/outputs/apk/release/*.apk
+          retention-days: 5
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab
+          path: frontend/android/app/build/outputs/bundle/release/*.aab
+          retention-days: 5
+
+  # ──────────────────────────────────────
+  # iOS (需 Apple Developer 证书，暂为可选)
+  # ──────────────────────────────────────
+  build-ios:
+    needs: prepare
+    runs-on: macos-latest
+    if: false  # 启用条件：有 Apple 证书后改为 true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npx vite build
+
+      - name: Sync Capacitor
+        run: cd frontend && npx cap sync ios
+
+      - name: Build IPA
+        run: |
+          cd frontend/ios/App
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath $PWD/build/App.xcarchive \
+            archive
+        env:
+          CODE_SIGN_IDENTITY: ''
+          CODE_SIGNING_ALLOWED: 'NO'
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: frontend/ios/App/build/*.xcarchive
+          retention-days: 5
+
+  # ──────────────────────────────────────
+  # 发布到 GitHub Release (Draft)
+  # ──────────────────────────────────────
+  release:
+    needs: [prepare, build-win, build-mac, build-linux, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.exe *.dmg *.AppImage *.deb *.apk *.aab 2>/dev/null > SHA256SUMS.txt || true
+          echo "=== SHA256 ==="
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: "Buddy v${{ needs.prepare.outputs.version }}"
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## Buddy v${{ needs.prepare.outputs.version }}
+
+            ### 📦 下载
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x64 | `Buddy-${{ needs.prepare.outputs.version }}-x64-Setup.exe` |
+            | Windows | arm64 | `Buddy-${{ needs.prepare.outputs.version }}-arm64-Setup.exe` |
+            | Windows | x64 portable | `Buddy-${{ needs.prepare.outputs.version }}-x64-portable.exe` |
+            | macOS | x64 | `Buddy-${{ needs.prepare.outputs.version }}-x64.dmg` |
+            | macOS | arm64 | `Buddy-${{ needs.prepare.outputs.version }}-arm64.dmg` |
+            | Linux | x64 | `Buddy-${{ needs.prepare.outputs.version }}-x64.AppImage` |
+            | Linux | x64 | `buddy-ai_${{ needs.prepare.outputs.version }}_amd64.deb` |
+            | Android | arm64-v8a | `app-release.apk` |
+            | Android | universal | `app-release.aab` (Play Store) |
+
+            ### 🔒 校验
+
+            见 `SHA256SUMS.txt`
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.apk
+            artifacts/**/*.aab
+            artifacts/**/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

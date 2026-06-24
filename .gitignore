@@ -30,3 +30,7 @@ test-results/
 test-results/
 .cache/
 model-discovery-result.json
+*.p12
+*.jks
+*.keystore
+*.p12.b64

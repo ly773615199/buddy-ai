@@ -1,21 +1,28 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Capacitor & WebView
+-keep class com.getcapacitor.** { *; }
+-keep class com.getcapacitor.plugin.** { *; }
+-keep class org.apache.cordova.** { *; }
+-keepclassmembers class * {
+    @com.getcapacitor.annotation.* <methods>;
+}
+-keepclassmembers class * {
+    @org.apache.cordova.* <methods>;
+}
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# WebView JavaScript interface
+-keepclassmembers class fqcn.of.javascript.interface.for.webview {
+    public *;
+}
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Three.js / WebGL (如果用到 3D)
+-keep class org.mozilla.javascript.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# React (通常不需要，但保险起见)
+-keep class com.facebook.react.** { *; }
+
+# 保留行号信息（调试用）
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

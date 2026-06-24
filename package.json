@@ -2,6 +2,8 @@
   "name": "buddy-ai",
   "version": "0.2.0",
   "description": "灵伴 — 有形象的个人 AI 助手",
+  "author": "Buddy AI <buddy@openi.pcl.ac.cn>",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "predev": "lsof -ti:8765 | xargs -r kill -9 2>/dev/null || true",
@@ -52,14 +54,21 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "electron/icon.png"
+      "icon": "electron/icon.icns",
+      "hardenedRuntime": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.dmg"
     },
     "win": {
       "icon": "electron/icon.ico",
-      "signingHashAlgorithms": [
-        "sha256"
-      ],
-      "sign": "electron/sign-config.js",
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",
@@ -75,7 +84,6 @@
           ]
         }
       ],
-      "publisherName": "Buddy AI",
       "artifactName": "${productName}-${version}-${arch}-Setup.${ext}"
     },
     "nsis": {
@@ -106,7 +114,18 @@
     },
     "linux": {
       "category": "Utility",
-      "icon": "electron/icon.png"
+      "icon": "electron/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {
