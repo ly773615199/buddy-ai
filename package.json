@@ -15,7 +15,7 @@
     "predev:all": "lsof -ti:8765,5173 | xargs -r kill -9 2>/dev/null || true",
     "dev:all": "concurrently --names backend,frontend -c blue,green \"npm run dev:ws\" \"npm run dev:frontend\"",
     "install:all": "npm install && cd frontend && npm install",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "build:frontend": "cd frontend && npx vite build",
     "build:all": "npm run build && npm run build:frontend",
     "start": "node dist/main.js",
@@ -61,7 +61,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "artifactName": "${productName}-${version}-${arch}.dmg"
@@ -108,8 +111,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "lewyeu",
-      "repo": "buddy",
+      "owner": "ly773615199",
+      "repo": "buddy-ai",
       "releaseType": "release"
     },
     "linux": {
@@ -118,11 +121,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
@@ -135,8 +142,10 @@
     "@ai-sdk/openai": "^3.0.73",
     "@ai-sdk/openai-compatible": "^2.0.51",
     "@ai-sdk/provider-utils": "^4.0.30",
+    "@types/express": "^5.0.6",
     "ai": "^6.0.208",
     "better-sqlite3": "^12.9.0",
+    "express": "^5.2.1",
     "glob": "^13.0.6",
     "seedrandom": "^3.0.5",
     "stripe": "^22.1.0",
