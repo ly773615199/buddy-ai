@@ -102,12 +102,7 @@
       "include": "electron/nsis-custom.nsh",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
-      "license": "LICENSE",
-      "installerLanguages": [
-        "SimpChinese",
-        "English"
-      ],
-      "language": "2052"
+      "license": "LICENSE"
     },
     "publish": {
       "provider": "github",
