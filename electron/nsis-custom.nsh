@@ -23,7 +23,7 @@
   CreateDirectory "$SMPROGRAMS\Buddy"
 
   ; 创建卸载快捷方式到开始菜单
-  CreateShortcut "$SMPROGRAMS\Buddy\卸载 Buddy.lnk" "$UNINSTALLER_FULLPATH"
+  CreateShortcut "$SMPROGRAMS\Buddy\卸载 Buddy.lnk" "$INSTDIR\Uninstall Buddy.exe"
 
   ; 添加防火墙规则（允许 WebSocket 通信）
   nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Buddy AI" dir=in action=allow program="$INSTDIR\Buddy.exe" enable=yes profile=any'
